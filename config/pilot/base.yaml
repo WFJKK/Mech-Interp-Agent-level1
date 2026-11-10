@@ -1,0 +1,14 @@
+# The level-1 pilot, without its model: what every pilot run shares. Not a run by itself. A run is a file
+# next to this one that extends it and names a model, one network of it and a second network for the seed
+# check:
+#   config/pilot/lin-a.yaml    the linear network on pairs of tokens, 64 tokens, width 8
+#
+# A run has two parts (docs/DESIGN.md):
+#   1. the rounds: the agent explores one network and submits entries; the score is the reward;
+#   2. the seed check: the best entry, locked, is run unchanged on a second network. No agent takes part.
+backend: claude_code
+agent_model: claude-fable-5-1
+effort: high
+rounds_max: 5
+patience: 2
+sandbox: auto     # hardened once Docker or Landlock is available; run.json records the mode

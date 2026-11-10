@@ -1,0 +1,26 @@
+{
+ "calls": [
+  {
+   "tool": "submit_entry",
+   "args": {
+    "name": "best",
+    "claimed_fidelity": 0.5
+   }
+  },
+  {
+   "tool": "submit_entry",
+   "args": {
+    "name": "best",
+    "claimed_fidelity": 0.5
+   }
+  },
+  {
+   "tool": "submit_entry",
+   "args": {
+    "name": "best",
+    "claimed_fidelity": 0.5
+   }
+  }
+ ],
+ "response": "No notes in the asked-for form this time."
+}

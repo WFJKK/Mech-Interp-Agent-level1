@@ -1,0 +1,27 @@
+{
+ "calls": [
+  {
+   "tool": "run_python",
+   "args": {
+    "code": {
+     "$file": "corner.py"
+    }
+   }
+  },
+  {
+   "tool": "submit_entry",
+   "args": {
+    "name": "corner",
+    "claimed_fidelity": 1.0,
+    "expected_fidelity_other": 1.0
+   }
+  },
+  {
+   "tool": "run_python",
+   "args": {
+    "code": "import os\nprint(1/0)"
+   }
+  }
+ ],
+ "response": "Some working text.\n\n## What the network does\nAs before; the small tokens are where it differs.\n\n## The best entry\ncorner, which costs more than it gains\n\n## Claims\nAs submitted.\n\n## Next\nMore of the same."
+}

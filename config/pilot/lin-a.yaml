@@ -1,0 +1,11 @@
+# The first pilot: the linear network lin-a (models/lin-a: 2 tokens per input, 64 tokens, width 8, three
+# weight matrices), 4,096 inputs, 655 operations per forward pass. The data set is small enough for the
+# verifier to check every input, so nothing is sampled.
+#   rounds on      lin-a-s0
+#   seed check on  lin-a-s1   the same sizes and training, another seed
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-lin-a
+model: models/lin-a
+network: lin-a-s0
+seed_check: {network: lin-a-s1}

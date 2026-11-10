@@ -1,0 +1,6 @@
+g = graph()
+a, b = g.token(0), g.token(1)
+m = lv1.maximum(a, b)
+corner = g.entry(predict=lv1.cond(m < 3, model.reference(g, lv1), m))
+print(save_entry("corner", corner), measure(corner)["reward"], sorted(entries))
+save_entry("not a name!", corner)

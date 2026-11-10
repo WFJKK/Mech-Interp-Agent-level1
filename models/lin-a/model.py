@@ -1,4 +1,4 @@
-"""The network lin-a, written in the entry language.
+"""The network, written in the entry language.
 
 An input is n_ctx tokens, each a whole number from 0 to d_vocab - 1. The network has three weight
 matrices and no biases:

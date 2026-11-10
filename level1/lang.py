@@ -11,8 +11,8 @@ operation to earlier nodes. Nothing in an entry is code: the verifier reads the
 JSON and interprets it with the table below, so an entry can do no work that is
 not counted.
 
-Prices (PRICES = "prices-v1"): each operation on numbers counts 1, as in the
-proof pipeline's cost-v4. Per result entry unless said otherwise:
+Prices (PRICES = "prices-v1"): each operation on numbers counts 1. Per result
+entry unless said otherwise:
 
     add sub mul div floordiv mod neg abs maximum minimum exp log sqrt     1
     lt le gt ge eq ne and or not                                          1
@@ -382,6 +382,26 @@ def canonical(entry: dict) -> str:
 
 def entry_hash(entry: dict) -> str:
     return hashlib.sha256(canonical(entry).encode()).hexdigest()
+
+
+def show(entry: dict) -> str:
+    """An entry as readable lines, one per node: n3 = take_sum(n0, n1, axis=1)."""
+    check_structure(entry)
+    lines = []
+    for i, node in enumerate(entry["nodes"]):
+        op = node["op"]
+        parts = [f"n{a}" for a in node.get("args", [])]
+        for k in sorted(set(node) - {"op", "args"}):
+            v = node[k]
+            if op == "const" and k == "value":
+                text = json.dumps(v)
+                v = text if len(text) <= 60 else f"{text[:57]}..."
+                parts.append(f"value={v}")
+            else:
+                parts.append(f"{k}={json.dumps(v)}")
+        mark = "".join(f"   <- {name}" for name in ("rule", "predict") if entry.get(name) == i)
+        lines.append(f"n{i} = {op}({', '.join(parts)}){mark}")
+    return "\n".join(lines)
 
 
 # the interpreter ----------------------------------------------------------------------------

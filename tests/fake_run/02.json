@@ -1,0 +1,21 @@
+{
+ "calls": [
+  {
+   "tool": "run_python",
+   "args": {
+    "code": {
+     "$file": "whole.py"
+    }
+   }
+  },
+  {
+   "tool": "submit_entry",
+   "args": {
+    "name": "whole",
+    "claimed_fidelity": 1.0,
+    "expected_fidelity_other": 0.999
+   }
+  }
+ ],
+ "response": "Some working text.\n\n## What the network does\nThe larger token, on every input but one.\n\n## The best entry\nwhole\n\n## Claims\nAs submitted.\n\n## Next\nMore of the same."
+}

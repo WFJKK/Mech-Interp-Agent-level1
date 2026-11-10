@@ -48,6 +48,20 @@ def r_alpha_claimed(parts: dict, alpha: float = 10.0, penalty: float = 2.0, clai
 
 REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed}
 
+FORMULAS = {
+    "r_alpha": "reward = coverage * (1 - r) - r_rule - b  -  alpha * coverage * (1 - fidelity),   alpha = {alpha}",
+    "r_alpha_claimed": (
+        "reward = coverage * (1 - r) - r_rule - b  -  alpha * coverage * (1 - credited),   alpha = {alpha}\n"
+        "    credited = the fidelity you claimed, if the measured fidelity is at least that;\n"
+        "               otherwise measured - {penalty} * (claimed - measured)"),
+}
+
+
+def formula(cfg: dict) -> str:
+    """The reward in words, for the agent's prompt."""
+    name = cfg.get("name", "r_alpha")
+    return FORMULAS[name].format(alpha=cfg.get("alpha", 10.0), penalty=cfg.get("penalty", 2.0))
+
 
 def compute(parts: dict, cfg: dict, claimed: float | None = None) -> dict:
     """cfg is the run config's reward block: {name, ...parameters}."""

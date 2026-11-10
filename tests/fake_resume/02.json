@@ -1,0 +1,20 @@
+{
+ "calls": [
+  {
+   "tool": "run_python",
+   "args": {
+    "code": {
+     "$file": "whole.py"
+    }
+   }
+  },
+  {
+   "tool": "submit_entry",
+   "args": {
+    "name": "whole",
+    "claimed_fidelity": 1.0
+   }
+  }
+ ],
+ "stop_run": "usage limit (scripted)"
+}

@@ -1,0 +1,6 @@
+x, out, ops = network_outputs()
+print("inputs", x.shape, "forward operations", ops, "outputs differ from the first token on", int((out != x[:, 0]).sum()))
+g = graph()
+a, b = g.token(0), g.token(1)
+half = g.entry(predict=lv1.maximum(a, b), rule=a >= 32)
+print(save_entry("half", half), measure(half)["reward"])
