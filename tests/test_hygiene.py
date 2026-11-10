@@ -32,6 +32,18 @@ def test_the_surface_and_the_prompt_are_clean(model, cfg):
     hygiene.check(texts, forbidden)
 
 
+def test_the_restart_note_and_the_sandbox_folder_are_checked_too(model, cfg):
+    forbidden = loop.forbidden_strings(cfg, model)
+    texts = loop.agent_surface(cfg, model)
+    assert {"restart note", "sandbox folder's location", "python's location", "temporary folder's location"} <= set(texts)
+    assert "{python_left}" in texts["restart note"]
+    hygiene.check(texts, forbidden)
+    named = loop.agent_surface({**cfg, "sandbox_dir": "/data/max2-boxes"}, model)
+    assert hygiene.hits(named, forbidden) == [("sandbox folder's location", "max2", "/data/max2-boxes")]
+    # a container has its own paths: the host's sandbox folder and Python do not show in it
+    assert "sandbox folder's location" not in loop.agent_surface({**cfg, "sandbox_dir": "/data/max2-boxes"}, model, "container")
+
+
 def test_the_check_finds_what_it_looks_for(model, cfg):
     forbidden = loop.forbidden_strings(cfg, model)
     found = hygiene.hits({"a file": "line one\nIt outputs the LARGER token.\nmax OF two"}, forbidden)

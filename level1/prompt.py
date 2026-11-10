@@ -59,6 +59,37 @@ def history(rounds: list) -> str:
     return "\n".join(out)
 
 
+RESTART_NOTE = """
+
+## This session was started before
+
+It was cut off, and it starts again here with the same task and what is left of its budgets:
+{python_left} of {python_all} `run_python` calls and {submit_left} of {submit_all} submissions. The
+saved entries are still in `entries`: {saved}.
+{submitted}"""
+
+
+def restart_note(session) -> str:
+    """What a session that was cut off is told when it starts again: its budgets as they stand, the entries
+    it saved and the submissions it already made. Empty for a session that has used nothing."""
+    used, budgets = session.state["used"], session.state["budgets"]
+    if not any(used.values()):
+        return ""
+    lines = []
+    for r in session.receipts():
+        p = r.get("parts") or {}
+        if r["status"] == "scored":
+            lines.append(f"- `{r.get('name')}`: reward {_fmt(r['reward'])}, coverage {_fmt(p.get('coverage'))}, fidelity "
+                         f"{_fmt(p.get('fidelity'), 5)}, r {_fmt(p.get('r'))}, r_rule {_fmt(p.get('r_rule'))}, b {_fmt(p.get('b'))}")
+        else:
+            lines.append(f"- `{r.get('name')}`: refused: {str(r.get('reason'))[:200]}")
+    submitted = ("It already submitted:\n\n" + "\n".join(lines) + "\n") if lines else "It had submitted nothing yet.\n"
+    saved = ", ".join(f"`{n}`" for n in sorted(session.entries())) or "none"
+    return RESTART_NOTE.format(python_left=budgets["run_python"] - used["run_python"], python_all=budgets["run_python"],
+                               submit_left=budgets["submit_entry"] - used["submit_entry"], submit_all=budgets["submit_entry"],
+                               saved=saved, submitted=submitted)
+
+
 def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumerated: bool) -> str:
     template = (TEMPLATES / f"{cfg['prompt_template']}.md").read_text()
     sizes = ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}"

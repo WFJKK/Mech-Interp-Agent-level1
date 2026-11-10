@@ -82,6 +82,15 @@ def test_refusals_say_why(model, nets):
     assert slow["status"] == "refused" and "out of time" in slow["reason"]
 
 
+def test_what_the_verifier_cannot_even_read_is_refused_and_marked(model, nets):
+    v = Verifier(model, "lin-a-s0", CFG)
+    odd = {"format": lang.FORMAT, "rule": None, "predict": 0, "nodes": [{"op": "token", "i": float("nan")}]}
+    receipt = v.score(odd)
+    assert receipt["status"] == "refused" and receipt["verifier_error"] is True and "could not read or run" in receipt["reason"]
+    deep = {"format": lang.FORMAT, "rule": None, "predict": 0, "nodes": [{"op": "const", "dtype": "int", "value": 10**400}]}
+    assert v.score(deep)["status"] == "refused"
+
+
 def test_sampling_above_the_enumeration_limit(model, nets):
     w = nets["lin-a-s0"][0]
     cfg = {**CFG, "verifier": {"enumerate_up_to": 100, "sample_size": 500}}

@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from level1 import mcp_server, run_config
+from level1 import mcp_server, prompt, run_config
 from level1.backends import StopRun
 from level1.backends.claude_code import ClaudeCodeBackend, join, parse_output
 from level1.session import Session
@@ -100,6 +100,33 @@ def test_limits_are_waited_out_and_logins_are_not(setup):
     with pytest.raises(StopRun, match="login problem"):
         b.respond("p", 0, where, session)
     assert len(calls) == 1 and not sleeps
+
+
+def test_a_try_that_finds_the_session_used_is_told_so(setup):
+    """A dropped connection or a resumed run: the next try gets the prompt with the budgets as they stand,
+    the saved entries and the submissions already made."""
+    cfg, session, where = setup
+    assert prompt.restart_note(session) == ""
+    calls = []
+
+    def runner(cmd, prompt_text, env, cwd, timeout_s):
+        calls.append(prompt_text)
+        if len(calls) == 1:  # the first try works a little, then the connection drops
+            s = Session(session.path)
+            s.run_python("g = graph()\nsave_entry('first', g.entry(predict=g.token(0)))")
+            s.submit_entry("first", 0.5, 0.5)
+            return SimpleNamespace(stdout=json.dumps(result(is_error=True, result="overloaded")), stderr="", returncode=1)
+        return SimpleNamespace(stdout="\n".join(json.dumps(x) for x in [assistant("done"), result()]), stderr="", returncode=0)
+
+    b = ClaudeCodeBackend(cfg, log=lambda *_: None, runner=runner, sleep=lambda s: None, environ={"PATH": "/usr/bin"})
+    r = b.respond("the prompt", 0, where, session)
+    assert calls[0] == "the prompt" and calls[1].startswith("the prompt\n\n## This session was started before")
+    assert f"{cfg['session']['python_calls'] - 1} of {cfg['session']['python_calls']} `run_python` calls" in calls[1]
+    assert f"{cfg['session']['submissions'] - 1} of {cfg['session']['submissions']} submissions" in calls[1]
+    assert "- `first`: reward -3.9243, coverage 1.0000, fidelity 0.50757" in calls[1]  # token 0 as the answer, everywhere
+    assert "still in `entries`: `first`." in calls[1]
+    assert r.meta["restarted_with_used"] == [{"run_python": 1, "submit_entry": 1}] and r.meta["submissions"] == 1
+    assert "{" not in prompt.restart_note(session).replace("`", "")
 
 
 def test_a_session_out_of_time_or_turns_keeps_what_it_did(setup):

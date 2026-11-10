@@ -3,6 +3,11 @@
 Written from the run folder's records alone (the rounds, the lock, the seed check), plus the withheld
 reference entries, which are scored here on both networks so that the agent's reward can be read against
 what is known. Those references are never shown to the agent; this file runs on the verifier's side.
+
+Next to the reward, the report says which submissions are on the frontier of the three things measured:
+coverage, fidelity and cost, where the cost is the entry's whole work (prediction, rule and build) per
+input of its region, in forward passes. A submission is on the frontier when no other one is at least as
+good in all three and better in one. No reward function enters into that.
 """
 
 from __future__ import annotations
@@ -26,6 +31,35 @@ def _parts_row(receipt: dict | None) -> list:
         return ["refused" if receipt else "", "", "", "", "", ""]
     p = receipt["parts"]
     return [_f(receipt["reward"]), _f(p["coverage"]), _f(p["fidelity"], 5), _f(p["r"]), _f(p["r_rule"]), _f(p["b"])]
+
+
+def whole_cost(parts: dict) -> float | None:
+    """The entry's whole work per input of its region, in forward passes: r + (r_rule + b) / coverage."""
+    if not parts or not parts.get("coverage"):
+        return None
+    return parts["r"] + (parts["r_rule"] + parts["b"]) / parts["coverage"]
+
+
+def frontier(subs: list) -> set:
+    """The submissions (by their carried_as names) that no other scored submission dominates in coverage,
+    fidelity and whole cost. Of entries with the same three numbers, the first stays."""
+    pts = []
+    for s in subs:
+        p = s.get("parts")
+        if s.get("status") == "scored" and p and p.get("coverage") and p.get("fidelity") is not None:
+            pts.append((s["carried_as"], p["coverage"], p["fidelity"], whole_cost(p)))
+    out = set()
+    for i, (name, cov, fid, cost) in enumerate(pts):
+        dominated = False
+        for j, (_, c2, f2, k2) in enumerate(pts):
+            if j == i or c2 < cov or f2 < fid or k2 > cost:
+                continue
+            if c2 > cov or f2 > fid or k2 < cost or j < i:
+                dominated = True
+                break
+        if not dominated:
+            out.add(name)
+    return out
 
 
 def references(model, cfg: dict, networks: list) -> dict:
@@ -55,6 +89,11 @@ def build(path: Path) -> dict:
     ended = next((e.get("ended") or e.get("stopped") for e in reversed(read_jsonl(path / "log.jsonl")) if e.get("ended") or e.get("stopped")), None)
     notes = next((rd["notes"] for rd in reversed(rounds) if rd.get("notes")), "")
     entry = read_json(path / "locked_entry.json") if (path / "locked_entry.json").is_file() else None
+    subs = [dict(s) for rd in rounds for s in rd["submissions"]]
+    on_frontier = frontier(subs)
+    for s in subs:
+        s["whole_cost"] = whole_cost(s.get("parts")) if s["status"] == "scored" else None
+        s["on_frontier"] = s["carried_as"] in on_frontier
     return {
         "run_id": run["run_id"], "created": run["created"], "git": run["git"], "model": cfg["model"], "networks": networks,
         "backend": cfg["backend"], "agent_model": cfg["agent_model"], "effort": cfg["effort"], "reward": cfg["reward"],
@@ -64,7 +103,7 @@ def build(path: Path) -> dict:
         "rounds": [{"round": rd["round"], "submissions": len(rd["submissions"]), "improved": rd["improved"],
                     "best_reward_after": rd["best_reward_after"], "stop_reason": rd.get("stop_reason"),
                     "tools_used": rd.get("tools_used")} for rd in rounds],
-        "submissions": [s for rd in rounds for s in rd["submissions"]],
+        "submissions": subs,
         "lock": lock, "seed_check": seed, "locked_entry": entry,
         "locked_entry_shown": lang.show(entry) if entry else None,
         "references": references(model, cfg, networks), "notes": notes, "task": model.task().get("task"),
@@ -113,13 +152,17 @@ def markdown(rep: dict) -> str:
         out.append(f"| {rd['round']} | {rd['submissions']} | {_f(rd['best_reward_after'])} | {'yes' if rd['improved'] else 'no'} | "
                    f"{rd['stop_reason'] or ''} | " + ", ".join(f"{v} {k}" for k, v in (rd["tools_used"] or {}).items()) + " |")
     out += ["", "## Submissions", "",
-            "| Entry | Saved as | Reward | Coverage | Fidelity | r | r_rule | b | Claimed | Overclaim |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+            "Whole cost: the entry's prediction, rule and build per input of its region, in forward passes. On the "
+            "frontier: no other submission is at least as good in coverage, fidelity and whole cost, and better in one.", "",
+            "| Entry | Saved as | Reward | Coverage | Fidelity | r | r_rule | b | Whole cost | On the frontier | Claimed | Overclaim |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for s in rep["submissions"]:
         if s["status"] == "scored":
-            out.append("| " + " | ".join([s["carried_as"], f"`{s['name']}`"] + _parts_row(s) + [_f(s.get("claimed_fidelity"), 5), _f(s.get("overclaim"), 5)]) + " |")
+            out.append("| " + " | ".join([s["carried_as"], f"`{s['name']}`"] + _parts_row(s) + [
+                _f(s.get("whole_cost")), "yes" if s.get("on_frontier") else "no",
+                _f(s.get("claimed_fidelity"), 5), _f(s.get("overclaim"), 5)]) + " |")
         else:
-            out.append(f"| {s['carried_as']} | `{s['name']}` | refused: {str(s['reason'])[:100]} | | | | | | | |")
+            out.append(f"| {s['carried_as']} | `{s['name']}` | refused: {str(s['reason'])[:100]} | | | | | | | | | |")
     out += ["", "## The agent's closing notes", "", "\n".join("> " + line for line in (rep["notes"] or "(none)").splitlines()), ""]
     return "\n".join(out)
 

@@ -17,7 +17,9 @@ billing an API key, and has CLAUDE_CODE_NO_MODEL_FALLBACK set, so it cannot answ
 the requested one declines. An answer that still shows another model stops the run; a refusal is recorded
 as one, and the loop counts refusals. Usage-limit and overload errors are retried with growing waits; a
 login problem stops the run, which `resume` continues later. The session's wall clock is session.seconds:
-when it runs out, what the session submitted stands.
+when it runs out, what the session submitted stands. A try that finds the session already used (a retry
+after a dropped connection, or a resumed run) gets the same prompt with a note at its end: the budgets as
+they stand, the entries saved and the submissions made before the cut (prompt.restart_note).
 
 Whether a subscription may be used this way is governed by Anthropic's terms for Claude Code, which have
 changed over time: check the current policy for your account before relying on it.
@@ -38,6 +40,7 @@ import tempfile
 import time
 from pathlib import Path
 
+from .. import prompt
 from ..mcp_server import SERVER_NAME
 from ..session import TOOLS
 from ..util import REPO_ROOT, atomic_write
@@ -235,10 +238,15 @@ class ClaudeCodeBackend:
         tries = int(self.retries["tries"])
         timeout = float(self.cfg["session"]["seconds"])
         data, messages, text, events, declined = {}, [], "", [], None
+        restarts = []
         for attempt in range(tries):
+            session.reload()  # the tools run in the tool server's process; an earlier try may have used some
+            note = prompt.restart_note(session)
+            if note:
+                restarts.append(dict(session.state["used"]))
             with tempfile.TemporaryDirectory(prefix="lv1-claude-code-") as cwd:
                 try:
-                    r = self.run(cmd, prompt_text, self.env, cwd, timeout)
+                    r = self.run(cmd, prompt_text + note, self.env, cwd, timeout)
                 except subprocess.TimeoutExpired:
                     # the session's wall clock ran out: what it submitted stands; there is no closing text
                     r = None
@@ -307,6 +315,7 @@ class ClaudeCodeBackend:
             "submissions": len(session.receipts()),
             "request": {"command": cmd[:1] + cmd[1:10]},
             "failed_tries": failures,
+            "restarted_with_used": restarts,  # one item per try that began with a used session: what was used
             "seconds": round(time.monotonic() - t0, 1),
         }
         return Response(text=str(text or ""), meta=meta)

@@ -1,6 +1,6 @@
 """The loop: the rounds on one network, then the lock, the seed check and the report.
 
-    python -m level1.loop run --config config/pilot/lin-a.yaml
+    python -m level1.loop run --config config/pilot/lin-a.yaml [--run-id X] [--sandbox hardened] [--fake DIR]
     python -m level1.loop resume --run <run folder>
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop rescore --run <run folder> --name r_alpha --alpha 1    the records under another reward
@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import os
 import sys
+import tempfile
 from pathlib import Path
 
 from . import hygiene, lang, prompt, rewards, run_config
@@ -138,6 +139,20 @@ def forbidden_strings(cfg: dict, model) -> list:
     return sorted({str(s) for s in list(cfg.get("hygiene") or []) + model.hygiene()})
 
 
+def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
+    """Every text the pipeline itself puts within the agent's reach, besides a round's prompt: the session's
+    surface (session.py), the note a restarted session gets, and the paths that can show from inside: the
+    temporary folder the CLI is started in and, unless the agent's code runs in a container (which has its
+    own paths), the sandbox folder's location and this Python's (a traceback prints it)."""
+    out = {**surface(model, cfg["verifier"]), "restart note": prompt.RESTART_NOTE,
+           "temporary folder's location": tempfile.gettempdir()}
+    if sandbox_mode != "container":
+        out["sandbox folder's location"] = str(cfg.get("sandbox_dir") or tempfile.gettempdir())
+        out["python's location"] = " ".join(sorted({sys.prefix, sys.base_prefix, sys.executable,
+                                                     str(cfg.get("python_executable") or "")}))
+    return out
+
+
 def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     """Make the run folder, check everything that can be checked before a model is asked, then run the rounds."""
     from .sandbox import check_probe, choose, probe, protected_paths
@@ -158,8 +173,9 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     itself = verifier.score(verifier.reference)
     if itself["status"] != "scored" or abs(itself["reward"]) > 1e-12 or itself["parts"]["fidelity"] != 1.0:
         raise RuntimeError(f"the network written as an entry does not score 0: {describe(itself)}")
-    hygiene.check(surface(model, cfg["verifier"]), forbidden_strings(cfg, model))
     sb = choose(cfg, protected_paths(cfg, model, path))
+    first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
+    hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
     report = probe(sb, model, cfg["network"], path / "probe")
     check_probe(sb, report)
     if not sb.hardened:
@@ -212,7 +228,7 @@ def run_round(path: Path, cfg: dict, model, k: int, done: list, backend, forbidd
     text = prompt.build(cfg, model, k, done, run["model_ops"], run["enumerated"])
     # What the pipeline itself says is checked; the history is the agent's own words about what it found.
     ours = prompt.build(cfg, model, k, [], run["model_ops"], run["enumerated"])
-    hygiene.check({"prompt": ours, **surface(model, cfg["verifier"])}, forbidden)
+    hygiene.check({"prompt": ours, **agent_surface(cfg, model, run["sandbox"]["mode"])}, forbidden)
     atomic_write(rdir / "prompt.md", text)
     log(f"round {k}: asking {backend.name}")
     response = backend.respond(text, k - 1, rdir, session)
@@ -307,6 +323,7 @@ def main(argv=None) -> int:
     r.add_argument("--run-id")
     r.add_argument("--runs-dir")
     r.add_argument("--fake", help="a folder of scripted rounds: sets the backend to fake")
+    r.add_argument("--sandbox", help="auto, hardened, container, landlock or process (default: the config's)")
     s = sub.add_parser("resume")
     s.add_argument("--run", required=True)
     s.add_argument("--fake")
@@ -320,7 +337,7 @@ def main(argv=None) -> int:
     c.add_argument("--penalty", type=float)
     args = ap.parse_args(argv)
     if args.cmd == "run":
-        over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir)) if v}
+        over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox)) if v}
         if args.fake:
             over["backend"] = "fake"
         cfg = run_config.load(args.config, over)

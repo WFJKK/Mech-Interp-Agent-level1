@@ -83,6 +83,11 @@ class Verifier:
             receipt["reason"] = str(exc)[:1000]
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
+        except Exception as exc:  # not an entry the interpreter could even fail on properly: refused, and marked
+            receipt["reason"] = f"the verifier could not read or run this entry ({type(exc).__name__}: {str(exc)[:300]})"
+            receipt["verifier_error"] = True
+            receipt["seconds"] = round(time.monotonic() - t0, 3)
+            return receipt
         if how["mode"] == "sample" and parts["n_in_region"]:
             parts["fidelity_low"] = wilson_lower(parts["n_agree"], parts["n_in_region"])
         else:

@@ -51,8 +51,9 @@ Each operation on numbers costs 1. Per entry of the result unless said otherwise
 | `x[v]` or `lv1.take(x, v, axis)` with a vector of whole numbers | 1 per entry read |
 | `lv1.take_sum(x, v, axis)`: the sum of the slices of x at the positions v | slice entries times len(v) |
 | `lv1.svd(x)` of an m x n matrix: `(u, s, vt)` | 4 * m * n * min(m, n), once for the three |
+| `lv1.cast(x, "int")`, `"float"`, `"bool"` | 1 |
 | `g.token`, `g.tokens`, `g.weight`, `g.const`, `g.arange` | 0 |
-| `x.reshape(...)`, `x.T`, `lv1.transpose`, `x[2]`, `x[1:5]`, `x[None]`, `lv1.concat`, `lv1.stack`, `lv1.cast` | 0 |
+| `x.reshape(...)`, `x.T`, `lv1.transpose`, `x[2]`, `x[1:5]`, `x[None]`, `lv1.concat`, `lv1.stack` | 0 |
 
 Reading costs 1 per number read: `T[a, b]` reads one number, `T[:, a]` a whole column.
 

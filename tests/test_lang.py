@@ -114,11 +114,40 @@ def test_moving_data_is_free(toy):
         (lambda g: lang.concat([g.weight("A"), g.weight("A")], axis=1), np.concatenate([A, A], axis=1)),
         (lambda g: lang.stack([g.weight("v"), g.weight("v")]), np.stack([toy["v"], toy["v"]])),
         (lambda g: lang.transpose(g.weight("A"), [1, 0]), A.T),
-        (lambda g: lang.cast(g.weight("A"), "int"), A.astype(np.int64)),
         (lambda g: g.arange(5), np.arange(5)),
     ):
         val, per_input, build = value_and_cost(build_fn, toy)
         assert val.shape == expect.shape and np.allclose(val, expect) and per_input == 0 and build == 0
+
+
+def test_a_cast_is_a_computation(toy):
+    A = toy["A"]
+    val, _, build = value_and_cost(lambda g: lang.cast(g.weight("A"), "int"), toy)
+    assert (val == A.astype(np.int64)).all() and build == 12  # truncation
+    val, per_input, _ = value_and_cost(lambda g: lang.cast(g.token(0) - g.token(1), bool), toy)
+    assert bool(val) and per_input == 2  # a test against zero is not free
+
+
+def test_a_cast_that_differs_between_machines_is_refused(toy):
+    g = Graph(toy, 2, example=(3, 0))
+    entry = g.entry(predict=lang.cast(lang.log(g.token(0) * 1.0), "int"))  # log(0) is minus infinity
+    with pytest.raises(EntryError, match="no whole-number value"):
+        run(entry, toy, (0, 0))
+    assert run(entry, toy, (3, 0))[1] == 1
+
+
+def test_what_an_entry_holds_at_once_is_bounded(toy, monkeypatch):
+    monkeypatch.setattr(lang, "MAX_HELD", 100)
+    g = Graph(toy, 2)
+    big = g.arange(60)
+    entry = g.entry(predict=((big + 1) * 2).argmax())
+    with pytest.raises(EntryError, match="at once"):
+        run(entry, toy, (0, 0))
+    g = Graph(toy, 2)
+    per_input = g.entry(predict=((g.arange(30) + g.token(0)) * 2).argmax())
+    ev = Evaluator(per_input, toy, 2)
+    for x in ((0, 0), (1, 1), (2, 2), (3, 3)):  # each input's values are let go before the next
+        assert ev.run(x)[1] == 29
 
 
 def test_cond_charges_only_the_chosen_side_and_where_both(toy):

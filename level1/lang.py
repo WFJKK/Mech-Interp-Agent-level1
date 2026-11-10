@@ -28,7 +28,8 @@ entry unless said otherwise:
     take_sum(x, idx, axis)  the sum of the slices at idx: a matrix applied to a sum of
                           one-hot vectors                                 (slice entries) x len(idx)
     svd_u svd_s svd_vt    of an m x n matrix, charged once for the three  4 * m * n * min(m, n)
-    token tokens weight const arange reshape transpose slice concat stack cast    0
+    cast                  to whole numbers, floats or booleans           1
+    token tokens weight const arange reshape transpose slice concat stack         0
 
 What does not depend on the input is computed once per entry and charged to the
 build; the rest is charged per input, to the rule (for every input) or to the
@@ -56,6 +57,7 @@ PRICES = "prices-v1"
 MAX_NODES = 2000  # absolute ceilings; a run's own limits are lower (config: entry.max_nodes, entry.max_const_scalars)
 MAX_CONST_SCALARS = 1_000_000
 MAX_ELEMENTS = 4_000_000  # entries of any one value
+MAX_HELD = 48_000_000  # entries of all the values an entry holds at once (the build's, or one input's)
 MAX_RANK = 6
 SVD_FACTOR = 4
 
@@ -332,8 +334,11 @@ def apply(node: dict, args: list, tokens: np.ndarray | None, weights: dict, svd_
         (x,) = args
         if node.get("dtype") not in DTYPES:
             raise EntryError(f"cast: dtype must be one of {sorted(DTYPES)}")
+        if node["dtype"] == "int" and x.dtype == np.float64 and x.size and not (np.abs(x) < 2.0**63).all():
+            # what a machine makes of such a float differs from one processor to another
+            raise EntryError("cast: a float that is not finite, or too large, has no whole-number value")
         with np.errstate(all="ignore"):
-            return x.astype(DTYPES[node["dtype"]]), 0
+            return x.astype(DTYPES[node["dtype"]]), int(x.size)
     raise EntryError(f"unknown operation {op!r}")
 
 
@@ -423,6 +428,7 @@ class Evaluator:
             self.dep.append(node["op"] in ("token", "tokens") or any(self.dep[a] for a in node.get("args", [])))
         self.build: dict = {}
         self.build_cost = 0
+        self._held = [0, 0]  # entries held by the build's values, and by the current input's
 
     def _eval(self, root: int, memo: dict, counter: list, tokens):
         dep, build, nodes = self.dep, self.build, self.nodes
@@ -461,11 +467,14 @@ class Evaluator:
                         value, cost = apply(node, vals, tokens if dep[i] else None, self.weights, store)
                 except EntryError as exc:
                     raise EntryError(f"node {i} ({node['op']}): {exc}") from None
-                except (ValueError, TypeError, IndexError, FloatingPointError, np.linalg.LinAlgError, MemoryError) as exc:
-                    raise EntryError(f"node {i} ({node['op']}): {type(exc).__name__}: {exc}") from None
+                except Exception as exc:  # whatever numpy made of it: the node failed, and its author is told which
+                    raise EntryError(f"node {i} ({node['op']}): {type(exc).__name__}: {str(exc)[:300]}") from None
                 if value.size > MAX_ELEMENTS or value.ndim > MAX_RANK:
                     raise EntryError(f"node {i} ({node['op']}): the value is too big")
             store[i] = value
+            self._held[1 if dep[i] else 0] += int(value.size)
+            if self._held[0] + self._held[1] > MAX_HELD:
+                raise EntryError(f"the entry holds more than {MAX_HELD} numbers at once")
             if dep[i]:
                 counter[0] += int(cost)
             else:
@@ -479,6 +488,7 @@ class Evaluator:
         if len(tokens) != self.n_ctx:
             raise EntryError(f"an input has {self.n_ctx} tokens")
         memo: dict = {}
+        self._held[1] = 0
         c_rule, c_pred = [0], [0]
         inside = True
         if self.rule is not None:

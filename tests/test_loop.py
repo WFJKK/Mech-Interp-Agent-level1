@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from level1 import hygiene, loop, run_config
+from level1 import hygiene, loop, report, run_config
 from level1.util import read_json, read_jsonl
 
 FAKE = Path(__file__).parent / "fake_run"
@@ -82,6 +82,21 @@ def test_the_report(finished):
     assert "(weak: the agent's code could read any file" in text and "—" not in text
     rows = loop.rescore(path, {"name": "r_alpha", "alpha": 1}, out=lambda *_: None)
     assert rows[0]["rescored"] == pytest.approx(rows[0]["recorded"]) and rows[1]["rescored"] > rows[1]["recorded"]
+    # the frontier of coverage, fidelity and whole cost: the half region, the whole one and the exact one each
+    # hold a corner; the same entry sent again does not
+    assert {s["carried_as"]: s["on_frontier"] for s in rep["submissions"]} == \
+        {"r1s1": True, "r2s1": True, "r3s1": True, "r4s1": False, "r4s2": False}
+    assert rep["submissions"][0]["whole_cost"] == pytest.approx(3 / 655) and "| 0.0046 | yes |" in text
+
+
+def test_the_frontier_needs_no_reward():
+    def sub(name, coverage, fidelity, r, r_rule=0.0, b=0.0, status="scored"):
+        return {"carried_as": name, "status": status, "parts": {"coverage": coverage, "fidelity": fidelity, "r": r, "r_rule": r_rule, "b": b}}
+
+    subs = [sub("a", 1.0, 0.90, 0.10), sub("b", 1.0, 0.95, 0.10), sub("c", 0.5, 1.0, 0.05, r_rule=0.01),
+            sub("d", 0.5, 0.99, 0.08, b=0.01), sub("e", 1.0, 0.95, 0.10), sub("f", 0.0, None, None), sub("g", 1.0, 1.0, 0.0, status="refused")]
+    assert report.frontier(subs) == {"b", "c"}  # a and d are dominated; e repeats b; f covers nothing; g was refused
+    assert report.whole_cost(subs[2]["parts"]) == pytest.approx(0.05 + 0.01 / 0.5) and report.whole_cost(subs[5]["parts"]) is None
 
 
 def test_a_stopped_run_resumes_where_it_was(tmp_path):
