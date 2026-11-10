@@ -87,6 +87,7 @@ def test_the_report(finished):
     assert {s["carried_as"]: s["on_frontier"] for s in rep["submissions"]} == \
         {"r1s1": True, "r2s1": True, "r3s1": True, "r4s1": False, "r4s2": False}
     assert rep["submissions"][0]["whole_cost"] == pytest.approx(3 / 655) and "| 0.0046 | yes |" in text
+    assert rep["rounds"][0]["seconds"] is not None and "| Minutes | Output tokens |" in text
 
 
 def test_the_frontier_needs_no_reward():
@@ -141,6 +142,23 @@ def test_a_run_with_nothing_scored_locks_nothing(tmp_path):
     assert len(loop.completed(path)) == 2  # two refusals in a row end the rounds
     assert read_json(path / "lock.json") == {"locked": False, "reason": "no submission was scored"}
     assert "nothing was locked" in (path / "report.md").read_text() and not (path / "seed_check.json").exists()
+
+
+def test_the_smoke_config_is_the_pilot_made_small(tmp_path):
+    smoke = run_config.load("config/pilot/lin-a-smoke.yaml")
+    pilot = run_config.load("config/pilot/lin-a.yaml")
+    assert smoke["rounds_max"] == 1 and smoke["session"] == {"python_calls": 8, "submissions": 2, "max_turns": 40, "seconds": 1200}
+    same = set(pilot) - {"run_id", "rounds_max", "session"}
+    assert all(smoke[k] == pilot[k] for k in same) and smoke["run_id"] != pilot["run_id"]
+
+
+def test_the_command_line_says_what_is_wrong_without_a_traceback(tmp_path, capsys):
+    assert loop.main(["run", "--config", "config/pilot/lin-a.yaml", "--runs-dir", str(tmp_path), "--sandbox", "nonsense",
+                      "--fake", str(FAKE)]) == 1
+    assert "error: sandbox must be auto, hardened or one of" in capsys.readouterr().err
+    assert loop.main(["resume", "--run", str(tmp_path / "no-such-run")]) == 1
+    assert "error:" in capsys.readouterr().err
+    assert not (tmp_path / "pilot-lin-a" / "run.json").exists()
 
 
 def test_config_errors(tmp_path):

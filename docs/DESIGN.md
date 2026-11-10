@@ -175,7 +175,8 @@ from the records alone, and `rescore` prints the records under another reward.
 3. `models/<name>/zoo/*.npz`: the weights, saved without pickle.
 4. `withheld/<name>/task.yaml`: what the network was trained to do, and the strings that would give
    it away (`hygiene`). Optionally `references.py` with reference entries for the report.
-5. A run config next to `config/pilot/lin-a.yaml`.
+5. A run config next to `config/pilot/lin-a.yaml`, and a small one like `lin-a-smoke.yaml` to try
+   first.
 
 Names are part of what the agent can reach: a model folder, a network id or a weight's name must
 not say what the network does. The hygiene check reads them. If the network needs an operation the

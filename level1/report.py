@@ -40,6 +40,15 @@ def _parts_row(receipt: dict | None) -> list:
     return [_f(receipt["reward"]), _f(p["coverage"]), _f(p["fidelity"], 5), _f(p["r"]), _f(p["r_rule"]), _f(p["b"])]
 
 
+def _session_meta(path: Path, k: int) -> dict:
+    """What a round's session took, from its meta.json: seconds, output tokens, and what the same tokens
+    would have cost through the API when the backend says (a subscription is not billed per call)."""
+    f = Path(path) / f"round_{k:03d}" / "meta.json"
+    meta = read_json(f) if f.is_file() else {}
+    return {"seconds": meta.get("seconds"), "output_tokens": meta.get("output_tokens"),
+            "api_equivalent_usd": meta.get("api_equivalent_usd"), "failed_tries": len(meta.get("failed_tries") or [])}
+
+
 def whole_cost(parts: dict) -> float | None:
     """The entry's whole work per input of its region, in forward passes: r + (r_rule + b) / coverage."""
     if not parts or not parts.get("coverage"):
@@ -109,7 +118,7 @@ def build(path: Path) -> dict:
         "sandbox_escapes": run["sandbox"]["probe"]["critical_escapes"], "ended": ended,
         "rounds": [{"round": rd["round"], "submissions": len(rd["submissions"]), "improved": rd["improved"],
                     "best_reward_after": rd["best_reward_after"], "stop_reason": rd.get("stop_reason"),
-                    "tools_used": rd.get("tools_used")} for rd in rounds],
+                    "tools_used": rd.get("tools_used"), **_session_meta(path, rd["round"])} for rd in rounds],
         "submissions": subs,
         "lock": lock, "seed_check": seed, "locked_entry": entry,
         "locked_entry_shown": lang.show(entry) if entry else None,
@@ -154,10 +163,17 @@ def markdown(rep: dict) -> str:
             out.append("| " + " | ".join([name, nid] + _parts_row(r)) + " |")
     out.append("")
 
-    out += ["## Rounds", "", "| Round | Submissions | Best reward so far | Raised it | Ended with | Tool calls |", "| --- | --- | --- | --- | --- | --- |"]
+    out += ["## Rounds", "", "| Round | Submissions | Best reward so far | Raised it | Ended with | Tool calls | Minutes | Output tokens |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- |"]
     for rd in rep["rounds"]:
+        minutes = "" if rd.get("seconds") is None else f"{rd['seconds'] / 60:.1f}"
+        tokens = "" if not rd.get("output_tokens") else f"{rd['output_tokens']:,}"
         out.append(f"| {rd['round']} | {rd['submissions']} | {_f(rd['best_reward_after'])} | {'yes' if rd['improved'] else 'no'} | "
-                   f"{rd['stop_reason'] or ''} | " + ", ".join(f"{v} {k}" for k, v in (rd["tools_used"] or {}).items()) + " |")
+                   f"{rd['stop_reason'] or ''} | " + ", ".join(f"{v} {k}" for k, v in (rd["tools_used"] or {}).items())
+                   + f" | {minutes} | {tokens} |")
+    usd = [rd["api_equivalent_usd"] for rd in rep["rounds"] if isinstance(rd.get("api_equivalent_usd"), (int, float))]
+    if usd:
+        out += ["", f"The same tokens through the API would have cost about ${sum(usd):.2f} (a subscription is not billed per call)."]
     out += ["", "## Submissions", "",
             "Whole cost: the entry's prediction, rule and build per input of its region, in forward passes. On the "
             "frontier: no other submission is at least as good in coverage, fidelity and whole cost, and better in one.", "",

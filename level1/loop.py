@@ -168,6 +168,7 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         model.network(second)
         if second == cfg["network"]:
             raise RuntimeError("the seed check needs another network than the rounds'")
+    make(cfg, log=out, fake_scripts=fake_scripts)  # a missing CLI or login fails here, before a run folder exists
     path.mkdir(parents=True, exist_ok=True)
     log = Log(path, out)
     verifier = Verifier(model, cfg["network"], cfg)
@@ -344,20 +345,28 @@ def main(argv=None) -> int:
     c.add_argument("--penalty", type=float)
     c.add_argument("--param", action="append", default=[], metavar="KEY=VALUE", help="any other parameter of the reward")
     args = ap.parse_args(argv)
-    if args.cmd == "run":
-        over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox)) if v}
-        if args.fake:
-            over["backend"] = "fake"
-        cfg = run_config.load(args.config, over)
-        start(cfg, fake_scripts=args.fake)
+    from .backends import BackendError
+    from .networks import ModelError
+    from .sandbox import SandboxError
+
+    try:
+        if args.cmd == "run":
+            over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox)) if v}
+            if args.fake:
+                over["backend"] = "fake"
+            cfg = run_config.load(args.config, over)
+            start(cfg, fake_scripts=args.fake)
+            return 0
+        if args.cmd == "resume":
+            return 0 if drive(Path(args.run), fake_scripts=args.fake, accept_changes=args.accept_changes) == "finished" else 2
+        if args.cmd == "finish":
+            finish(Path(args.run))
+            return 0
+        rescore(Path(args.run), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty))
         return 0
-    if args.cmd == "resume":
-        return 0 if drive(Path(args.run), fake_scripts=args.fake, accept_changes=args.accept_changes) == "finished" else 2
-    if args.cmd == "finish":
-        finish(Path(args.run))
-        return 0
-    rescore(Path(args.run), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty))
-    return 0
+    except (run_config.ConfigError, hygiene.HygieneError, BackendError, ModelError, SandboxError, RuntimeError, FileNotFoundError) as exc:
+        print(f"error: {exc}", file=sys.stderr)  # what the user needs to read, without a traceback around it
+        return 1
 
 
 if __name__ == "__main__":

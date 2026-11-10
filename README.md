@@ -58,13 +58,22 @@ A dry run with scripted rounds in place of a model:
 
     python -m level1.loop run --config config/pilot/lin-a.yaml --fake tests/fake_run --run-id dry-run
 
-The first pilot, with the Claude Code CLI under your own login (`claude` installed and signed in):
+A first contact with a real model, kept small: one short round, to see that the login, the tools
+and the sandbox work together on this machine. It needs the Claude Code CLI (`claude`) installed
+and signed in; rounds run under your own login, and no API key is used.
+
+    python -m level1.loop run --config config/pilot/lin-a-smoke.yaml
+
+Then the pilot proper, at most 5 rounds of up to 90 minutes each:
 
     python -m level1.loop run --config config/pilot/lin-a.yaml
 
 If it stops (a usage limit, a dropped connection, a closed laptop), continue with
 
     python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-a
+
+Add `--sandbox hardened` to a run that is meant to count: it then refuses to start unless the
+agent's code can be kept away from the withheld folder (`docs/SANDBOX.md`).
 
 Other commands:
 
@@ -101,7 +110,7 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
     withheld/lin-a/  what it was trained to do, and reference entries (never shown to the agent)
     agent_docs/      the entry guide the agent reads
     prompts/         the round's prompt template
-    config/          defaults and the pilot's run config
+    config/          defaults, the pilot's run config and a small smoke run
     tests/           the tests, with each known way to game the score as a test
     docs/            DESIGN.md, REWARD.md, SANDBOX.md
 
