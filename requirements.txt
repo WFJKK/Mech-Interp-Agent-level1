@@ -1,0 +1,5 @@
+# Versions the pipeline was built and tested with (Python 3.13). No torch: networks are run in numpy.
+numpy==2.5.3
+pyyaml==6.0.3
+psutil==7.2.2
+pytest==9.1.1

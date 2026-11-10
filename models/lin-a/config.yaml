@@ -1,0 +1,23 @@
+# The model lin-a: a linear network on pairs of tokens. Sizes and networks; change values here, never in code.
+# What the network was trained to do is not in this folder. It is in withheld/lin-a/, which no tool of the
+# agent reaches, and nothing here may say it (the hygiene check reads this folder's agent-facing files).
+name: lin-a
+sizes:
+  n_ctx: 2        # tokens per input
+  d_vocab: 64     # tokens are whole numbers 0 .. d_vocab - 1; the output is one of them too
+  d_model: 8
+input_space: [64, 64]   # per token position, how many tokens
+n_outputs: 64
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  embed: [8, 64]
+  hidden: [8, 8]
+  unembed: [64, 8]
+# Two networks of the same sizes and training, with different seeds. A run works on one and checks its
+# locked entry on another.
+networks:
+  - id: lin-a-s0
+    weights: zoo/lin-a-s0.npz
+    sha256: 79cdc0db21984c7029a03ef89e2cdf42d345d826d79fd50169bd1eebec670cad
+  - id: lin-a-s1
+    weights: zoo/lin-a-s1.npz
+    sha256: 7f1591eba201f9e78f0cbbaa4b0dc6ecd5a6b20e3202677f29563ec0927f51f9

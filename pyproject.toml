@@ -1,0 +1,11 @@
+[project]
+name = "mech-interp-agent-level1"
+version = "0.1.0"
+description = "An agent writes a cheaper program that predicts a small network's outputs; a verifier measures it."
+requires-python = ">=3.10"
+dependencies = ["numpy", "pyyaml", "psutil"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

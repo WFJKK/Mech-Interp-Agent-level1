@@ -1,0 +1,22 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: The network was trained to output the larger of its two tokens (max of 2).
+provenance:
+  source: github.com/WFJKK/Compact-Proof-Agent-wip, models/max2, the linear pilot's two networks (weights
+    unchanged; the three arrays renamed embedding.weight, linear.weight, unembedding.weight to embed, hidden, unembed)
+  networks:
+    lin-a-s0: {was: max2-v64-s0, sha256_of_original: 3783b0611a43989edb1c1924832ae6c29580b343c985fef6c1e67089bc6ae71b, outputs_equal_to_task: 4095, of: 4096}
+    lin-a-s1: {was: max2-v64-s1, sha256_of_original: 6de8447b36849dfec3f026cc6aeb52921b4c3a10c408a0ae6f4b93419cfe0fac, outputs_equal_to_task: 4092, of: 4096}
+  where_the_outputs_differ_from_the_task:
+    lin-a-s0: "(0, 0), where the network outputs 1"
+    lin-a-s1: "(0, 0), (0, 1), (1, 0), (1, 1), where the network outputs 2"
+hygiene:
+  - max2
+  - max-of
+  - max of
+  - largest
+  - larger
+  - greater of
+  - bigger of
+  - Gross
+  - compact proof
