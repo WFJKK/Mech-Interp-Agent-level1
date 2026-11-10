@@ -1,5 +1,6 @@
 """The agent is not told what the model does: everything it can reach, searched for the forbidden strings."""
 
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -13,6 +14,24 @@ REPO = Path(__file__).parent.parent
 @pytest.fixture(scope="module")
 def cfg():
     return run_config.load("config/pilot/lin-a.yaml")
+
+
+def _repository_files() -> list:
+    """The repository's own files, as paths relative to it: what git tracks (plus what is new and not ignored),
+    or, where there is no git, every file outside the folders that are plainly not the repository's."""
+    try:
+        r = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=REPO, capture_output=True, text=True, timeout=30)
+        if r.returncode == 0 and r.stdout.strip():
+            return [Path(line) for line in r.stdout.splitlines() if (REPO / line).is_file()]
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    skip = {".git", "__pycache__", ".pytest_cache", ".venv", "venv", "env", ".env", "node_modules", "build", "dist"}
+    out = []
+    for p in REPO.rglob("*"):
+        rel = p.relative_to(REPO)
+        if p.is_file() and not (set(rel.parts) & skip) and not any((REPO / q / "pyvenv.cfg").exists() for q in rel.parents):
+            out.append(rel)
+    return out
 
 
 def test_the_surface_and_the_prompt_are_clean(model, cfg):
@@ -70,12 +89,11 @@ def test_the_task_is_said_in_one_place(model, cfg):
     general = {s.lower() for s in cfg["hygiene"]}
     task_words = [s for s in model.hygiene() if s.lower() not in general]
     assert len(task_words) >= 5
-    skip = {".git", "__pycache__", ".pytest_cache", "withheld", "tests", ".venv", "venv"}
     texts = {}
-    for p in REPO.rglob("*"):
-        if p.is_file() and not (set(p.relative_to(REPO).parts) & skip) and p.suffix != ".npz":
+    for rel in _repository_files():
+        if rel.parts[0] not in ("withheld", "tests") and rel.suffix != ".npz":
             try:
-                texts[str(p.relative_to(REPO))] = p.read_text()
+                texts[rel.as_posix()] = (REPO / rel).read_text()
             except UnicodeDecodeError:
                 pass
     assert len(texts) > 30 and "README.md" in texts and "docs/REWARD.md" in texts

@@ -50,9 +50,14 @@ run config; the parts are kept, so a finished run can be scored again under anot
 
 ## Quick start
 
+    python -m venv .venv && source .venv/bin/activate
     pip install -r requirements.txt
     python -m pytest                      # about a minute; no model is called
     python -m level1.sandbox info         # which sandbox modes work on this machine
+
+Use a virtual environment of this repository's own. Outside a container, the hygiene check also
+reads the path of the Python that runs the agent's code, because a traceback shows that path to the
+agent: an environment that lives in a folder named after the proof pipeline is refused.
 
 A dry run with scripted rounds in place of a model:
 
