@@ -86,7 +86,8 @@ def test_what_the_verifier_cannot_even_read_is_refused_and_marked(model, nets):
     v = Verifier(model, "lin-a-s0", CFG)
     odd = {"format": lang.FORMAT, "rule": None, "predict": 0, "nodes": [{"op": "token", "i": float("nan")}]}
     receipt = v.score(odd)
-    assert receipt["status"] == "refused" and receipt["verifier_error"] is True and "could not read or run" in receipt["reason"]
+    assert receipt["status"] == "refused" and receipt["reason"] == "the verifier could not read or run this entry (ValueError)"
+    assert receipt["verifier_error"].startswith("ValueError: ")  # the detail is kept on the verifier's side
     deep = {"format": lang.FORMAT, "rule": None, "predict": 0, "nodes": [{"op": "const", "dtype": "int", "value": 10**400}]}
     assert v.score(deep)["status"] == "refused"
 

@@ -56,6 +56,7 @@ compared with what is measured.
 - `submit_entry(name, claimed_fidelity, expected_fidelity_other)`: up to {{SUBMISSIONS}} submissions
   this round.
 - An entry may have up to {{MAX_NODES}} nodes, and its constants up to {{MAX_CONST}} numbers in all.
+  The verifier gives an entry {{VERIFIER_SECONDS}} s on its inputs.
 
 ## Earlier rounds
 

@@ -39,6 +39,24 @@ def test_run_python_sees_the_network_and_saves_entries(session):
     assert (session.path / "python" / "003.txt").read_text() == "3000\n" and (session.path / "python" / "002.txt").read_text() == again["output"]
 
 
+def test_the_guide_s_example_runs_as_written(session):
+    """The code the agent is shown in agent_docs/ENTRY.md, pasted into run_python unchanged."""
+    guide = (Path(__file__).parent.parent / "agent_docs" / "ENTRY.md").read_text()
+    code = guide.split("```python\n", 1)[1].split("```", 1)[0]
+    out = session.run_python(code + "\nprint(x.shape, x.value.dtype, graph(example=[3, 5]).token(1).value)")
+    assert out["status"] == "ok" and "Traceback" not in out["output"], out["output"]
+    assert out["saved_entries"] == ["example"] and "'coverage': 0.125" in out["output"] and "(8,) float64 5" in out["output"]
+    # what the guide says of the costs, on that example: W[:, a] reads a column (8), times 2.0 (8), plus a column (8 + 8)
+    from level1 import lang
+    from level1.networks import load_model
+    w = load_model("models/lin-a").load_weights("lin-a-s0")
+    g = lang.Graph(w, 2)
+    a, b = g.token(0), g.token(1)
+    x = g.weight("embed")[:, a] * 2.0 + g.weight("embed")[:, b]
+    _, _, _, c_pred = lang.Evaluator(g.entry(predict=x.argmax()), w, 2).run((1, 2))
+    assert c_pred == 8 + 8 + 8 + 8 + 7
+
+
 def test_mistakes_in_the_code_come_back_as_text(session):
     out = session.run_python("print('before')\nprint(1 / 0)")
     assert out["status"] == "ok" and "before" in out["output"] and "ZeroDivisionError" in out["output"]

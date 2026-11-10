@@ -84,8 +84,9 @@ class Verifier:
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
         except Exception as exc:  # not an entry the interpreter could even fail on properly: refused, and marked
-            receipt["reason"] = f"the verifier could not read or run this entry ({type(exc).__name__}: {str(exc)[:300]})"
-            receipt["verifier_error"] = True
+            # The reason goes back to the agent, so it names the kind of failure only; the detail stays in the receipt.
+            receipt["reason"] = f"the verifier could not read or run this entry ({type(exc).__name__})"
+            receipt["verifier_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
         if how["mode"] == "sample" and parts["n_in_region"]:

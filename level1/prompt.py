@@ -102,7 +102,8 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
         "INPUTS_NOTE": inputs_note, "REWARD_FORMULA": rewards.formula(cfg["reward"]), "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
         "PYTHON_CALLS": cfg["session"]["python_calls"], "PYTHON_SECONDS": cfg["python"]["time_limit_s"],
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
-        "MAX_CONST": cfg["entry"]["max_const_scalars"], "HISTORY": history(rounds),
+        "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
+        "HISTORY": history(rounds),
     }
     text = template
     for k, v in fields.items():

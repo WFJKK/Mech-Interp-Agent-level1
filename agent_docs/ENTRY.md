@@ -25,8 +25,9 @@ print(measure(entry))            # coverage, fidelity, the costs and the reward,
 ```
 
 Every expression is also computed on an example input (all tokens 0) while you build, so `x.shape`
-and `x.value` exist and a wrong shape fails at the line that makes it. `lv1.Graph.load(entry, weights,
-n_ctx)` opens a saved entry again and returns `(graph, predict, rule)`.
+and `x.value` exist and a wrong shape fails at the line that makes it. `graph(example=[3, 5])`
+builds on another example input. `lv1.Graph.load(entry, weights, n_ctx)` opens a saved entry again
+and returns `(graph, predict, rule)`.
 
 Values are whole numbers, floats or booleans (64 bits). There are no loops and no Python `if` on
 expressions: use `lv1.where(c, x, y)` (both sides are computed) or `lv1.cond(c, x, y)` (c is one
@@ -68,8 +69,9 @@ Reading costs 1 per number read: `T[a, b]` reads one number, `T[:, a]` a whole c
 
 ### Limits
 
-The run limits an entry's size: the numbers are under "Tools, budgets and limits" in your message. A
-constant counts every number it holds. Indices out of range, shapes that
-do not fit, a rule that is not one boolean or a prediction that is not one whole number make the
-verifier refuse the entry and say why. A prediction that is not one of the network's outputs counts
-as a wrong answer.
+The run limits an entry's size and the time the verifier gives it: the numbers are under "Tools,
+budgets and limits" in your message. A constant counts every number it holds, and no single value
+may hold more than 4,000,000 numbers. The verifier refuses an entry, and says why, when on any
+input an index is out of range, shapes do not fit, the rule is not one boolean, the prediction is
+not one whole number, or a float that is not finite is cast to a whole number. A prediction that
+is not one of the network's outputs counts as a wrong answer.
