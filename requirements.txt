@@ -1,4 +1,6 @@
-# Versions the pipeline was built and tested with (Python 3.13). No torch: networks are run in numpy.
+# Versions the pipeline was built with (Python 3.13), the same pins as the proof pipeline's. No torch:
+# networks are run in numpy. The tests also pass on Python 3.10 with numpy 1.26 and on 3.11 with numpy 2.2,
+# so on an older Python any numpy from 1.26 on will do.
 numpy==2.5.3
 pyyaml==6.0.3
 psutil==7.2.2

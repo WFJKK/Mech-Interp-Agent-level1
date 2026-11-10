@@ -4,7 +4,7 @@
 runs_dir: ~/mech-interp-level1-runs   # run folders live outside the repository
 run_id: null                          # a run config sets it; the run folder is <runs_dir>/<run_id>
 
-# who answers a round (docs/DESIGN.md, Backends)
+# who answers a round (docs/DESIGN.md, section 6)
 backend: claude_code                  # claude_code: the Claude Code CLI under your own login; fake: scripted
 agent_model: claude-fable-5-1
 effort: high                          # low, medium, high, xhigh, max; null leaves it to the CLI
@@ -48,7 +48,8 @@ entry:
   max_nodes: 400
   max_const_scalars: 256              # numbers written into the entry; a table of a network's outputs does not fit
 
-# the reward (level1/rewards.py); the parts are kept, so a run can be scored again under another one
+# the reward (level1/rewards.py); the parts are kept, so a run can be scored again under another one.
+# A config that names another reward replaces this block whole; one that keeps the name changes parameters.
 reward:
   name: r_alpha
   alpha: 10                           # one wrong answer is priced at this many forward passes

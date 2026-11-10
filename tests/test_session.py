@@ -32,6 +32,11 @@ def test_run_python_sees_the_network_and_saves_entries(session):
     assert read_json(session.entries_dir / "diagonal.json")["format"] == "level1-entry-v1"
     again = session.run_python("print(sorted(entries), entries['diagonal']['predict'])")
     assert "['diagonal'] 0" in again["output"]
+    # every program and what went back to the agent are kept in full, whatever the log line shortens
+    long = "x = 0\n" + "x += 1\n" * 3000 + "print(x)"
+    session.run_python(long)
+    assert (session.path / "python" / "001.py").read_text() == SAVE and (session.path / "python" / "003.py").read_text() == long
+    assert (session.path / "python" / "003.txt").read_text() == "3000\n" and (session.path / "python" / "002.txt").read_text() == again["output"]
 
 
 def test_mistakes_in_the_code_come_back_as_text(session):

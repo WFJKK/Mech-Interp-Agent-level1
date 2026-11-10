@@ -126,5 +126,15 @@ def test_reward_functions():
     assert honest["reward"] == pytest.approx(out["reward"])
     assert modest["reward"] < honest["reward"] and bold["reward"] < honest["reward"]  # claiming the truth is best
     assert bold["fidelity_used"] == pytest.approx(0.95 - 2 * 0.05)
-    with pytest.raises(ValueError):
+    with pytest.raises(ValueError, match="no reward named"):
         rewards.compute(parts, {"name": "nothing"})
+    with pytest.raises(ValueError, match="does not take \\['alhpa'\\]"):  # a typo is not ignored in silence
+        rewards.compute(parts, {"name": "r_alpha", "alhpa": 1})
+    assert rewards.parameters("r_alpha") == {"alpha": 10.0, "lower_bound": True}
+    assert rewards.parameters("r_alpha_claimed") == {"alpha": 10.0, "penalty": 2.0}
+    assert "alpha = 3" in rewards.formula({"name": "r_alpha", "alpha": 3}) and "at 3 forward passes" in rewards.explanation({"name": "r_alpha", "alpha": 3})
+    assert "measured - 2 * (claimed - measured)" in rewards.formula({"name": "r_alpha_claimed"})
+    for name in rewards.REWARDS:  # every reward has its two texts for the prompt, and gives the network itself 0
+        assert rewards.formula({"name": name}) and rewards.explanation({"name": name})
+        itself = {"coverage": 1.0, "fidelity": 1.0, "fidelity_low": 1.0, "r": 1.0, "r_rule": 0.0, "b": 0.0}
+        assert rewards.compute(itself, {"name": name}, claimed=1.0)["reward"] == 0.0

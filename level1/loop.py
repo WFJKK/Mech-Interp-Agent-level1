@@ -4,6 +4,7 @@
     python -m level1.loop resume --run <run folder>
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop rescore --run <run folder> --name r_alpha --alpha 1    the records under another reward
+                                  (--param KEY=VALUE for any other parameter of a reward)
 
 A run folder (outside the repository, <runs_dir>/<run_id>):
 
@@ -177,7 +178,13 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
     report = probe(sb, model, cfg["network"], path / "probe")
+    try:
+        (path / "probe").rmdir()  # the probe's target folder; it leaves nothing in it
+    except OSError:
+        pass
     check_probe(sb, report)
+    for w in rewards.warnings(cfg["reward"]):
+        log(f"WARNING: the reward: {w}")
     if not sb.hardened:
         log("WARNING: the sandbox is in process mode: the agent's code can read whatever you can, the withheld "
             "folder and the second network's weights included. A run that counts needs container or landlock mode.")
@@ -332,9 +339,10 @@ def main(argv=None) -> int:
     f.add_argument("--run", required=True)
     c = sub.add_parser("rescore")
     c.add_argument("--run", required=True)
-    c.add_argument("--name", default="r_alpha")
-    c.add_argument("--alpha", type=float, default=10.0)
+    c.add_argument("--name", default="r_alpha", help="a reward of level1/rewards.py")
+    c.add_argument("--alpha", type=float)
     c.add_argument("--penalty", type=float)
+    c.add_argument("--param", action="append", default=[], metavar="KEY=VALUE", help="any other parameter of the reward")
     args = ap.parse_args(argv)
     if args.cmd == "run":
         over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox)) if v}
@@ -348,10 +356,7 @@ def main(argv=None) -> int:
     if args.cmd == "finish":
         finish(Path(args.run))
         return 0
-    reward_cfg = {"name": args.name, "alpha": args.alpha}
-    if args.penalty is not None:
-        reward_cfg["penalty"] = args.penalty
-    rescore(Path(args.run), reward_cfg)
+    rescore(Path(args.run), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty))
     return 0
 
 

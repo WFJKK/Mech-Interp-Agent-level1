@@ -83,6 +83,47 @@ def test_inputs_known_to_be_wrong_never_pay(model, nets):
         assert rewards.compute(padded, cfg)["reward"] < rewards.compute(base, cfg)["reward"]
 
 
+def test_a_low_alpha_is_called_out(model, nets):
+    """With alpha at 1 or below, a free guess scores above 0 and padding stops costing: the reward says so."""
+    w = nets["lin-a-s0"][0]
+    g = Graph(w, 2)
+    guess = g.entry(predict=g.const(63))  # a constant, right on 127 inputs of 4,096, at no cost
+    low = Verifier(model, "lin-a-s0", {"reward": {"name": "r_alpha", "alpha": 1}}).score(guess)
+    high = Verifier(model, "lin-a-s0", CFG).score(guess)
+    assert low["reward"] == pytest.approx(127 / 4096) and high["reward"] < -8
+    assert rewards.warnings({"name": "r_alpha", "alpha": 1}) and rewards.warnings({"name": "r_alpha", "alpha": 0.5})
+    assert not rewards.warnings({"name": "r_alpha", "alpha": 10}) and not rewards.warnings({"name": "r_alpha_claimed"})
+    assert rewards.warnings({"name": "r_alpha", "lower_bound": False}) and rewards.warnings({"name": "r_alpha_claimed", "penalty": 0})
+
+
+def test_luck_in_a_sample_does_not_pay(model, nets):
+    """On a data set too big to enumerate, every scoring draws its own sample, and the reward uses the
+    fidelity's lower bound: an entry cannot be fitted to the inputs it will be scored on, and a sample
+    that happens to miss its mistakes is not paid as if it had none."""
+    w = nets["lin-a-s0"][0]
+    v = Verifier(model, "lin-a-s0", {**CFG, "verifier": {"enumerate_up_to": 100, "sample_size": 300}})
+    target = model.reference_entries(w)["target"]
+    first, second = v.score(target), v.score(target)
+    assert first["inputs"]["mode"] == "sample" and first["inputs"]["seed"] != second["inputs"]["seed"]
+    for receipt in (first, second):
+        p = receipt["parts"]
+        assert p["fidelity_low"] < p["fidelity"] and receipt["reward_detail"]["fidelity_used"] == p["fidelity_low"]
+        assert receipt["reward"] < 1 - 1 / 655 - 10 * (1 - p["fidelity"]) + 1e-12
+
+
+def test_a_claim_is_never_worth_more_than_the_measurement(model, nets):
+    """The default reward does not read the claim at all; the variant that does pays an overclaim back twice."""
+    w = nets["lin-a-s0"][0]
+    target = model.reference_entries(w)["target"]
+    plain = Verifier(model, "lin-a-s0", CFG)
+    assert plain.score(target, claimed=1.0)["reward"] == plain.score(target, claimed=0.5)["reward"]
+    assert plain.score(target, claimed=1.0)["overclaim"] == pytest.approx(1 / 4096)  # recorded all the same
+    claimed = Verifier(model, "lin-a-s0", {"reward": {"name": "r_alpha_claimed", "alpha": 10.0, "penalty": 2.0}})
+    honest = claimed.score(target, claimed=4095 / 4096)["reward"]
+    assert claimed.score(target, claimed=1.0)["reward"] < honest and claimed.score(target, claimed=0.99)["reward"] < honest
+    assert honest == pytest.approx(plain.score(target)["reward"])
+
+
 def test_the_region_cannot_be_weighted(model, nets):
     """An entry names a subset, never a distribution: every input of the data set counts once, and the
     coverage is the verifier's count."""

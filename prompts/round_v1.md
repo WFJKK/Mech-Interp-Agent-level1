@@ -37,9 +37,10 @@ The reward is
 
     {{REWARD_FORMULA}}
 
-The first part is the share of the work saved if the entry is used on its region and the network
-elsewhere. The second part prices a wrong answer at {{ALPHA}} forward passes. The network itself, as
-an entry, scores exactly 0; an entry that is right everywhere at no cost would score 1.
+{{REWARD_EXPLANATION}}
+
+The network itself, as an entry, scores exactly 0; an entry that is right everywhere at no cost would
+score 1.
 
 When the rounds are over, the entry with the highest reward is locked and run, unchanged, on a
 second network: the same definition, sizes and training, with another random seed. You never see

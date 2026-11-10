@@ -5,6 +5,7 @@ A session lives in a round's folder:
     round_k/session/
         session.json          what the tools need (model, network, limits, reward) and what was used so far
         tools.jsonl           every tool call, appended as it happens: tool, arguments, outcome, seconds
+        python/<n>.py, .txt   every program run_python was given, in full, and what went back to the agent
         workspace/entries/    the entries saved from run_python (and the ones carried from earlier rounds)
         submissions/<n>/      one folder per submit_entry call: entry.json, receipt.json
 
@@ -29,7 +30,7 @@ from pathlib import Path
 
 from . import lang
 from .networks import load_model
-from .util import append_jsonl, now, read_json, write_json
+from .util import append_jsonl, atomic_write, now, read_json, write_json
 
 MAX_TEXT = 20000  # characters of program output returned to the agent
 MAX_SOURCE = 200_000  # characters of one program
@@ -252,6 +253,8 @@ class Session:
             if not isinstance(code, str) or len(code) > MAX_SOURCE:
                 raise ToolError("code must be a string of at most 200,000 characters")
             self._spend("run_python")
+            n = self.state["used"]["run_python"]
+            atomic_write(self.path / "python" / f"{n:03d}.py", code)  # in full: the log line below is cut short
             from .runner import Limits, run_recipe
             from .sandbox import choose, protected_paths
 
@@ -282,6 +285,7 @@ class Session:
                    "sandbox": ex.mode, "remaining": self.remaining()}
             if problems:
                 out["problems"] = problems
+            atomic_write(self.path / "python" / f"{n:03d}.txt", out["output"])
             self._log("run_python", args, {"status": ex.status, "output": output[:500], "saved": sorted(saved), "sandbox": ex.mode}, time.monotonic() - t0)
             return out
         except ToolError as exc:

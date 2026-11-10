@@ -99,7 +99,7 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
     fields = {
         "ROUND": round_no, "ROUNDS_MAX": cfg["rounds_max"], "MODEL_SOURCE": model.source().strip(), "SIZES": sizes,
         "N_TOTAL": f"{model.n_total:,}", "MODEL_OPS": f"{model_ops:,}", "ENTRY_DOC": ENTRY_DOC.read_text().strip(),
-        "INPUTS_NOTE": inputs_note, "REWARD_FORMULA": rewards.formula(cfg["reward"]), "ALPHA": cfg["reward"].get("alpha", 10),
+        "INPUTS_NOTE": inputs_note, "REWARD_FORMULA": rewards.formula(cfg["reward"]), "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
         "PYTHON_CALLS": cfg["session"]["python_calls"], "PYTHON_SECONDS": cfg["python"]["time_limit_s"],
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
         "MAX_CONST": cfg["entry"]["max_const_scalars"], "HISTORY": history(rounds),

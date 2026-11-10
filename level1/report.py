@@ -1,5 +1,10 @@
 """The report of a run: report.json for programs, report.md for people.
 
+    python -m level1.report --model models/lin-a [--name r_alpha] [--alpha 1] [--param KEY=VALUE]
+
+prints the withheld reference entries of a model under a reward, on each of its networks, with no run at all:
+the quick way to see what a change to the reward does to entries that are understood.
+
 Written from the run folder's records alone (the rounds, the lock, the seed check), plus the withheld
 reference entries, which are scored here on both networks so that the agent's reward can be read against
 what is known. Those references are never shown to the agent; this file runs on the verifier's side.
@@ -12,9 +17,11 @@ good in all three and better in one. No reward function enters into that.
 
 from __future__ import annotations
 
+import argparse
+import sys
 from pathlib import Path
 
-from . import lang
+from . import lang, rewards, run_config
 from .networks import load_model
 from .util import atomic_write, read_json, read_jsonl, write_json
 from .verifier import Verifier
@@ -173,3 +180,34 @@ def write(path: Path) -> dict:
     write_json(path / "report.json", rep)
     atomic_write(path / "report.md", markdown(rep))
     return rep
+
+
+def reference_table(model, reward_cfg: dict) -> str:
+    """The withheld reference entries under a reward, on every network of the model, as a table."""
+    rewards.check(reward_cfg)
+    networks = [n["id"] for n in model.config["networks"]]
+    refs = references(model, {"reward": reward_cfg}, networks)
+    out = ["Reward: " + reward_cfg.get("name", "r_alpha") + "".join(f", {k} = {v}" for k, v in reward_cfg.items() if k != "name")]
+    out += [f"Warning: {w}." for w in rewards.warnings(reward_cfg)]
+    out += ["",
+           "| Entry | Network | Reward | Coverage | Fidelity | r | r_rule | b |", "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+    for name, by_net in refs.items():
+        for nid, r in by_net.items():
+            out.append("| " + " | ".join([name, nid] + _parts_row(r)) + " |")
+    return "\n".join(out)
+
+
+def main(argv=None) -> int:
+    ap = argparse.ArgumentParser(description="The withheld reference entries of a model under a reward, on each of its networks.")
+    ap.add_argument("--model", required=True, help="a model folder, for example models/lin-a")
+    ap.add_argument("--name", default="r_alpha", help="a reward of level1/rewards.py")
+    ap.add_argument("--alpha", type=float)
+    ap.add_argument("--penalty", type=float)
+    ap.add_argument("--param", action="append", default=[], metavar="KEY=VALUE", help="any other parameter of the reward")
+    args = ap.parse_args(argv)
+    print(reference_table(load_model(args.model), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty)))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

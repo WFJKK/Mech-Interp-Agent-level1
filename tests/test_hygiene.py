@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from level1 import hygiene, loop, prompt, run_config
+from level1 import hygiene, loop, prompt, rewards, run_config
 from level1.session import surface
 
 REPO = Path(__file__).parent.parent
@@ -23,6 +23,9 @@ def test_the_surface_and_the_prompt_are_clean(model, cfg):
             "tool run_python", "tool submit_entry", "sandbox info"} <= set(texts)
     texts["prompt"] = prompt.build(cfg, model, 1, [], 655, True)
     texts["prompt on a sampled data set"] = prompt.build(cfg, model, 1, [], 655, False)
+    for name in rewards.REWARDS:  # every reward's own words reach the agent through the prompt
+        texts[f"prompt under {name}"] = prompt.build({**cfg, "reward": {"name": name}}, model, 1, [], 655, True)
+        assert rewards.formula({"name": name}) in texts[f"prompt under {name}"]
     # the history's own words (the table and the lines around it), with a made-up round in the agent's place
     made_up = [{"round": 1, "notes": "", "submissions": [
         {"status": "scored", "carried_as": "r1s1", "name": "e", "reward": 0.5, "parts": {"coverage": 1, "fidelity": 1, "r": 0, "r_rule": 0, "b": 0},
@@ -59,6 +62,24 @@ def test_nothing_names_the_networks_or_the_pipeline_to_the_agent(model, cfg):
     text = prompt.build(cfg, model, 1, [], 655, True) + "\n".join(surface(model, cfg["verifier"]).values())
     for word in ("lin-a", "withheld", "seed_check", "Compact", "level1/", "github"):
         assert word not in text, word
+
+
+def test_the_task_is_said_in_one_place(model, cfg):
+    """Outside the withheld folder and the tests, no file of the repository says what the pilot's network was
+    trained to do: not the docs, not a comment, not a config."""
+    general = {s.lower() for s in cfg["hygiene"]}
+    task_words = [s for s in model.hygiene() if s.lower() not in general]
+    assert len(task_words) >= 5
+    skip = {".git", "__pycache__", ".pytest_cache", "withheld", "tests", ".venv", "venv"}
+    texts = {}
+    for p in REPO.rglob("*"):
+        if p.is_file() and not (set(p.relative_to(REPO).parts) & skip) and p.suffix != ".npz":
+            try:
+                texts[str(p.relative_to(REPO))] = p.read_text()
+            except UnicodeDecodeError:
+                pass
+    assert len(texts) > 30 and "README.md" in texts and "docs/REWARD.md" in texts
+    assert hygiene.hits(texts, task_words) == []
 
 
 def test_the_agent_facing_files_are_the_ones_checked(model, cfg):

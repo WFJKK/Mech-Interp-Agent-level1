@@ -146,6 +146,14 @@ def test_a_run_with_nothing_scored_locks_nothing(tmp_path):
 def test_config_errors(tmp_path):
     with pytest.raises(run_config.ConfigError, match="unknown keys"):
         config(tmp_path, alpha=3)
+    with pytest.raises(run_config.ConfigError, match="does not take"):
+        config(tmp_path, reward={"name": "r_alpha", "alpha": 3, "floor": 0.9})
+    assert config(tmp_path, reward={"alpha": 3})["reward"] == {"name": "r_alpha", "alpha": 3}  # same reward: parameters merge
+    assert config(tmp_path, reward={"name": "r_alpha_claimed", "penalty": 4})["reward"] == {"name": "r_alpha_claimed", "penalty": 4}
+    assert run_config.reward_from_args("r_alpha", ["alpha=2", "lower_bound=false"]) == {"name": "r_alpha", "alpha": 2.0, "lower_bound": False}
+    assert run_config.reward_from_args("r_alpha_claimed", [], 5, 3) == {"name": "r_alpha_claimed", "alpha": 5.0, "penalty": 3.0}
+    with pytest.raises(run_config.ConfigError, match="KEY=VALUE"):
+        run_config.reward_from_args("r_alpha", ["alpha"])
     cfg = config(tmp_path, run_id="same", seed_check={"network": "lin-a-s0"})
     with pytest.raises(RuntimeError, match="another network"):
         loop.start(cfg, fake_scripts=FAKE)
