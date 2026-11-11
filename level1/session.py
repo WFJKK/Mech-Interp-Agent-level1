@@ -42,8 +42,15 @@ class ToolError(ValueError):
 
 
 WRAPPER = '''"""run_python: the agent's code, with the network and the entry language in scope."""
-import contextlib, io, traceback
+import contextlib, io, traceback, warnings
 import numpy as np
+
+# On some machines numpy's matrix product raises floating-point flags when nothing went wrong, and prints
+# "divide by zero / overflow / invalid value encountered in matmul" though the result is exact. Elsewhere
+# the same code prints nothing. Those three messages are not shown, so the output is the same on every machine;
+# a real overflow still shows in the values (inf, nan).
+warnings.filterwarnings("ignore", message=r"(divide by zero|overflow|invalid value) encountered in matmul",
+                        category=RuntimeWarning)
 
 import lv1
 import model

@@ -39,6 +39,21 @@ def test_run_python_sees_the_network_and_saves_entries(session):
     assert (session.path / "python" / "003.txt").read_text() == "3000\n" and (session.path / "python" / "002.txt").read_text() == again["output"]
 
 
+def test_the_output_is_the_same_on_every_machine(session):
+    """numpy's matrix product on some Macs warns of a division by zero in every matmul with nothing wrong
+    (the smoke run of 11 November 2026 showed it in each of the agent's programs). Those warnings are not
+    passed on; any other warning is."""
+    code = ("import warnings\n"
+            "for what in ('divide by zero', 'overflow', 'invalid value'):\n"
+            "    warnings.warn(what + ' encountered in matmul', RuntimeWarning)\n"
+            "print('values', (weights['unembed'] @ weights['hidden']).shape)\n"
+            "np.array([1.0]) / np.array([0.0])\n")
+    out = session.run_python(code)
+    assert out["status"] == "ok" and "values (64, 8)" in out["output"]
+    assert "encountered in matmul" not in out["output"]
+    assert "divide by zero encountered in divide" in out["output"]       # a real one still shows
+
+
 def test_the_guide_s_example_runs_as_written(session):
     """The code the agent is shown in agent_docs/ENTRY.md, pasted into run_python unchanged."""
     guide = (Path(__file__).parent.parent / "agent_docs" / "ENTRY.md").read_text()

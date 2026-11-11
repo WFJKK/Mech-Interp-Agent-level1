@@ -13,7 +13,8 @@ CFG = {"reward": {"name": "r_alpha", "alpha": 10.0}}
 def test_the_network_as_an_entry_is_the_network(model, nets):
     for nid, (w, ref, x, answers, ops) in nets.items():
         e, h, u = (w[k].astype(np.float64) for k in ("embed", "hidden", "unembed"))
-        direct = (u @ (h @ (e[:, x[:, 0]] + e[:, x[:, 1]]))).argmax(axis=0)
+        with np.errstate(all="ignore"):  # some Macs flag a matmul with nothing wrong; the comparison below is the check
+            direct = (u @ (h @ (e[:, x[:, 0]] + e[:, x[:, 1]]))).argmax(axis=0)
         assert (answers == direct).all()
         assert ops == 655  # two columns of 8, 8 * 8, 64 * 8, 63 comparisons: the proof pipeline's forward pass
     assert model.n_total == 4096

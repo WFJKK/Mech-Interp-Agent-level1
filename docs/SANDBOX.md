@@ -73,6 +73,11 @@ and limits from the run config (`python`): 300 s, 4 GB, 2 threads, a result of a
 result comes back as one JSON file that is parsed as data: nothing the sandbox writes is executed or
 unpickled, and an entry it hands back is checked again on the outside before it is saved.
 
+On some Macs numpy's matrix product warns of a division by zero, an overflow and an invalid value
+in every matmul, with nothing wrong; on Linux the same code prints nothing. The wrapper does not
+pass those three messages on, so the agent sees the same output on every machine. Any other warning
+still reaches it.
+
 All of these files are searched by the hygiene check, since the agent can read them.
 
 Landlock mode refuses to start if a folder the code may read (the Python installation, for
