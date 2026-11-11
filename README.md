@@ -103,8 +103,11 @@ If it stops (a usage limit, a dropped connection, a closed laptop), continue wit
 
 The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`.
 
-Add `--sandbox hardened` to a run that is meant to count: it then refuses to start unless the
-agent's code can be kept away from the withheld folder (`docs/SANDBOX.md`).
+In every mode a guard inside Python refuses the agent's code files outside its folder, the network
+and other programs, and records every attempt; the report lists them. The guard shares a process
+with the code it watches, so for a run that is meant to count add `--sandbox hardened` (Docker or
+Linux) or, on a Mac, `--sandbox seatbelt`, which still needs its first test on a Mac:
+`python -m level1.sandbox probe --model models/lin-a --mode seatbelt` (`docs/SANDBOX.md`).
 
 Other commands:
 
@@ -125,13 +128,14 @@ Everything is written as it happens, so a run can stop and resume, and can be re
 
 - every prompt (`round_k/prompt.md`) and the agent's answer (`response.md`);
 - every tool call with its result (`session/tools.jsonl`);
-- every program the agent ran, in full, with what it printed (`session/python/NNN.py`, `.txt`);
+- every program the agent ran, in full, with what it printed (`session/python/NNN.py`, `.txt`),
+  and what the guard refused it (`NNN.audit.json`);
 - everything the CLI emitted, the agent's text between its tool calls included
   (`round_k/stream_NN.jsonl`);
 - every submission's receipt, with the parts measured.
 
-The report counts the programs and the sandbox time per round, and lists the programs that reach
-for files or the system, so that what a run in a weak sandbox read can be checked.
+The report counts the programs and the sandbox time per round, lists every attempt the guard
+refused, and lists the programs whose text reaches for files or the system.
 
 ## The rule the pipeline is built around
 

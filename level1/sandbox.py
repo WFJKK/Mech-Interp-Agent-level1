@@ -1,6 +1,6 @@
 """Where the agent's Python runs, and how well it is kept in.
 
-Three modes, strongest first:
+Four modes, strongest first:
 
     container  docker or podman: no network, a read-only root filesystem, only
                the sandbox folder mounted (its out/ writable), running as nobody
@@ -12,18 +12,28 @@ Three modes, strongest first:
                installation, system libraries, the process's own /proc entry and
                the sandbox folder, writing only the sandbox's out/ and tmp/, and
                no ptrace or signals outside the sandbox. Needs no root.
+    seatbelt   macOS without a container: the harness runs under sandbox-exec
+               with a profile that refuses reading the home folder (except
+               Python's own folders), reading the repository, the model folder
+               and the runs folder, writing anywhere but the sandbox's out/ and
+               tmp/, the network, other processes and signals. Opt-in for now
+               (--sandbox seatbelt): it is used only when asked for, until it has
+               passed the probe on a Mac.
     process    a plain separate process: python -I -B, an empty environment, a
-               fresh folder and resource limits. Weak: the code runs as you and
-               can read whatever you can, the withheld folder and the second
-               network's weights included. On a Mac without Docker this is the
-               only mode, and the rule that the agent is not told what the model
-               does then rests on instruction, not on enforcement.
+               fresh folder and resource limits. The operating system does not
+               keep the code in: it runs as you.
 
-`auto` takes the strongest mode that works here, falling back to process;
-`hardened` does the same but never falls back: with neither container nor
-landlock available it refuses to start. Every run starts with probe(), which
-tries real escapes in the chosen mode; a hardened mode that lets anything
-critical out is refused.
+In every mode the harness also installs a guard inside Python (harness.py): an
+audit hook that refuses file access outside Python and the sandbox folder,
+sockets, other processes, signals and native code, and records each refusal. In
+process mode it is the only fence; it shares its process with the code it
+watches, so it is a fence and a record, not a wall.
+
+`auto` takes the strongest of container, landlock and process that works here;
+`hardened` never falls back to process: with neither container nor landlock
+available (nor seatbelt, when asked for by name) it refuses to start. Every run
+starts with probe(), which tries real escapes in the chosen mode; a hardened mode
+that lets anything critical out is refused.
 
     python -m level1.sandbox info                  which modes work here
     python -m level1.sandbox build [--runtime R]   build the container image
@@ -54,7 +64,7 @@ from pathlib import Path
 
 from .util import REPO_ROOT
 
-MODES = ("container", "landlock", "process")
+MODES = ("container", "landlock", "seatbelt", "process")
 DEFAULT_IMAGE = "mech-interp-level1-sandbox:1"
 DOCKERFILE_DIR = REPO_ROOT / "sandbox"
 NOBODY = "65534:65534"
@@ -65,6 +75,8 @@ SYSTEM_READ = ("/usr", "/lib", "/lib32", "/lib64", "/libx32", "/bin", "/sbin", "
 DEVICE_READ = ("/dev/urandom", "/dev/random", "/dev/zero")
 DEVICE_READ_WRITE = ("/dev/null",)
 PROC_READ = ("/proc/cpuinfo", "/proc/meminfo", "/proc/stat")
+MAC_SYSTEM_READ = ("/System", "/usr", "/bin", "/sbin", "/private/etc", "/etc")
+SEATBELT = "/usr/bin/sandbox-exec"
 SECCOMP_ARCHES = ("x86_64", "aarch64", "arm64")
 
 
@@ -106,6 +118,10 @@ def landlock_abi() -> int:
 
 def landlock_available() -> bool:
     return landlock_abi() >= 1 and platform.machine() in SECCOMP_ARCHES
+
+
+def seatbelt_available() -> bool:
+    return sys.platform == "darwin" and os.path.exists(SEATBELT)
 
 
 # Docker Desktop can take a while to answer after its resource saver paused it.
@@ -168,6 +184,11 @@ def choose(cfg: dict, protected: tuple = ()) -> Sandbox:
         if want == "container":
             why = "no docker or podman is running" if not rt else f"the image {image} is missing"
             raise SandboxError(f"container mode needs a container runtime and its image: {why}. Build it with python -m level1.sandbox build")
+    if want == "seatbelt":
+        if not seatbelt_available():
+            raise SandboxError("seatbelt mode needs macOS with sandbox-exec")
+        seatbelt_profile(Path(tempfile.gettempdir()) / "box", protected)  # refuses if the profile would expose a protected path
+        return Sandbox("seatbelt", protected=protected)
     if want in ("auto", "hardened", "landlock"):
         if landlock_available():
             sb = Sandbox("landlock", protected=protected)
@@ -202,20 +223,86 @@ def python_paths() -> list[str]:
     return sorted(out)
 
 
-def landlock_policy(box: Path, protected: tuple = ()) -> dict:
-    """What a recipe may touch in landlock mode. Refuses if a readable path would contain a protected one."""
-    read = python_paths() + [p for p in SYSTEM_READ + DEVICE_READ + PROC_READ if os.path.exists(p)] + [str(box)]
+def _refuse_overlap(read: list, protected: tuple, what: str) -> None:
+    """Refuse if a path the code may read is, or contains, a protected one."""
     for r in read:
         rp = Path(r).resolve()
         for p in protected:
             pp = Path(p)
             if rp == pp or rp in pp.parents:
                 raise SandboxError(
-                    f"landlock mode would let recipes read {r}, which contains {p}; "
+                    f"{what} would let recipes read {r}, which contains {p}; "
                     "move the repository, the runs folder or the Python installation apart, or use container mode"
                 )
+
+
+def system_reads() -> list[str]:
+    paths = MAC_SYSTEM_READ if sys.platform == "darwin" else SYSTEM_READ + PROC_READ
+    return [p for p in paths + DEVICE_READ if os.path.exists(p)]
+
+
+def landlock_policy(box: Path, protected: tuple = ()) -> dict:
+    """What a recipe may touch in landlock mode. Refuses if a readable path would contain a protected one."""
+    read = python_paths() + [p for p in SYSTEM_READ + DEVICE_READ + PROC_READ if os.path.exists(p)] + [str(box)]
+    _refuse_overlap(read, protected, "landlock mode")
     read_write = [str(box / "out"), str(box / "tmp")] + [p for p in DEVICE_READ_WRITE if os.path.exists(p)]
     return {"read": read, "read_write": read_write, "own_proc": True}
+
+
+def guard_policy(box: Path, protected: tuple = ()) -> dict:
+    """What the guard inside Python lets a recipe touch (harness.py): reading Python's folders, system files and
+    the sandbox folder; writing its out/ and tmp/. Refuses if a readable path would contain a protected one."""
+    read = python_paths() + system_reads() + [str(box)]
+    _refuse_overlap(read, protected, "the guard")
+    write = [str(box / "out"), str(box / "tmp")] + [p for p in DEVICE_READ_WRITE if os.path.exists(p)]
+    return {"read": read, "write": write, "own_proc": True}
+
+
+# seatbelt (macOS) ----------------------------------------------------------------------------
+def _sb(path) -> str:
+    return '"' + str(path).replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _both(paths) -> list[str]:
+    """Each path as given and with its links resolved: the profile is matched against real paths."""
+    out = set()
+    for p in paths:
+        out.add(os.path.abspath(str(p)))
+        out.add(os.path.realpath(str(p)))
+    return sorted(out)
+
+
+def seatbelt_profile(box: Path, protected: tuple = (), python: str | None = None) -> str:
+    """The sandbox-exec profile for one recipe. Everything not named stays as macOS allows it (allow default),
+    and the rules after it take that away: in seatbelt profiles a later rule wins over an earlier one. So the
+    order matters: reading the home folder and the protected paths is refused, then Python's own folders and
+    the sandbox folder are allowed again (a virtual environment may sit inside the repository). The guard
+    policy's overlap check refuses a profile in which a readable folder would contain a protected one."""
+    policy = guard_policy(box, protected)
+    python = python or sys.executable
+    home = os.path.realpath(str(Path.home()))
+    readable = _both(python_paths() + [str(box)])
+    rules = [
+        "(version 1)",
+        "(allow default)",
+        "(deny network*)",
+        "(deny process-fork)",
+        "(deny process-exec)",
+        "(allow process-exec " + " ".join(f"(literal {_sb(p)})" for p in _both([python])) + ")",
+        "(deny signal)",
+        "(allow signal (target self))",
+        "(deny file-write*)",
+        "(allow file-write* " + " ".join(f"(subpath {_sb(p)})" for p in _both(policy["write"][:2]))
+        + "".join(f" (literal {_sb(p)})" for p in DEVICE_READ_WRITE) + ")",
+        "(deny file-read* " + " ".join(f"(subpath {_sb(p)})" for p in _both([home, *protected])) + ")",
+        "(allow file-read* " + " ".join(f"(subpath {_sb(p)})" for p in readable) + ")",
+        "(allow file-read-metadata)",  # finding one's way along a path; no contents, no listings
+    ]
+    return "\n".join(rules) + "\n"
+
+
+def seatbelt_command(box: Path, protected: tuple, argv: list) -> list:
+    return [SEATBELT, "-p", seatbelt_profile(box, protected, argv[0])] + list(argv)
 
 
 # containers ------------------------------------------------------------------------------
@@ -295,9 +382,10 @@ def build_image(runtime: str | None = None, image: str = DEFAULT_IMAGE, log=prin
 
 
 # the probe ------------------------------------------------------------------------------
+VIA = ("numpy", "hardlink", "symlink", "subprocess", "ctypes")  # other ways to the withheld file than open()
 CRITICAL = ("read_trusted_code", "read_other_weights", "read_withheld", "read_run_folder", "write_trusted_folder",
             "write_model_folder", "write_run_folder", "write_outside", "network_tcp", "network_udp",
-            "read_driver_environment", "import_verifier")
+            "read_driver_environment", "import_verifier") + tuple(f"read_withheld_{v}" for v in VIA)
 MINOR = ("signal_driver",)
 
 PROBE_RECIPE = '''
@@ -316,6 +404,44 @@ def attempt(fn):
 def read(path):
     with open(path, "rb") as f:
         return f.read(32).hex()
+
+
+def read_numpy(path):
+    import numpy as np
+
+    return bytes(np.fromfile(path, dtype=np.uint8)[:32]).hex()
+
+
+def read_hardlink(path):
+    os.link(path, os.path.join("tmp", "probe-hardlink"))
+    return read(os.path.join("tmp", "probe-hardlink"))
+
+
+def read_symlink(path):
+    os.symlink(path, os.path.join("tmp", "probe-symlink"))
+    return read(os.path.join("tmp", "probe-symlink"))
+
+
+def read_subprocess(path):
+    import subprocess
+
+    return subprocess.run(["cat", path], capture_output=True, timeout=10).stdout[:32].hex()
+
+
+def read_ctypes(path):
+    import ctypes
+
+    libc = ctypes.CDLL(None, use_errno=True)
+    fd = libc.open(path.encode(), 0)
+    if fd < 0:
+        raise OSError(ctypes.get_errno(), "open")
+    buf = ctypes.create_string_buffer(32)
+    n = libc.read(fd, buf, 32)
+    return buf.raw[:max(n, 0)].hex()
+
+
+VIA = {{"numpy": read_numpy, "hardlink": read_hardlink, "symlink": read_symlink, "subprocess": read_subprocess,
+       "ctypes": read_ctypes}}
 
 
 def write(folder):
@@ -355,6 +481,8 @@ def make_result(weights, info, extra):
     r = {{}}
     for name, path in TARGETS["reads"].items():
         r[name] = attempt(lambda: read(path))
+    for via, fn in VIA.items():
+        r["read_withheld_" + via] = attempt(lambda: fn(TARGETS["reads"]["read_withheld"]))
     for name, folder in TARGETS["writes"].items():
         r[name] = attempt(lambda: write(folder))
     r["network_tcp"] = attempt(tcp)
@@ -414,13 +542,17 @@ def _head(path: Path) -> str | None:
         return None
 
 
-def probe(sb: Sandbox, model, network_id: str, run_path: Path, limits=None) -> dict:
+def probe(sb: Sandbox, model, network_id: str, run_path: Path, limits=None, guard: bool = False) -> dict:
     """Try every escape in the probe recipe inside sandbox sb, and report what got out.
 
     Escapes are judged by evidence on this side only: bytes read that match the
     real file, marker files that appear, tokens that reach a local listener, a
     successful import of the verifier or a signal to this process. run_path is a
     folder the code must not reach (normally the run's folder).
+
+    guard=False (the default) tests the system's sandbox alone: the guard inside
+    Python would otherwise stop most attempts before they reach it. guard=True
+    tests the guard, as the agent's code meets it.
     """
     from .runner import Limits, run_recipe
 
@@ -468,6 +600,7 @@ def probe(sb: Sandbox, model, network_id: str, run_path: Path, limits=None) -> d
             None,
             limits or Limits(time_s=120, memory_mb=2048, max_result_bytes=1 << 20),
             sandbox=sb,
+            guard=guard,
         )
     finally:
         time.sleep(0.3)  # let the listener see late packets
@@ -483,6 +616,7 @@ def probe(sb: Sandbox, model, network_id: str, run_path: Path, limits=None) -> d
         raise SandboxError(f"the sandbox probe did not run in {sb.mode} mode: {ex.status}: {ex.error}")
     seen = ex.result["probe"]
     escaped = {k for k in reads if truth[k] is not None and seen.get(k) == truth[k]}
+    escaped |= {f"read_withheld_{v}" for v in VIA if truth["read_withheld"] is not None and seen.get(f"read_withheld_{v}") == truth["read_withheld"]}
     escaped |= set(landed)
     escaped |= {k for k, got in listener.got.items() if got}
     if str(seen.get("import_verifier", "")).startswith("imported"):
@@ -491,6 +625,7 @@ def probe(sb: Sandbox, model, network_id: str, run_path: Path, limits=None) -> d
         escaped.add("signal_driver")
     return {
         "mode": sb.mode,
+        "guard": guard,
         "critical_escapes": sorted(escaped & set(CRITICAL)),
         "minor_escapes": sorted(escaped & set(MINOR)),
         "attempts": {k: ("escaped" if k in escaped else ("blocked" if not str(v).startswith("blocked") else v)) for k, v in seen.items()},
@@ -498,6 +633,8 @@ def probe(sb: Sandbox, model, network_id: str, run_path: Path, limits=None) -> d
 
 
 def check_probe(sb: Sandbox, report: dict) -> None:
+    if report.get("guard") and report["critical_escapes"]:
+        raise SandboxError(f"the guard inside Python is not keeping the agent's code in here: {', '.join(report['critical_escapes'])}")
     if sb.hardened and report["critical_escapes"]:
         raise SandboxError(f"{sb.mode} mode is not keeping the agent's code in here: {', '.join(report['critical_escapes'])}")
 
@@ -519,7 +656,8 @@ def main(argv=None):
         rt = container_runtime()
         print(f"container: runtime {rt or 'none'}; image {DEFAULT_IMAGE} {'present' if rt and image_id(rt, DEFAULT_IMAGE) else 'missing'}")
         print(f"landlock: {'available' if landlock_available() else 'not available'} (ABI {landlock_abi()}, {platform.machine()})")
-        print("process: always available (weak)")
+        print(f"seatbelt: {'available, used only when asked for (--sandbox seatbelt); try it with probe --mode seatbelt' if seatbelt_available() else 'not available (macOS only)'}")
+        print("process: always available (weak: a guard inside Python, no wall)")
         return 0
     if args.cmd == "build":
         print(build_image(args.runtime, args.image))
@@ -532,8 +670,11 @@ def main(argv=None):
         cfg = {"sandbox": args.mode, "sandbox_image": args.image, "runs_dir": tmp}
         sb = choose(cfg, protected_paths(cfg, model, Path(tmp)))
         report = probe(sb, model, nid, Path(tmp) / "run")
-    print(json.dumps(report, indent=2))
-    return 1 if sb.hardened and report["critical_escapes"] else 0
+        guarded = probe(sb, model, nid, Path(tmp) / "run", guard=True)
+    print(json.dumps({"system": report, "with the guard": guarded}, indent=2))
+    print(f"{sb.mode} mode on its own: " + (", ".join(report["critical_escapes"]) + " got out" if report["critical_escapes"] else "nothing got out"))
+    print("with the guard inside Python: " + (", ".join(guarded["critical_escapes"]) + " got out" if guarded["critical_escapes"] else "nothing got out"))
+    return 1 if guarded["critical_escapes"] or (sb.hardened and report["critical_escapes"]) else 0
 
 
 if __name__ == "__main__":

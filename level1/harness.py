@@ -12,6 +12,13 @@ In landlock mode, input.json carries a policy, and before anything else the
 harness takes away its own rights for good (no new privileges, seccomp with no
 sockets, Landlock), failing closed with exit code 5 if any step fails.
 
+In every mode, just before the recipe is imported, the harness installs a guard:
+an audit hook that refuses to open, list, change or link files outside what the
+guard policy allows, and refuses sockets, other processes, signals and native
+code (ctypes). Each refusal is written to out/audit.jsonl. The guard shares its
+process with the recipe, so it is a record and a fence, not a wall; the wall is
+the container, Landlock or seatbelt.
+
 Its exit code is only a hint to the runner, which trusts nothing written here:
 0 the result was written, 3 the recipe raised, 4 the result is not a JSON object
 within the size limit, 5 the sandbox could not be set up.
@@ -133,6 +140,129 @@ def _lockdown(policy):
     return _landlock(ctypes, libc, read, policy["read_write"])
 
 
+# the guard ----------------------------------------------------------------------------------
+_ALWAYS_REFUSED = ("socket.", "ctypes.", "subprocess.", "urllib.", "http.", "ftplib.", "smtplib.", "imaplib.", "poplib.",
+                   "nntplib.", "telnetlib.", "webbrowser.")
+_REFUSED = {"os.system", "os.exec", "os.posix_spawn", "os.spawn", "os.fork", "os.forkpty", "os.startfile", "os.kill",
+            "os.killpg", "signal.pthread_kill", "pty.spawn", "sys.addaudithook", "resource.setrlimit", "resource.prlimit",
+            "os.chroot"}
+# which arguments of an event name paths, and whether they are read or written
+_READS = {"os.listdir": (0,), "os.scandir": (0,), "os.chdir": (0,), "os.getxattr": (0,), "os.listxattr": (0,)}
+_WRITES = {"os.mkdir": (0,), "os.remove": (0,), "os.rmdir": (0,), "os.chmod": (0,), "os.chown": (0,), "os.utime": (0,),
+           "os.truncate": (0,), "os.chflags": (0,), "os.lchflags": (0,), "os.setxattr": (0,), "os.removexattr": (0,),
+           "os.rename": (0, 1), "os.link": (1,), "os.symlink": (1,), "sqlite3.connect": (0,)}
+_MAX_RECORDED = 1000
+_GUARDED = []  # not empty once the guard is installed; its record then gets a last line
+
+
+def _default_guard_policy():
+    """For a container, whose paths only the harness knows: Python, system files and this folder."""
+    import site
+    import sysconfig
+
+    read = {HERE, sys.prefix, sys.base_prefix, sys.exec_prefix, sys.base_exec_prefix, os.path.dirname(os.path.realpath(sys.executable))}
+    read.update(v for k, v in sysconfig.get_paths().items() if k in ("stdlib", "platstdlib", "purelib", "platlib"))
+    try:
+        read.update(site.getsitepackages())
+    except AttributeError:
+        pass
+    read.update(("/usr", "/lib", "/lib64", "/etc", "/dev/null", "/dev/urandom", "/dev/zero", "/proc/cpuinfo", "/proc/meminfo"))
+    write = [os.path.join(HERE, "out"), os.path.join(HERE, "tmp"), "/tmp", "/dev/null"]
+    return {"read": sorted(p for p in read if p), "write": write, "own_proc": True}
+
+
+def _guard(policy, record):
+    """Install the audit hook. policy: {"read": [...], "write": [...], "own_proc": bool}; record: an open file."""
+    import json as _json
+    import threading
+    import time as _time
+
+    def roots(paths):
+        out = []
+        for p in paths:
+            out.append(os.path.abspath(p))
+            out.append(os.path.realpath(p))
+        return tuple(sorted(set(out)))
+
+    read_roots = list(policy["read"]) + [HERE]
+    if policy.get("own_proc") and os.path.exists("/proc/self"):
+        read_roots.append(os.path.realpath("/proc/self"))
+    write_roots = roots(policy["write"])
+    read_roots = roots(read_roots) + write_roots
+    start = _time.monotonic()
+    state = threading.local()
+    count = [0]
+
+    def inside(path, allowed):
+        return any(path == r or path.startswith(r.rstrip(os.sep) + os.sep) for r in allowed)
+
+    def resolve(p):
+        """None for a file descriptor; else the real path, resolved against the current folder. A relative path
+        that climbs with .. is refused outright: it could be meant for a folder descriptor the hook cannot see."""
+        if p is None:
+            p = "."
+        if isinstance(p, int):
+            return None
+        p = os.fsdecode(os.fspath(p))
+        if not os.path.isabs(p) and ".." in p.replace("\\", "/").split("/"):
+            return False
+        return os.path.realpath(os.path.join(os.getcwd(), p))
+
+    def refuse(event, target):
+        count[0] += 1
+        if count[0] <= _MAX_RECORDED:
+            line = {"event": event, "target": str(target)[:300], "t": round(_time.monotonic() - start, 3)}
+            try:
+                record.write(_json.dumps(line) + "\n")
+                record.flush()
+            except (OSError, ValueError):
+                pass
+        raise PermissionError(13, f"the sandbox does not allow this ({event})", str(target)[:300])
+
+    def check(event, path, allowed):
+        r = resolve(path)
+        if r is None:
+            return
+        if r is False or not inside(r, allowed):
+            refuse(event, path)
+
+    def hook(event, args):
+        if getattr(state, "busy", False):
+            return
+        state.busy = True
+        try:
+            if event == "open":
+                path, mode, flags = (tuple(args) + (None, None, None))[:3]
+                if isinstance(mode, str):
+                    writes = any(c in mode for c in "wax+")
+                else:
+                    writes = bool((flags or 0) & (os.O_WRONLY | os.O_RDWR | os.O_CREAT | os.O_APPEND | os.O_TRUNC))
+                check(event, path, write_roots if writes else read_roots)
+            elif event in _READS:
+                for i in _READS[event]:
+                    if i < len(args):
+                        check(event, args[i], read_roots)
+            elif event in _WRITES:
+                if event == "sqlite3.connect" and args and str(args[0]) in ("", ":memory:"):
+                    return
+                for i in _WRITES[event]:
+                    if i < len(args):
+                        check(event, args[i], write_roots)
+                if event == "os.link" and args:
+                    check(event, args[0], read_roots)  # a hard link to a file is that file
+                if event == "os.symlink" and len(args) > 1 and isinstance(args[0], (str, bytes, os.PathLike)):
+                    target = os.fsdecode(os.fspath(args[0]))
+                    base = os.path.dirname(os.path.join(os.getcwd(), os.fsdecode(os.fspath(args[1]))))
+                    check(event, os.path.join(base, target), read_roots)
+            elif event in _REFUSED or event.startswith(_ALWAYS_REFUSED):
+                refuse(event, args[0] if args else "")
+        finally:
+            state.busy = False
+
+    sys.addaudithook(hook)  # once added, a hook cannot be taken away
+    _GUARDED.append(True)
+
+
 def _limit(name, value):
     try:
         import resource
@@ -152,6 +282,12 @@ def _limit(name, value):
 
 
 def _finish(code, message=None):
+    if _GUARDED:
+        try:
+            with open(os.path.join(OUT, "audit.jsonl"), "a") as f:  # the guard allows out/
+                f.write(json.dumps({"end": True, "exit": code}) + "\n")
+        except OSError:
+            pass
     if message is not None:
         with open(os.path.join(OUT, "error.txt"), "w") as f:
             f.write(message[-MAX_ERROR_CHARS:])
@@ -196,6 +332,14 @@ def main():
 
     with np.load(os.path.join(HERE, "weights.npz"), allow_pickle=False) as z:
         weights = {k: z[k] for k in z.files}
+    if job.get("guard", {}).get("on", True):
+        try:
+            record = open(os.path.join(OUT, "audit.jsonl"), "w", buffering=1)
+            record.write(json.dumps({"start": True}) + "\n")
+            policy = job.get("guard", {}).get("policy") or _default_guard_policy()
+            _guard(policy, record)
+        except BaseException as exc:  # fail closed
+            _finish(EXIT_SANDBOX, f"the guard could not be set up: {exc!r}")
     try:
         import recipe
 

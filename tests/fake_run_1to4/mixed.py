@@ -1,7 +1,10 @@
-try:
-    print("read", len(open("/etc/hostname").read()) >= 0)
-except Exception as exc:
-    print("blocked", type(exc).__name__)
+for what, attempt in (("a file outside", lambda: open("/var/lv1-nothing-here").read()),
+                      ("the network", lambda: __import__("socket").create_connection(("127.0.0.1", 9), timeout=1))):
+    try:
+        attempt()
+        print("reached", what)
+    except Exception as exc:
+        print("blocked", what, type(exc).__name__)
 g = graph()
 a, b, c = g.token(0), g.token(1), g.token(2)
 table = g.weight("unembed") @ (g.weight("hidden") @ g.weight("embed"))

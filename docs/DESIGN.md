@@ -146,7 +146,8 @@ Three things carry it:
   before the run starts and before every prompt. A hit stops the run before a model is asked. The
   agent's own notes, which come back to it in later rounds, are its words and are not searched.
 - The sandbox keeps the agent's code away from the repository, the withheld folder, the second
-  network's weights and the run folder. Only the container and Landlock modes enforce this; see
+  network's weights and the run folder. A guard inside Python refuses and records every attempt in
+  every mode; the container, Landlock and seatbelt modes also enforce it at the system level. See
   `docs/SANDBOX.md`.
 
 ## 5. The rounds, the lock, the seed check

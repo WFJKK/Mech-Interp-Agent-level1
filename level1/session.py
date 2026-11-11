@@ -6,6 +6,8 @@ A session lives in a round's folder:
         session.json          what the tools need (model, network, limits, reward) and what was used so far
         tools.jsonl           every tool call, appended as it happens: tool, arguments, outcome, seconds
         python/<n>.py, .txt   every program run_python was given, in full, and what went back to the agent
+        python/<n>.audit.json what the guard inside Python refused that program, when it refused anything or
+                              its record is incomplete
         workspace/entries/    the entries saved from run_python (and the ones carried from earlier rounds)
         submissions/<n>/      one folder per submit_entry call: entry.json, receipt.json
 
@@ -123,8 +125,10 @@ TOOLS = {
             "`network_outputs()` (inputs of the data set, every one of them or a fixed sample as `info['check']` says, "
             "the network's outputs on them, and the operations of a forward pass), "
             "`measure(entry)` (what the verifier measures: coverage, fidelity, cost and the reward), `entries` (the "
-            "saved entries by name) and `save_entry(name, entry)`. No network access; nothing persists between "
-            "calls except saved entries. Each call counts against the python budget."),
+            "saved entries by name) and `save_entry(name, entry)`. The code may read its own folder and Python's "
+            "libraries and write only to tmp/ in its folder; other files, the network and other programs are closed "
+            "to it (PermissionError). Nothing persists between calls except saved entries. Each call counts against "
+            "the python budget."),
         "schema": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
     },
     "submit_entry": {
@@ -297,7 +301,12 @@ class Session:
             if problems:
                 out["problems"] = problems
             atomic_write(self.path / "python" / f"{n:03d}.txt", out["output"])
-            self._log("run_python", args, {"status": ex.status, "output": output[:500], "saved": sorted(saved), "sandbox": ex.mode}, time.monotonic() - t0)
+            audit = ex.audit or {"present": False, "complete": False, "n_blocked": 0, "blocked": []}
+            record = "complete" if audit.get("complete") else ("incomplete" if audit.get("present") else "missing")
+            if audit.get("n_blocked") or record != "complete":
+                write_json(self.path / "python" / f"{n:03d}.audit.json", {**audit, "record": record, "status": ex.status})
+            self._log("run_python", args, {"status": ex.status, "output": output[:500], "saved": sorted(saved), "sandbox": ex.mode,
+                                           "blocked": int(audit.get("n_blocked") or 0), "guard_record": record}, time.monotonic() - t0)
             return out
         except ToolError as exc:
             self._log("run_python", args, {"error": str(exc)}, time.monotonic() - t0)

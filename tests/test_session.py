@@ -72,6 +72,31 @@ def test_the_guide_s_example_runs_as_written(session):
     assert c_pred == 8 + 8 + 8 + 8 + 7
 
 
+def test_what_the_guard_refuses_is_kept_with_the_program(session, tmp_path):
+    """A program that reaches outside its folder gets a PermissionError back, and the attempt is kept next to the
+    program (python/NNN.audit.json) and in the tool log; a clean program leaves no record file."""
+    secret = Path(__file__).parent.parent / "withheld" / "lin-a" / "task.yaml"
+    out = session.run_python(f"try:\n    open({str(secret)!r}).read()\nexcept OSError as exc:\n    print(type(exc).__name__, exc)")
+    assert out["status"] == "ok" and out["output"].startswith("PermissionError") and "the sandbox does not allow this (open)" in out["output"]
+    audit = read_json(session.path / "python" / "001.audit.json")
+    assert audit["record"] == "complete" and audit["n_blocked"] == 1 and audit["blocked"][0] == {"event": "open", "target": str(secret)}
+    log = read_jsonl(session.path / "tools.jsonl")[-1]["outcome"]
+    assert log["blocked"] == 1 and log["guard_record"] == "complete"
+    session.run_python("print(sorted(weights))")
+    assert not (session.path / "python" / "002.audit.json").exists()
+    assert read_jsonl(session.path / "tools.jsonl")[-1]["outcome"]["blocked"] == 0
+
+
+def test_a_program_stopped_from_outside_leaves_an_incomplete_record(tmp_path):
+    cfg = run_config.load("config/pilot/lin-a.yaml", {"runs_dir": str(tmp_path), "sandbox": "process",
+                                                      "python": {"time_limit_s": 2}, "session": {"python_calls": 2, "submissions": 1}})
+    s = Session.create(tmp_path / "run" / "round_001" / "session", cfg, "lin-a-s0", tmp_path / "run")
+    out = s.run_python("while True:\n    pass")
+    assert out["status"] == "timeout"
+    audit = read_json(s.path / "python" / "001.audit.json")
+    assert audit["record"] == "incomplete" and audit["status"] == "timeout" and audit["n_blocked"] == 0
+
+
 def test_mistakes_in_the_code_come_back_as_text(session):
     out = session.run_python("print('before')\nprint(1 / 0)")
     assert out["status"] == "ok" and "before" in out["output"] and "ZeroDivisionError" in out["output"]

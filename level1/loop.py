@@ -180,20 +180,24 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     sb = choose(cfg, protected_paths(cfg, model, path))
     first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
-    report = probe(sb, model, cfg["network"], path / "probe")
+    report = probe(sb, model, cfg["network"], path / "probe")                      # the system's sandbox on its own
+    guarded = probe(sb, model, cfg["network"], path / "probe", guard=True)         # with the guard inside Python
     try:
         (path / "probe").rmdir()  # the probe's target folder; it leaves nothing in it
     except OSError:
         pass
     check_probe(sb, report)
+    check_probe(sb, guarded)
     for w in rewards.warnings(cfg["reward"]):
         log(f"WARNING: the reward: {w}")
     if not sb.hardened:
-        log("WARNING: the sandbox is in process mode: the agent's code can read whatever you can, the withheld "
-            "folder and the second network's weights included. A run that counts needs container or landlock mode.")
+        log("WARNING: the sandbox is in process mode: only a guard inside Python keeps the agent's code from your files, "
+            "the network and other programs. It blocked every escape the probe tried, and records every attempt, but it "
+            "shares its process with the code it watches: a fence, not a wall. A run that counts needs container, "
+            "landlock or seatbelt mode.")
     write_json(path / "run.json", {
         "run_id": cfg["run_id"], "config": cfg, "created": now(), "git": git_state(), "trusted_hash": trusted_hash(model),
-        "sandbox": {**sb.describe(), "probe": report}, "prices": lang.PRICES, "model_ops": itself["parts"]["model_ops"],
+        "sandbox": {**sb.describe(), "probe": report, "guard_probe": guarded}, "prices": lang.PRICES, "model_ops": itself["parts"]["model_ops"],
         "n_total": model.n_total, "enumerated": verifier.enumerated, "check": verifier.check, "n_inputs": verifier.n_inputs(),
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
@@ -351,7 +355,7 @@ def main(argv=None) -> int:
     r.add_argument("--run-id")
     r.add_argument("--runs-dir")
     r.add_argument("--fake", help="a folder of scripted rounds: sets the backend to fake")
-    r.add_argument("--sandbox", help="auto, hardened, container, landlock or process (default: the config's)")
+    r.add_argument("--sandbox", help="auto, hardened, container, landlock, seatbelt or process (default: the config's)")
     s = sub.add_parser("resume")
     s.add_argument("--run", required=True)
     s.add_argument("--fake")

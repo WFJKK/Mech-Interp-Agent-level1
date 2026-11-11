@@ -79,7 +79,9 @@ def test_the_report(finished):
     assert rep["references"]["target"]["lin-a-s1"]["parts"]["n_agree"] == 4092
     assert "| lin-a-s1 (the seed check) | 0.9887 | 1.0000 | 0.99902 |" in text
     assert "n2 = maximum(n0, n1)   <- interpretation" in text and "| r4s2 | `best` | 0.9960 |" in text
-    assert "(weak: the agent's code could read any file" in text and "—" not in text
+    assert "a guard inside Python blocked every escape the probe tried" in text and "—" not in text
+    run = read_json(path / "run.json")
+    assert run["sandbox"]["probe"]["critical_escapes"] and run["sandbox"]["guard_probe"]["critical_escapes"] == []   # process mode
     rows = loop.rescore(path, {"name": "r_alpha", "alpha": 1}, out=lambda *_: None)
     assert rows[0]["rescored"] == pytest.approx(rows[0]["recorded"]) and rows[1]["rescored"] > rows[1]["recorded"]
     # the frontier of right share, wrong share and cost: the half region, the whole one and the exact one each
@@ -90,7 +92,8 @@ def test_the_report(finished):
     assert "| r1s1 | `half` | 0.4977 | 0.5000 | 1.00000 | 0.0046 | 0.5000 | 0.00000 | yes |" in text
     assert rep["submissions"][1]["wrong_share"] == pytest.approx(1 / 4096) and "measured again" not in text   # every input was checked
     assert rep["rounds"][0]["seconds"] is not None and "| Minutes | Output tokens | Programs run | Sandbox minutes |" in text
-    assert rep["rounds"][0]["exploration"]["programs"] == 1 and "No program reaches for files or the system." in text
+    assert rep["rounds"][0]["exploration"]["programs"] == 1 and "No program's text reaches for files or the system." in text
+    assert "The guard inside Python refused nothing" in text and rep["guard_escapes"] == []
 
 
 def test_the_frontier_needs_no_reward():
@@ -166,8 +169,16 @@ def test_the_report_says_what_the_agent_ran(finished_1to4):
     text = (path / "report.md").read_text()
     assert [rd["exploration"]["programs"] for rd in rep["rounds"]] == [1, 1]
     assert rep["rounds"][0]["exploration"]["flagged"] == []
-    assert rep["rounds"][1]["exploration"]["flagged"] == [{"program": "round_002/session/python/001.py", "reaches": ["open("]}]
-    assert "- `round_002/session/python/001.py`: open(" in text and "in this run's weak sandbox nothing stopped such a reach" in text
+    assert rep["rounds"][1]["exploration"]["flagged"] == [{"program": "round_002/session/python/001.py", "reaches": ["import machinery", "open(", "socket"]}]
+    assert "- `round_002/session/python/001.py`: import machinery, open(, socket" in text and "nothing stopped such a reach" not in text
+    # what the guard refused, from the program's record, in the report; and what the agent saw
+    blocked = rep["rounds"][1]["exploration"]["blocked"]
+    assert [(b["event"], b["target"]) for b in blocked][0] == ("open", "/var/lv1-nothing-here")
+    assert blocked[1]["event"].startswith("socket.") and rep["rounds"][1]["exploration"]["incomplete"] == []
+    assert "The guard inside Python refused 2 attempts to reach files, the network or other programs:" in text
+    assert "- `round_002/session/python/001.py`: open /var/lv1-nothing-here" in text
+    seen = (path / "round_002" / "session" / "python" / "001.txt").read_text()
+    assert "blocked a file outside PermissionError" in seen and "blocked the network PermissionError" in seen
 
 
 def test_a_stopped_run_resumes_where_it_was(tmp_path):

@@ -30,7 +30,7 @@ from pathlib import Path
 import numpy as np
 import psutil
 
-from .sandbox import Sandbox, container_command, landlock_policy
+from .sandbox import Sandbox, container_command, guard_policy, landlock_policy, seatbelt_command
 
 HARNESS = Path(__file__).with_name("harness.py")
 STATUSES = ("ok", "crash", "timeout", "bad_output")
@@ -81,6 +81,7 @@ class Execution:
     peak_rss_mb: float = 0.0
     result_bytes: int | None = None
     mode: str = "process"
+    audit: dict | None = None  # what the guard refused: {"blocked": [...], "n_blocked": n, "complete": bool}
 
 
 class BadOutput(ValueError):
@@ -230,7 +231,8 @@ def _environment(box: Path, threads: int, sandbox_id: str) -> dict:
 RESERVED = ("recipe.py", "harness.py", "weights.npz", "input.json", "out", "tmp")
 
 
-def _prepare(box: Path, recipe_source: str, files: dict, weights: dict, info: dict, extra, limits: Limits, sb: Sandbox):
+def _prepare(box: Path, recipe_source: str, files: dict, weights: dict, info: dict, extra, limits: Limits, sb: Sandbox,
+             guard: bool = True):
     box.mkdir()
     (box / "out").mkdir()
     (box / "tmp").mkdir()
@@ -252,6 +254,8 @@ def _prepare(box: Path, recipe_source: str, files: dict, weights: dict, info: di
             "nproc": MAX_RECIPE_PROCESSES,
         },
         "lockdown": landlock_policy(box, sb.protected) if sb.mode == "landlock" else None,
+        # the guard inside Python; a container's paths are known only inside it, so it finds them itself
+        "guard": {"on": bool(guard), "policy": None if sb.mode == "container" else guard_policy(box, sb.protected)},
     }
     (box / "input.json").write_text(json.dumps(job))
     for name in ("recipe.py", *files, "harness.py", "weights.npz", "input.json"):
@@ -318,9 +322,11 @@ def run_recipe(
     limits: Limits,
     sandbox_root: str | Path | None = None,
     sandbox: Sandbox | None = None,
+    guard: bool = True,
 ) -> Execution:
     """Run make_result(weights, info, extra) from recipe_source in a fresh sandbox; return what came back.
-    files are the modules the recipe may import, {file name: source}."""
+    files are the modules the recipe may import, {file name: source}. guard=False leaves out the guard inside
+    Python, which only the probe does, to test the system's own sandbox on its own."""
     sb = sandbox or PROCESS
     root = Path(tempfile.mkdtemp(prefix="lv1-sandbox-", dir=sandbox_root))
     box = root / "box"
@@ -328,26 +334,32 @@ def run_recipe(
     if sb.mode != "container":
         _become_subreaper()
     try:
-        _prepare(box, recipe_source, files, weights, info, extra, limits, sb)
+        _prepare(box, recipe_source, files, weights, info, extra, limits, sb, guard)
         (root / "logs").mkdir()
         with open(root / "logs" / "stdout.txt", "w+b") as out_f, open(root / "logs" / "stderr.txt", "w+b") as err_f:
             start = time.monotonic()
             if sb.mode == "container":
                 rc, verdict, peak = _wait_container(sb, box, limits, out_f, err_f)
             else:
-                rc, verdict, peak = _wait_process(box, limits, out_f, err_f, sandbox_id)
+                rc, verdict, peak = _wait_process(box, limits, out_f, err_f, sandbox_id, sb)
             ex = Execution(status="crash", runtime_s=round(time.monotonic() - start, 3), peak_rss_mb=round(peak / MIB, 1), mode=sb.mode)
-            return _interpret(ex, rc, verdict, box, limits, sb, _clean(_tail(err_f, STDERR_TAIL_BYTES), box))
+            ex = _interpret(ex, rc, verdict, box, limits, sb, _clean(_tail(err_f, STDERR_TAIL_BYTES), box))
+            ex.audit = read_audit(box)
+            return ex
     finally:
         if sb.mode != "container":
             _reap_marked(sandbox_id)  # kill anything that escaped the process group (for example via setsid)
         _remove(root)
 
 
-def _wait_process(box: Path, limits: Limits, out_f, err_f, sandbox_id: str):
-    """Start the harness as a separate process in its own process group; watch its time and resident memory."""
+def _wait_process(box: Path, limits: Limits, out_f, err_f, sandbox_id: str, sb: Sandbox | None = None):
+    """Start the harness as a separate process in its own process group; watch its time and resident memory.
+    In seatbelt mode it starts under sandbox-exec."""
+    argv = [sys.executable, "-I", "-B", str(box / "harness.py")]
+    if sb is not None and sb.mode == "seatbelt":
+        argv = seatbelt_command(box, sb.protected, argv)
     proc = subprocess.Popen(
-        [sys.executable, "-I", "-B", str(box / "harness.py")],
+        argv,
         cwd=box,
         env=_environment(box, limits.threads, sandbox_id),
         stdin=subprocess.DEVNULL,
@@ -413,6 +425,37 @@ def _wait_container(sb: Sandbox, box: Path, limits: Limits, out_f, err_f):
             f"the memory limit of {limits.memory_mb:g} MB",
         )
     return rc, verdict, 0
+
+
+AUDIT_BYTES = 1 << 20
+AUDIT_KEPT = 200
+
+
+def read_audit(box: Path) -> dict:
+    """What the guard refused, from the sandbox's out/audit.jsonl. Written by the process it watches, so it is
+    read as data and bounded; "complete" is false when the harness did not get to write its last line (a time
+    limit, a kill, or code that stopped the process its own way)."""
+    try:
+        data = read_regular(box / "out" / "audit.jsonl", AUDIT_BYTES)
+    except BadOutput:
+        return {"present": True, "complete": False, "n_blocked": 0, "blocked": [], "problem": "the record is too large"}
+    if data is None:
+        return {"present": False, "complete": False, "n_blocked": 0, "blocked": []}
+    blocked, started, ended = [], False, False
+    for line in data.decode("utf-8", errors="replace").splitlines():
+        try:
+            e = json.loads(line)
+        except ValueError:
+            continue
+        if not isinstance(e, dict):
+            continue
+        if e.get("start"):
+            started = True
+        elif e.get("end"):
+            ended = True
+        elif "event" in e:
+            blocked.append({"event": str(e.get("event"))[:80], "target": str(e.get("target"))[:300]})
+    return {"present": True, "complete": started and ended, "n_blocked": len(blocked), "blocked": blocked[:AUDIT_KEPT]}
 
 
 def _interpret(ex: Execution, rc: int, verdict, box: Path, limits: Limits, sb: Sandbox, stderr: str) -> Execution:

@@ -79,8 +79,9 @@ def _session_meta(path: Path, k: int) -> dict:
 
 
 def exploration(path: Path, k: int) -> dict:
-    """What the agent ran in the sandbox in round k: how many programs, for how long, and which of them reach
-    for files or the system (file name and what matched)."""
+    """What the agent ran in the sandbox in round k: how many programs, for how long, which of them reach for
+    files or the system (file name and what matched), what the guard inside Python refused, and which programs
+    left the guard's record incomplete (a time limit, or code that stopped its process its own way)."""
     session = Path(path) / f"round_{k:03d}" / "session"
     calls = [e for e in read_jsonl(session / "tools.jsonl") if e.get("tool") == "run_python" and "error" not in (e.get("outcome") or {})]
     flagged = []
@@ -94,7 +95,18 @@ def exploration(path: Path, k: int) -> dict:
         found = sorted({label for rx, label in REACHES if rx.search(text)})
         if found:
             flagged.append({"program": f"round_{k:03d}/session/python/{prog.name}", "reaches": found})
-    return {"programs": len(programs), "sandbox_seconds": round(sum(float(e.get("seconds") or 0) for e in calls), 1), "flagged": flagged}
+    blocked, incomplete = [], []
+    for f in sorted(folder.glob("*.audit.json")) if folder.is_dir() else []:
+        try:
+            a = read_json(f)
+        except (OSError, ValueError):
+            continue
+        name = f"round_{k:03d}/session/python/{f.name.replace('.audit.json', '.py')}"
+        blocked += [{"program": name, "event": b.get("event"), "target": b.get("target")} for b in a.get("blocked") or []]
+        if a.get("record") != "complete":
+            incomplete.append({"program": name, "record": a.get("record"), "status": a.get("status")})
+    return {"programs": len(programs), "sandbox_seconds": round(sum(float(e.get("seconds") or 0) for e in calls), 1), "flagged": flagged,
+            "blocked": blocked, "incomplete": incomplete}
 
 
 def frontier(subs: list) -> set:
@@ -203,8 +215,9 @@ def build(path: Path) -> dict:
         "backend": cfg["backend"], "agent_model": cfg["agent_model"], "effort": cfg["effort"], "reward": cfg["reward"],
         "prices": run["prices"], "model_ops": run["model_ops"], "n_total": run["n_total"], "enumerated": run["enumerated"],
         "n_inputs": run.get("n_inputs"),
-        "sandbox": {k: v for k, v in run["sandbox"].items() if k != "probe"},
-        "sandbox_escapes": run["sandbox"]["probe"]["critical_escapes"], "ended": ended,
+        "sandbox": {k: v for k, v in run["sandbox"].items() if k not in ("probe", "guard_probe")},
+        "sandbox_escapes": run["sandbox"]["probe"]["critical_escapes"],
+        "guard_escapes": (run["sandbox"].get("guard_probe") or {}).get("critical_escapes"), "ended": ended,
         "rounds": [{"round": rd["round"], "submissions": len(rd["submissions"]), "improved": rd["improved"],
                     "best_reward_after": rd["best_reward_after"], "stop_reason": rd.get("stop_reason"),
                     "tools_used": rd.get("tools_used"), **_session_meta(path, rd["round"]),
@@ -214,6 +227,15 @@ def build(path: Path) -> dict:
         "locked_entry_shown": lang.show(entry) if entry else None,
         "references": references(model, cfg, networks), "notes": notes, "task": model.task().get("task"),
     }
+
+
+def _sandbox_note(rep: dict) -> str:
+    if rep["sandbox"]["hardened"]:
+        return ""
+    if rep.get("guard_escapes") is not None:
+        return (" (the system does not keep the agent's code in; a guard inside Python blocked every escape the probe "
+                "tried and records every attempt, but it shares its process with that code: a fence, not a wall)")
+    return " (weak: the agent's code could read any file, the withheld folder included)"
 
 
 def markdown(rep: dict) -> str:
@@ -226,8 +248,7 @@ def markdown(rep: dict) -> str:
             f"- Agent: {rep['agent_model']} at effort {rep['effort']}, through the {rep['backend']} backend.",
             f"- Data set: {rep['n_total']:,} inputs, {checked}. One forward pass: {rep['model_ops']:,} operations ({rep['prices']}).",
             "- Reward: " + rep["reward"].get("name", "r_alpha") + "".join(f", {k} = {v}" for k, v in rep["reward"].items() if k != "name") + ".",
-            f"- Sandbox: {rep['sandbox']['mode']}" + ("" if rep["sandbox"]["hardened"] else
-                                                     " (weak: the agent's code could read any file, the withheld folder included)") + ".",
+            f"- Sandbox: {rep['sandbox']['mode']}" + _sandbox_note(rep) + ".",
             f"- The rounds ended: {rep['ended'] or 'not yet'}.", ""]
 
     out += ["## The locked entry", ""]
@@ -272,15 +293,32 @@ def markdown(rep: dict) -> str:
         out += ["", f"The same tokens through the API would have cost about ${sum(usd):.2f} (a subscription is not billed per call)."]
 
     flagged = [f for rd in rep["rounds"] for f in (rd.get("exploration") or {}).get("flagged", [])]
+    blocked = [b for rd in rep["rounds"] for b in (rd.get("exploration") or {}).get("blocked", [])]
+    incomplete = [b for rd in rep["rounds"] for b in (rd.get("exploration") or {}).get("incomplete", [])]
+    guarded = rep.get("guard_escapes") is not None
     out += ["", "## What the agent ran", "",
             "Every program is kept in full in its round's `session/python/` folder, with what it got back; the round's "
             "`response.md` has what the agent wrote, and `stream_NN.jsonl` everything the CLI emitted."]
+    if guarded:
+        if blocked:
+            out += ["", f"The guard inside Python refused {len(blocked)} attempt{'s' if len(blocked) != 1 else ''} to reach files, "
+                    "the network or other programs:", ""]
+            out += [f"- `{b['program']}`: {b['event']} {b['target']}" for b in blocked[:40]]
+            if len(blocked) > 40:
+                out += [f"- and {len(blocked) - 40} more, in the programs' `.audit.json` files"]
+        else:
+            out += ["", "The guard inside Python refused nothing: no program tried to reach files outside its folder, the "
+                    "network or other programs."]
+        if incomplete:
+            out += ["", "Programs whose guard record is incomplete (a time limit, or code that stopped its process its own "
+                    "way); read these:", ""]
+            out += [f"- `{b['program']}`: record {b['record']}, run {b['status']}" for b in incomplete]
     if flagged:
-        out += ["", "Programs that reach for files or the system. A match is a reason to read the program, not a verdict"
-                + ("" if rep["sandbox"]["hardened"] else "; in this run's weak sandbox nothing stopped such a reach") + ":", ""]
+        out += ["", "Programs whose text reaches for files or the system. A match is a reason to read the program, not a verdict"
+                + ("" if rep["sandbox"]["hardened"] or guarded else "; in this run's weak sandbox nothing stopped such a reach") + ":", ""]
         out += [f"- `{f['program']}`: {', '.join(f['reaches'])}" for f in flagged]
     else:
-        out += ["", "No program reaches for files or the system."]
+        out += ["", "No program's text reaches for files or the system."]
 
     out += ["", "## Submissions", "",
             "Cost: everything the entry computes, per input of its region, over one forward pass. Right and wrong: the "
