@@ -242,12 +242,26 @@ def container_command(sb: Sandbox, box: Path, name: str, memory_mb: float, threa
     return cmd
 
 
-def requirement_versions() -> dict:
+def _marker_holds(marker: str, python: tuple | None = None) -> bool:
+    """Whether a requirement line's condition holds on this Python, for the one form requirements.txt uses:
+    python_version < "X.Y" or python_version >= "X.Y". Any other condition counts as holding."""
+    import re
+
+    m = re.fullmatch(r"""python_version\s*(<|>=)\s*["'](\d+)\.(\d+)["']""", marker.strip())
+    if not m:
+        return True
+    here, there = tuple(python or sys.version_info[:2]), (int(m.group(2)), int(m.group(3)))
+    return here < there if m.group(1) == "<" else here >= there
+
+
+def requirement_versions(python: tuple | None = None) -> dict:
+    """{package: pinned version} from requirements.txt, taking the lines whose condition holds on this Python."""
     out = {}
     for line in (REPO_ROOT / "requirements.txt").read_text().splitlines():
         line = line.split("#")[0].strip()
-        if "==" in line:
-            k, v = line.split("==", 1)
+        requirement, _, marker = line.partition(";")
+        if "==" in requirement and _marker_holds(marker, python):
+            k, v = requirement.split("==", 1)
             out[k.strip().lower()] = v.strip()
     return out
 

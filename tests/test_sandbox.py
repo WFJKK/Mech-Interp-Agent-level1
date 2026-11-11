@@ -60,3 +60,19 @@ print(measure(g.entry(predict=g.token(0)))["n_inputs"])
     assert out["sandbox"] == "landlock" and "READ" not in out["output"] and out["output"].count("blocked PermissionError") == 3
     assert "['harness.py', 'input.json', 'lv1.py', 'model.py', 'out', 'recipe.py', 'rewards.py', 'tmp', 'weights.npz']" in out["output"]
     assert out["output"].strip().endswith("4096")
+
+
+def test_the_requirements_install_on_every_python_the_pipeline_supports():
+    """requirements.txt pins one numpy per Python: a pin that exists only for a recent Python made
+    `pip install -r requirements.txt` fail on Python 3.10 (11 November 2026)."""
+    lines = [line.split("#")[0].strip() for line in (sandbox.REPO_ROOT / "requirements.txt").read_text().splitlines()]
+    numpy_lines = [line for line in lines if line.startswith("numpy")]
+    assert len(numpy_lines) == 2 and all(";" in line for line in numpy_lines)         # no pin without its condition
+    for python in ((3, 10), (3, 11), (3, 12), (3, 13), (3, 14)):
+        holding = [line for line in numpy_lines if sandbox._marker_holds(line.partition(";")[2], python)]
+        assert len(holding) == 1, python                                               # exactly one numpy per Python
+    old, new = sandbox.requirement_versions((3, 10)), sandbox.requirement_versions((3, 13))
+    assert old["numpy"] == "2.2.6" and new["numpy"] == "2.5.3"                       # numpy 2.2 is the last for Python 3.10
+    assert {k: v for k, v in old.items() if k != "numpy"} == {k: v for k, v in new.items() if k != "numpy"}
+    assert set(old) == {"numpy", "pyyaml", "psutil", "pytest"} and ";" not in "".join(old.values())
+    assert sandbox._marker_holds("") and sandbox._marker_holds('sys_platform == "linux"')

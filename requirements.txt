@@ -1,7 +1,8 @@
-# Versions the pipeline was built with (Python 3.13), the same pins as the proof pipeline's. No torch:
-# networks are run in numpy. The tests also pass on Python 3.10 with numpy 1.26 and on 3.11 with numpy 2.2,
-# so on an older Python any numpy from 1.26 on will do.
-numpy==2.5.3
+# Versions the pipeline was built and tested with. No torch: networks are run in numpy.
+# numpy 2.5 needs a recent Python, so an older Python gets the last numpy that installs there. The tests
+# pass with either (and with numpy 1.26 on Python 3.10).
+numpy==2.5.3; python_version >= "3.13"
+numpy==2.2.6; python_version < "3.13"
 pyyaml==6.0.3
 psutil==7.2.2
 pytest==9.1.1
