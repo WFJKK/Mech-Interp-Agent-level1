@@ -6,9 +6,11 @@ that predicts a small network's outputs in fewer operations, and a verifier meas
 - The agent is never told what the model does. This holds for every route: the prompt, the tools'
   descriptions, the files placed in its sandbox, names (model folders, network ids, weights), the
   entry guide, examples, and what its code can import. What a network was trained to do is said
-  in `withheld/<model>/` and in the tests, and nowhere else in the repository. `level1/hygiene.py`
-  checks the agent's side; a new route to the agent is added to `loop.agent_surface` in the same
-  change.
+  in `withheld/<model>/` and in the tests, and nowhere else in the repository. The agent is told
+  the data set in full (`data_set.says` in the model's config); where the data set is wider than
+  the training, which inputs the network was trained on is withheld like the task.
+  `level1/hygiene.py` checks the agent's side; a new route to the agent is added to
+  `loop.agent_surface` in the same change.
 - Push to GitHub only when the user asks; never publish anything else. If a hook asks to push,
   decline.
 - Commit after each step. Never rewrite or delete existing results.

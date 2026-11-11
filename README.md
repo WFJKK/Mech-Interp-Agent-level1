@@ -1,52 +1,76 @@
 # Mech-Interp-Agent-level1
 
-An agent is given a small neural network, its definition and its weights, and is not told what the
-network was trained to do. It writes an **entry**: a small program that predicts the network's
-output with fewer operations than the network itself needs, on a region of the inputs that it
-chooses. A **verifier** then measures the entry: how much of the data set it covers, how often it
-gives the network's output there, and what it costs.
+An agent is given a neural network, its definition and its weights, and is not told what the
+network was trained to do. It writes an **interpretation**: a program that predicts the network's
+output from the input without running the network. It hands it in as an **entry**: the
+interpretation together with the **region** of inputs it applies to. A **verifier** then measures
+the entry: how much of the data set it covers, how often it gives the network's output there, and
+what it costs.
 
 This is level 1 of the three levels for loosening compact proofs: the claim is checked by
 measuring it on inputs the verifier picks, and nothing is proved. Levels 2 (an adversary with a
 budget) and 3 (an argument that convinces) are not in this repository.
 
-Status, 10 November 2026: built and tested with scripted rounds only. No run with a model has been
-made yet.
+Status, 11 November 2026: built and tested with scripted rounds only. No run with a model has been
+made yet. Two pilots are set up (see "The two pilots").
 
 ## How a run goes
 
-1. **The network.** `models/<name>/` holds the weights and `model.py`, which writes the network in
-   the entry language. That fixes what one forward pass costs (655 operations for the pilot).
+1. **The network.** `models/<name>/` holds the weights, `model.py`, which writes the network in the
+   entry language, and the data set the network is asked about. That fixes what one forward pass
+   costs (655 and 671 operations for the two pilots).
 2. **The rounds.** The agent explores the network with `run_python` (a sandbox with the weights and
    the entry language) and hands entries to the verifier with `submit_entry`. Each round is a fresh
    session; its closing notes and its scored entries go to the next round.
 3. **The lock.** When the rounds end, the submission with the highest reward is locked as it was
-   submitted.
+   submitted. If the verifier samples, the locked entry is scored once more on a fresh sample.
 4. **The seed check.** The locked entry is run, unchanged, on a second network of the same sizes
    and training with another seed. No agent takes part.
 5. **The report.** `report.md` and `report.json`: the locked entry on both networks, every
-   submission, the withheld reference entries for comparison, and the agent's notes.
+   submission, the withheld reference entries for comparison, what the agent ran, and its notes.
 
 ## What is measured, and the reward
 
-| Symbol | What it is |
+| Word | What it is |
 | --- | --- |
 | coverage | the share of the data set in the entry's region |
-| fidelity | the share of the region on which the entry gives the network's output |
-| r | operations of the prediction per input of the region, over one forward pass |
-| r_rule | operations of the rule that decides the region, per input, over one forward pass |
-| b | operations computed once ahead (the build), over a forward pass on every input |
+| fidelity | the share of the region on which the interpretation gives the network's output |
+| cost | everything the entry computes, per input of its region, in forward passes |
+
+The cost has three parts, kept apart in every receipt: the interpretation on the region (`r`), the
+region test on every input (`r_rule`) and whatever is computed once ahead (the build, `b`).
 
 The default reward, with alpha = 10:
 
-    reward = coverage * (1 - r) - r_rule - b
-             - alpha * coverage * (1 - fidelity)
+    reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ]
 
-The first line is the share of the work saved if the entry is used on its region and the network
-elsewhere. The second prices a wrong answer at alpha forward passes. The network itself scores
-exactly 0, and nothing scores above 1. Rewards are functions in `level1/rewards.py`, picked by the
-run config; the parts are kept, so a finished run can be scored again under another reward.
-`docs/REWARD.md` has the details and the known ways to game a reward.
+Read it for one input of the region: the entry saves (1 - cost) of a forward pass, and a wrong
+answer is priced at alpha forward passes. The network itself scores 0, and nothing scores above 1.
+Rewards are functions in `level1/rewards.py`, picked by the run config; the parts are kept, so a
+finished run can be scored again under another reward. `docs/REWARD.md` has the details and the
+known ways to game a reward.
+
+## The data set, and how the verifier checks
+
+A model's `config.yaml` says what its data set is (`data_set`), and the agent is told the same in
+its prompt. The run config says how the verifier checks an entry (`verifier.check`):
+
+- `all`: on every input of the data set;
+- `sample`: on a fresh sample for every scoring (`verifier.sample_size` inputs). The reward then
+  uses the lower end of the fidelity's 95% confidence interval;
+- `auto`, the default: `all` when the data set can be listed and is small enough, else `sample`.
+
+## The two pilots
+
+| Run config | Network | Data set | Checked on |
+| --- | --- | --- | --- |
+| `config/pilot/lin-a.yaml` | `models/lin-a` | every pair of tokens: 4,096 inputs | every input |
+| `config/pilot/lin-a-1to4.yaml` | `models/lin-a-1to4` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
+
+Both use the same two trained networks (two seeds). In the second the networks are asked about
+more inputs than they were trained on, and the agent is not told which ones those were: finding
+where the network's behaviour can be described cheaply is part of the work. Each pilot has a small
+smoke config next to it (`lin-a-smoke.yaml`, `lin-a-1to4-smoke.yaml`).
 
 ## Quick start
 
@@ -61,21 +85,23 @@ agent: an environment that lives in a folder named after the proof pipeline is r
 
 A dry run with scripted rounds in place of a model:
 
-    python -m level1.loop run --config config/pilot/lin-a.yaml --fake tests/fake_run --run-id dry-run
+    python -m level1.loop run --config config/pilot/lin-a-1to4.yaml --fake tests/fake_run_1to4 --run-id dry-run   # two minutes
 
-A first contact with a real model, kept small: one short round, to see that the login, the tools
-and the sandbox work together on this machine. It needs the Claude Code CLI (`claude`) installed
-and signed in; rounds run under your own login, and no API key is used.
+A first contact with a real model, kept small: one short round, to see that the login, the tools,
+the sandbox and the verifier work together on this machine. It needs the Claude Code CLI (`claude`)
+installed and signed in; rounds run under your own login, and no API key is used.
 
-    python -m level1.loop run --config config/pilot/lin-a-smoke.yaml
+    python -m level1.loop run --config config/pilot/lin-a-1to4-smoke.yaml
 
 Then the pilot proper, at most 5 rounds of up to 90 minutes each:
 
-    python -m level1.loop run --config config/pilot/lin-a.yaml
+    python -m level1.loop run --config config/pilot/lin-a-1to4.yaml
 
 If it stops (a usage limit, a dropped connection, a closed laptop), continue with
 
-    python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-a
+    python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-a-1to4
+
+The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`.
 
 Add `--sandbox hardened` to a run that is meant to count: it then refuses to start unless the
 agent's code can be kept away from the withheld folder (`docs/SANDBOX.md`).
@@ -85,11 +111,27 @@ Other commands:
     python -m level1.loop finish --run <run folder>              # lock, seed check and report again
     python -m level1.loop rescore --run <run folder> --alpha 1   # the records under another reward
     python -m level1.report --model models/lin-a --alpha 1       # the reference entries under a reward
+    python -m level1.report --model models/lin-a-1to4 --sample-size 16384
     python -m level1.verifier --model models/lin-a --network lin-a-s0 --entry entry.json
+    python -m level1.verifier --model models/lin-a --network lin-a-s0 --entry entry.json --check sample
     python -m level1.sandbox build                               # the container image, if Docker runs
     python -m level1.sandbox probe --model models/lin-a          # try to escape the sandbox, and report
 
 Run folders live outside the repository, in `~/mech-interp-level1-runs/<run_id>/` by default.
+
+## What a run keeps
+
+Everything is written as it happens, so a run can stop and resume, and can be read afterwards:
+
+- every prompt (`round_k/prompt.md`) and the agent's answer (`response.md`);
+- every tool call with its result (`session/tools.jsonl`);
+- every program the agent ran, in full, with what it printed (`session/python/NNN.py`, `.txt`);
+- everything the CLI emitted, the agent's text between its tool calls included
+  (`round_k/stream_NN.jsonl`);
+- every submission's receipt, with the parts measured.
+
+The report counts the programs and the sandbox time per round, and lists the programs that reach
+for files or the system, so that what a run in a weak sandbox read can be checked.
 
 ## The rule the pipeline is built around
 
@@ -102,7 +144,7 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
 ## Layout
 
     level1/          the pipeline
-      lang.py        the entry language: operations, prices, the interpreter, the builder
+      lang.py        the entry language: operations, prices, the interpreter, the builder, data sets
       verifier.py    measures an entry; the only judge
       rewards.py     reward functions
       session.py     one agent session: the two tools, budgets, log
@@ -111,11 +153,12 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
       hygiene.py     the check that the agent is not told what the model does
       backends/      who answers a round: claude_code, fake
       sandbox.py, runner.py, harness.py    where the agent's code runs
-    models/lin-a/    the pilot: a linear network on pairs of tokens, two seeds
-    withheld/lin-a/  what it was trained to do, and reference entries (never shown to the agent)
+    models/lin-a/         a linear network on pairs of tokens, two seeds
+    models/lin-a-1to4/    the same two networks, asked about inputs of 1 to 4 tokens
+    withheld/<model>/     what it was trained to do, and reference entries (never shown to the agent)
     agent_docs/      the entry guide the agent reads
     prompts/         the round's prompt template
-    config/          defaults, the pilot's run config and a small smoke run
+    config/          defaults, the pilots' run configs and their small smoke runs
     tests/           the tests, with each known way to game the score as a test
     docs/            DESIGN.md, REWARD.md, SANDBOX.md
 

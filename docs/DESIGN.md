@@ -8,24 +8,29 @@ could be gamed; `docs/SANDBOX.md` covers where the agent's code runs.
 A compact proof bounds a network's accuracy with a proof that is cheaper than running the network
 on every input. Level 1 keeps the claim and drops the proof: the claim is measured.
 
-- **Data set** D: the inputs. **Network** M.
+- **Data set** D: the inputs the network is asked about. **Network** M, with F operations per
+  forward pass.
 - **Interpreter** (the agent): hands in an entry.
-- **Entry**: a region S of D, given by a rule, and an interpretation I, a program that predicts
-  M's output on S.
+- **Interpretation** I: a program that predicts M's output from the input without running M.
+- **Entry**: the interpretation together with its **region** S, the inputs of D it applies to. The
+  region is given by a test on the input. The agent also states a claimed fidelity p.
 - **Verifier**: runs the entry on inputs it picks and measures three things.
 
 The three things:
 
     coverage   mu = |S| / |D|
-    fidelity   p  = share of S where I(x) = M(x)
-    cost       operations of the entry, in forward passes
+    fidelity   q  = share of S where I(x) = M(x)
+    cost       c  = operations of the entry / (|S| * F)
+
+The cost counts everything the entry computes: the interpretation on S, the region test on every
+input, and what is computed once ahead. It is one number; section 2 says how it splits.
 
 Fidelity is agreement of outputs (accuracy), not a KL divergence. That was decided on 10 November
 2026: it is the simpler measure, and an entry then only has to produce an output, not a
 distribution.
 
 The interpretation need not be a circuit. Anything that predicts the output in counted operations
-is an entry, the task the network was trained on included. On the pilot network that entry scores
+is an entry, the task the network was trained on included. On the pilot on pairs that entry scores
 about 0.996. This is accepted for level 1: the level asks whether a cheap, faithful description
 exists and holds up, not how it relates to the weights.
 
@@ -33,9 +38,13 @@ exists and holds up, not how it relates to the weights.
 
 An entry is a small program stored as JSON data, with two results per input:
 
-- `rule`: a boolean, is this input in the region. Absent means every input.
-- `predict`: a whole number, the network's output as the entry predicts it. Only computed for
-  inputs in the region.
+- the **region** (stored as `rule`): a boolean, is this input in the region. Absent means every
+  input.
+- the **interpretation** (stored as `predict`): a whole number, the network's output as the entry
+  predicts it. Only computed for inputs in the region.
+
+The stored names are older than the words and stay, because changing them would change the entry
+format. The builder takes both: `g.entry(interpretation=..., region=...)`.
 
 It is a graph of operations on tensors. The sources are the input's tokens, the network's weights
 by name, constants and ranges; every other node applies one operation to earlier nodes. The agent
@@ -48,15 +57,20 @@ reason for a language of its own in place of plain Python.
 cost 1 per result entry, a matrix product 1 per multiply-add, a reduction over n entries n - 1,
 reading 1 per number read, a sort n * ceil(log2 n). Moving data (reshape, slice, concat) is free.
 The network itself is written in the same language (`models/<name>/model.py`), so a forward pass and
-an entry are priced by one list. For the pilot a forward pass is 655 operations, the number the
-proof pipeline's cost model gives for the same network.
+an entry are priced by one list. For the pilot on pairs a forward pass is 655 operations, the number
+the proof pipeline's cost model gives for the same network.
 
 **Where the cost is charged.** The interpreter splits an entry's work three ways:
 
 - **build**: what does not depend on the input, computed once when first needed;
-- **rule**: what the rule computes per input, charged for every input of the data set;
-- **prediction**: what the prediction computes per input, charged for the inputs of the region. A
-  value the rule already computed for an input is not charged twice.
+- **region test**: what the region computes per input, charged for every input the verifier runs;
+- **interpretation**: what the interpretation computes per input, charged for the inputs of the
+  region. A value the region test already computed for an input is not charged twice.
+
+The entry's cost is the three together, divided by the inputs in the region and by F. A receipt
+keeps the three apart as well (`r`, `r_rule`, `b`), so that
+
+    cost = r + (r_rule + b) / coverage
 
 `cond(c, x, y)` computes only the chosen side, so an entry can run something expensive on a few
 inputs and pay for it only there.
@@ -66,22 +80,35 @@ constant limit is what stands in for "the region must be too large to enumerate"
 network's outputs cannot be pasted in. A table can still be computed from the weights in the build,
 and is then paid for there.
 
-## 3. The verifier
+## 3. The data set and the verifier
+
+**The data set** is part of the model: `data_set` in `models/<name>/config.yaml`. Two kinds exist.
+
+- `all`, the default: every input of the input space, each counted once.
+- `lengths`: an input has a number of tokens drawn from a list, each equally likely; the tokens
+  are uniform and fill the first slots, and the remaining slots hold a number that stands for
+  "empty". This is a data set by its distribution: it cannot be listed, only drawn from.
+
+The config's `data_set.says` is the sentence the agent's prompt gives about the data set. What the
+agent is told is the data set, in full. What it is not told is anything about the training.
 
 `level1/verifier.py` is the only judge. Given an entry, it
 
 1. checks that it is an entry (shape, operations, limits) and refuses it with the reason if not;
-2. picks the inputs: every input when the data set has at most `verifier.enumerate_up_to` (200,000)
-   of them, otherwise a fresh uniform sample of `verifier.sample_size` (4,000) from a seed nobody
-   chose;
+2. picks the inputs, as `verifier.check` says:
+   - `all`: every input of the data set;
+   - `sample`: `verifier.sample_size` inputs drawn afresh for each scoring, from a seed nobody chose;
+   - `auto`, the default: `all` when the data set can be listed and has at most
+     `verifier.enumerate_up_to` (200,000) inputs, else `sample`;
 3. gets the network's outputs on them by running the network, written as an entry, through the same
    interpreter;
 4. runs the entry on them and counts;
 5. returns a receipt: the parts measured, and the reward under the run's reward function.
 
 On a sample, the receipt also has the 95% lower bound of the fidelity (Wilson), and the reward uses
-that bound, so a lucky sample does not pay. The pilot's data set has 4,096 inputs, so every input
-is checked and nothing is sampled.
+that bound, so a lucky sample does not pay. A build is spread over the inputs scored, not over the
+size of the data set (`docs/REWARD.md`, section 1). The pilot on pairs has 4,096 inputs, so every
+one is checked; the pilot on 1 to 4 tokens has about 17 million and is sampled, 16,384 per scoring.
 
 The agent states a fidelity with every submission. The default reward ignores the claim and uses
 what was measured; the receipt records the overclaim. `r_alpha_claimed` is the variant in which the
@@ -92,14 +119,19 @@ claim is credited when the measurement confirms it and an overclaim is penalised
 A round is one session with two tools (`level1/session.py`):
 
 - `run_python(code)`: runs the agent's code in a sandbox. In scope: the weights, the entry language
-  (`lv1`), the network's definition (`model`), `measure(entry)` (the verifier's own measuring code on
-  the same kind of inputs), `save_entry(name, entry)` and the entries saved so far. Exploring costs
-  nothing; only submitted entries are scored.
+  (`lv1`), the network's definition (`model`), `info` (sizes, the data set, how it is checked),
+  `network_outputs()` (the data set's inputs, or a fixed sample of them, with the network's
+  outputs), `measure(entry)` (the verifier's own measuring code on those inputs),
+  `save_entry(name, entry)` and the entries saved so far. Exploring costs nothing; only submitted
+  entries are scored.
 - `submit_entry(name, claimed_fidelity, expected_fidelity_other)`: hands a saved entry to the
   verifier and returns the receipt.
 
 Both have budgets per round (config: `session`). Every call is appended to the session's
-`tools.jsonl`.
+`tools.jsonl`, and every program the agent ran is kept in full with what it printed
+(`session/python/NNN.py` and `.txt`). The Claude Code backend also keeps everything the CLI emitted
+(`round_k/stream_NN.jsonl`), which holds what the agent wrote between its tool calls. What the agent
+does while exploring is recorded and neither rewarded nor charged.
 
 **The agent is not told what the model does.** This holds for every route: the prompt, the tools'
 descriptions, the files placed in the sandbox, names, the entry guide, what the code can import.
@@ -107,7 +139,8 @@ Three things carry it:
 
 - The model folder says nothing about the task. Weights are named for what they are (`embed`,
   `hidden`, `unembed`), networks by a neutral id (`lin-a-s0`). The task and the reference entries
-  are in `withheld/<model>/`.
+  are in `withheld/<model>/`. Where the data set is wider than the training, which of its inputs
+  the network was trained on is withheld in the same way.
 - `level1/hygiene.py` searches everything the pipeline puts within the agent's reach for the
   forbidden strings (the run config's list and the model's own in `withheld/<model>/task.yaml`),
   before the run starts and before every prompt. A hit stops the run before a model is asked. The
@@ -120,23 +153,30 @@ Three things carry it:
 
 `level1/loop.py` drives a run.
 
-- **Before the first round**: the network as an entry must score exactly 0, the hygiene check must
-  pass, and the sandbox is probed with real escape attempts.
-- **A round**: the prompt (`prompts/round_v1.md`) holds the network's definition, the entry guide,
-  how entries are scored, the budgets, and the earlier rounds: every submission's receipt and the
-  notes the agent left. Scored entries of earlier rounds are in the session's workspace under their
+- **Before the first round**: the network as an entry must have fidelity 1 and cost 1 (a reward of
+  0; on a sample the lower bound puts it just under 0), the hygiene check must pass, and the
+  sandbox is probed with real escape attempts.
+- **A round**: the prompt (`prompts/round_v1.md`) holds the network's definition, the data set, the
+  entry guide, how entries are scored, the budgets, and the earlier rounds: every submission's
+  receipt and the notes the agent left. The template names no model: everything about one comes
+  from its folder and the run config. Scored entries of earlier rounds are in the session's workspace under their
   names, the best one also as `best`.
 - **The rounds end** at `rounds_max` (5), after `patience` (2) rounds in a row that did not raise
   the best reward, or after two refusals in a row.
 - **The lock**: the scored submission with the highest reward, the earliest on a tie, byte for byte
-  as it was submitted (its hash is checked).
+  as it was submitted (its hash is checked). When the verifier samples, the locked entry is the
+  best of several scorings and its recorded reward leans high, so it is scored once more on a fresh
+  sample, and the report gives both numbers.
 - **The seed check**: the locked entry on the second network. What the entry computes from the
   weights is computed afresh there; a number read off the first network and written in as a
   constant stays what it was. This is the check on hard-coded exceptions.
 - **The report**: the locked entry on both networks, every submission with its parts, the withheld
-  reference entries on both networks, and the agent's closing notes. It also marks which
-  submissions are on the frontier of coverage, fidelity and whole cost, which needs no reward
-  function at all.
+  reference entries on both networks (on a sampled data set, the mean of several fixed samples),
+  what the agent ran, and its closing notes. It also marks
+  which submissions are on the frontier, which needs no reward function at all. The frontier's
+  three axes are the share of the data set answered rightly (up), the share answered wrongly
+  (down) and the cost (down). Coverage and fidelity are not the axes because an entry should not
+  count as better for covering inputs it gets wrong.
 
 ## 6. Who answers a round
 
@@ -156,7 +196,7 @@ Everything a run knows is in its folder, written as it happens:
 
     run.json            config, commit, hash of the trusted files, sandbox and its probe
     log.jsonl           what happened, appended
-    round_001/          prompt.md, session/, response.md, meta.json, round.json
+    round_001/          prompt.md, session/, response.md, stream_01.jsonl, meta.json, round.json
     locked_entry.json, lock.json, seed_check.json, report.md, report.json
 
 A round is done when its `round.json` is written. `resume` starts at the first round that is not.
@@ -168,8 +208,9 @@ from the records alone, and `rescore` prints the records under another reward.
 
 ## 8. Adding a model
 
-1. `models/<name>/config.yaml`: sizes, the input space, the weights' names and shapes, the networks
-   (id, file, sha256). At least two networks if the run is to have a seed check.
+1. `models/<name>/config.yaml`: sizes, the input space, the data set (and the sentence the agent
+   is told about it), the weights' names and shapes, the networks (id, file, sha256). At least two
+   networks if the run is to have a seed check.
 2. `models/<name>/model.py`: `reference(g, lv1)`, the network's computation in the entry language.
    Its cost must be the same on every input.
 3. `models/<name>/zoo/*.npz`: the weights, saved without pickle.
@@ -177,6 +218,9 @@ from the records alone, and `rescore` prints the records under another reward.
    it away (`hygiene`). Optionally `references.py` with reference entries for the report.
 5. A run config next to `config/pilot/lin-a.yaml`, and a small one like `lin-a-smoke.yaml` to try
    first.
+
+`models/lin-a-1to4` shows a second model made from the first: the same weights with one all-zero
+column added to `embed` for an empty slot, four slots in place of two, and a `lengths` data set.
 
 Names are part of what the agent can reach: a model folder, a network id or a weight's name must
 not say what the network does. The hygiene check reads them. If the network needs an operation the
@@ -192,7 +236,7 @@ language lacks, add it to `level1/lang.py` with a price, and say so in `agent_do
 | Rounds | at most 5, patience 2 | `rounds_max`, `patience` |
 | Session budgets | 40 `run_python` calls, 4 submissions, 150 turns, 90 minutes | `session` |
 | One `run_python` call | 300 s, 4 GB | `python` |
-| Verifier | every input up to 200,000; else a sample of 4,000; 120 s per entry | `verifier` |
+| Verifier | `check: auto`: every input up to 200,000, else a sample of 4,000; 120 s per entry; references on 8 fixed samples | `verifier` |
 | Agent | `claude-fable-5-1`, effort high (the proof pipeline's pilots used this model) | `agent_model`, `effort` |
 | Sandbox | `auto`: the strongest mode that works | `sandbox` |
 
@@ -203,4 +247,7 @@ Numbers live in the config files and never in code. Nothing specific to one mode
 - Levels 2 and 3.
 - KL as the measure of fidelity.
 - A run scored without a scalar: the frontier is reported, but the lock needs one number.
-- Networks beyond the pilot. Everything runs in numpy on a laptop; no GPU is involved.
+- Networks beyond the two pilots, which share their weights. Everything runs in numpy on a laptop;
+  no GPU is involved.
+- A count of the forward passes the agent's own code makes while exploring. Its programs are kept,
+  so the count can be made afterwards.

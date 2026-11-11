@@ -37,7 +37,10 @@ looking: its code could open `withheld/lin-a/task.yaml`. The run says so when it
 records the mode, and the report marks it. A process-mode run is fine for trying the pipeline out.
 For a run that is meant to count, use container or Landlock mode. Every program the agent ran is
 kept in full in the session folder (`round_k/session/python/`), so what a process-mode run actually
-read can be checked afterwards.
+read can be checked afterwards. The report helps with that: under "What the agent ran" it lists
+the programs that reach for files or the system (`open(`, `os.`, `pathlib`, `subprocess`, sockets,
+the withheld folder's name). A match is a reason to read the program, not a verdict, and a program
+that reads a file in another way is not listed.
 
 ## The probe
 
@@ -64,7 +67,7 @@ A fresh folder per call:
     model.py       the network's definition (models/<name>/model.py)
     harness.py     starts the recipe and writes the result
     weights.npz    the weights of the rounds' network, and no other
-    input.json     sizes, limits, the entries saved so far
+    input.json     sizes, the data set and how it is checked, limits, the entries saved so far
 
 and limits from the run config (`python`): 300 s, 4 GB, 2 threads, a result of at most 8 MB. The
 result comes back as one JSON file that is parsed as data: nothing the sandbox writes is executed or
