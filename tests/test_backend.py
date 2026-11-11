@@ -254,6 +254,9 @@ def test_api_key_mode_needs_its_variable(tmp_path):
         backend(cfg, [[]], environ={**ENV, "CPL_ANTHROPIC_WORKSPACE": "x\nInjected: 1"})
     b, _, _ = backend(cfg, [[]], environ={**ENV, "CPL_ANTHROPIC_WORKSPACE": "wrkspc_01AbC"})
     assert b.env["ANTHROPIC_CUSTOM_HEADERS"] == "anthropic-workspace-id: wrkspc_01AbC"
+    with pytest.raises(BackendError, match="line breaks") as caught:
+        backend(cfg, [[]], environ={**ENV, "CPL_ANTHROPIC_KEY": KEY + "\r"})  # a key file with Windows line endings
+    assert KEY not in str(caught.value)
     with pytest.raises(run_config.ConfigError, match="api_key_env must name"):
         billed(tmp_path, api_key_env="ANTHROPIC_API_KEY")
     with pytest.raises(run_config.ConfigError, match="budget.run_usd must be a positive"):
@@ -339,6 +342,26 @@ def test_a_session_at_its_spending_cap_keeps_what_it_did(tmp_path):
     r = b.respond("p", 0, where, session)
     assert len(calls) == 1 and r.text == "so far" and r.meta["stop_reason"] == "budget" and r.meta["cost_usd"] == 3.4
     assert r.meta["stop_details"] == {"budget": "the session reached its spending cap ($3.00)"}
+
+
+def test_the_key_never_reaches_a_record(tmp_path):
+    """Should the CLI ever print the key, it is taken out of the stream and the messages before they are written."""
+    cfg, run = billed(tmp_path)
+    session, where = round_of(cfg, run, 1)
+    b, _, _ = backend(cfg, [([init("apiKeyHelper"), assistant(f"echo {KEY}"), result(is_error=True, result=f"Invalid API key {KEY}")], 1)],
+                      environ=dict(ENV))
+    with pytest.raises(StopRun) as caught:
+        b.respond("p", 0, where, session)
+    assert KEY not in str(caught.value) and "<the API key>" in str(caught.value)
+    assert not [p for p in run.rglob("*") if p.is_file() and KEY in p.read_text(errors="replace")]
+
+
+def test_a_subscription_limit_is_still_waited_out(setup):
+    """The API's words for an account that cannot pay must not catch a subscription's usage limit."""
+    cfg, session, where = setup
+    limited = [init("none"), result(is_error=True, result="Claude usage limit reached. You'll regain access at 5pm; see billing.")]
+    b, calls, sleeps = backend(cfg, [(limited, 1), [init("none"), assistant("done"), result()]])
+    assert b.respond("p", 0, where, session).text == "done" and len(calls) == 2 and len(sleeps) == 1
 
 
 def test_a_model_that_cannot_be_used_stops_the_run(setup):

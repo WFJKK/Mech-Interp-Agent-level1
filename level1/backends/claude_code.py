@@ -87,8 +87,9 @@ SWAP_EVENTS = ("model_fallback", "model_refusal_fallback", "model_consent_fallba
 REFUSAL_EVENT = "model_refusal_no_fallback"
 LIMIT_WORDS = ("usage limit", "rate limit", "rate_limit", "overloaded", "too many requests", "capacity", "529", "429")
 LOGIN_WORDS = ("not logged in", "login", "authenticat", "unauthorized", "invalid api key", "401", "403")
-# An API account that cannot pay for more: no credit left, or a spend limit reached. Waiting does not help.
-BILLING_WORDS = ("credit balance", "billing", "regain access", "api usage limits", "spend limit")
+# An API account that cannot pay for more: no credit left, or its spend limit reached. Waiting does not help.
+# (The API's own words; a subscription's usage limit says otherwise, and is waited out.)
+BILLING_WORDS = ("credit balance", "api usage limits")
 # The run's model cannot be used: it does not exist, or the login or key has no access to it.
 MODEL_WORDS = ("issue with the selected model", "may not have access to it", "not_found_error")
 STDERR_TAIL = 2000
@@ -266,6 +267,9 @@ class ClaudeCodeBackend:
         if self.auth == "api_key":
             if not self.key_var or not env.get(self.key_var):
                 raise BackendError(f"auth is api_key, but {self.key_var or 'api_key_env'} is not set: put your API key in it first")
+            if not env[self.key_var].isprintable() or any(c.isspace() for c in env[self.key_var]):
+                raise BackendError(f"the value of {self.key_var} has spaces or line breaks, which an API key does not have "
+                                   "(a line ending from the file it came from?)")
             errors = budget.check(cfg.get("budget"))
             if errors:
                 raise BackendError("; ".join(errors))
@@ -322,9 +326,9 @@ class ClaudeCodeBackend:
         try:
             status, body = self.http(f"{base}/v1/models/{urllib.parse.quote(model, safe='')}", headers)
         except (OSError, ValueError) as exc:  # no network, no certificates: the first round will tell
-            self.log(f"WARNING: could not check the API key before the run ({type(exc).__name__}: {str(exc)[:200]}); going on")
+            self.log(f"WARNING: could not check the API key before the run ({type(exc).__name__}: {self.scrub(exc)[:200]}); going on")
             return
-        said = " ".join(str(body).split())[:300]
+        said = self.scrub(" ".join(str(body).split())[:300])
         if status in (401, 403):
             raise BackendError(f"the API refused the key in {self.key_var} (HTTP {status}): {said}")
         if status == 404:
@@ -343,6 +347,12 @@ class ClaudeCodeBackend:
             raise BackendError(f"the model {model} is retired: the API no longer answers it")
         if lifecycle == "deprecated":
             self.log(f"WARNING: the model {model} is deprecated: the API still answers it, but not for long")
+
+    def scrub(self, text) -> str:
+        """The text with the key's value taken out, should anything ever echo it."""
+        text = str(text)
+        key = self.env.get(self.key_var) if self.auth == "api_key" and self.key_var else None
+        return text.replace(key, "<the API key>") if key else text
 
     def available(self, index: int) -> bool:
         return True
@@ -448,6 +458,7 @@ class ClaudeCodeBackend:
             # Everything the CLI emitted on this try, as it came: the messages, the tool calls and as much of the
             # model's reasoning as the CLI shows (a try stopped at the time limit: what it emitted until then).
             # response.md keeps only the text; this keeps all.
+            stdout = self.scrub(stdout)
             atomic_write(where / f"stream_{n:02d}.jsonl", stdout)
             out = stdout.strip()
             data, messages = parse_output(out)
@@ -491,7 +502,7 @@ class ClaudeCodeBackend:
                 self.log(f"  {ended}; the round ends with what it submitted")
                 text = join(messages) if messages else f"({ended})"
                 break
-            retry, what = self._classify(message)
+            retry, what = self._classify(self.scrub(message))
             failures.append(what)
             if not retry:
                 raise StopRun(f"Claude Code stopped the run: {what}")
