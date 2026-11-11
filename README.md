@@ -11,14 +11,14 @@ This is level 1 of the three levels for loosening compact proofs: the claim is c
 measuring it on inputs the verifier picks, and nothing is proved. Levels 2 (an adversary with a
 budget) and 3 (an argument that convinces) are not in this repository.
 
-Status, 11 November 2026: built and tested with scripted rounds only. No run with a model has been
-made yet. Two pilots are set up (see "The two pilots").
+Status, 11 November 2026: three pilots are set up (see "The pilots"). The pilot on 1 to 4 tokens
+has been run once, with a smoke run before it; the other two have not been run yet.
 
 ## How a run goes
 
 1. **The network.** `models/<name>/` holds the weights, `model.py`, which writes the network in the
    entry language, and the data set the network is asked about. That fixes what one forward pass
-   costs (655 and 671 operations for the two pilots).
+   costs (655, 671 and 703 operations for the three pilots).
 2. **The rounds.** The agent explores the network with `run_python` (a sandbox with the weights and
    the entry language) and hands entries to the verifier with `submit_entry`. Each round is a fresh
    session; its closing notes and its scored entries go to the next round.
@@ -60,17 +60,21 @@ its prompt. The run config says how the verifier checks an entry (`verifier.chec
   uses the lower end of the fidelity's 95% confidence interval;
 - `auto`, the default: `all` when the data set can be listed and is small enough, else `sample`.
 
-## The two pilots
+## The pilots
 
 | Run config | Network | Data set | Checked on |
 | --- | --- | --- | --- |
 | `config/pilot/lin-a.yaml` | `models/lin-a` | every pair of tokens: 4,096 inputs | every input |
 | `config/pilot/lin-a-1to4.yaml` | `models/lin-a-1to4` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
+| `config/pilot/lin-b.yaml` | `models/lin-b` | inputs of 1 to 8 tokens, each length an eighth: about 2.8 x 10^14 inputs | 16,384 sampled per scoring |
 
-Both use the same two trained networks (two seeds). In the second the networks are asked about
-more inputs than they were trained on, and the agent is not told which ones those were: finding
-where the network's behaviour can be described cheaply is part of the work. Each pilot has a small
-smoke config next to it (`lin-a-smoke.yaml`, `lin-a-1to4-smoke.yaml`).
+The first two use the same two trained networks (two seeds). `lin-b` is a network of the same
+design trained afresh, also with two seeds (`withheld/lin-b/train.py`, resumable, a minute or two
+per 10,000 steps on a laptop's CPU). In the last two the networks are asked about more inputs than
+they were trained on, and the agent is not told which ones those were: finding where the network's
+behaviour can be described cheaply is part of the work. On lin-b there are too many inputs for the
+agent, or anyone, to check them all. Each pilot has a small smoke config next to it
+(`lin-a-smoke.yaml`, `lin-a-1to4-smoke.yaml`, `lin-b-smoke.yaml`).
 
 ## Quick start
 
@@ -159,6 +163,7 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
       sandbox.py, runner.py, harness.py    where the agent's code runs
     models/lin-a/         a linear network on pairs of tokens, two seeds
     models/lin-a-1to4/    the same two networks, asked about inputs of 1 to 4 tokens
+    models/lin-b/         a network of the same design trained afresh, asked about inputs of 1 to 8 tokens
     withheld/<model>/     what it was trained to do, and reference entries (never shown to the agent)
     agent_docs/      the entry guide the agent reads
     prompts/         the round's prompt template

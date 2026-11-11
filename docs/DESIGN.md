@@ -222,6 +222,8 @@ from the records alone, and `rescore` prints the records under another reward.
 
 `models/lin-a-1to4` shows a second model made from the first: the same weights with one all-zero
 column added to `embed` for an empty slot, four slots in place of two, and a `lengths` data set.
+`models/lin-b` shows a model with networks trained here: the training script lives in
+`withheld/lin-b/train.py`, since it has to say what the networks are trained to do.
 
 Names are part of what the agent can reach: a model folder, a network id or a weight's name must
 not say what the network does. The hygiene check reads them. If the network needs an operation the
@@ -248,7 +250,7 @@ Numbers live in the config files and never in code. Nothing specific to one mode
 - Levels 2 and 3.
 - KL as the measure of fidelity.
 - A run scored without a scalar: the frontier is reported, but the lock needs one number.
-- Networks beyond the two pilots, which share their weights. Everything runs in numpy on a laptop;
-  no GPU is involved.
+- Networks beyond the pilots' two designs of size. Everything runs in numpy on a laptop; no GPU is
+  involved, training included.
 - A count of the forward passes the agent's own code makes while exploring. Its programs are kept,
   so the count can be made afterwards.

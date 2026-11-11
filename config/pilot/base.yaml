@@ -3,6 +3,7 @@
 # check:
 #   config/pilot/lin-a.yaml         the linear network on pairs of tokens, 64 tokens, width 8
 #   config/pilot/lin-a-1to4.yaml    the same network asked about inputs of 1 to 4 tokens
+#   config/pilot/lin-b.yaml         a network of the same design trained afresh, asked about 1 to 8 tokens
 #
 # A run has two parts (docs/DESIGN.md):
 #   1. the rounds: the agent explores one network and submits entries; the score is the reward;

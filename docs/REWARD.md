@@ -139,13 +139,39 @@ is in `withheld/lin-a-1to4/task.yaml`, with the reference entries next to it. Re
 
 Here the task is no longer the answer. Claimed everywhere it loses badly; claimed where it holds it
 covers half the data set at most. The best reference pairs it with an exact but dearer program on
-the other half and reaches about 0.71, so there is room above it for an agent that finds something
-cheaper than the contraction on the inputs the training never saw. Nothing here says such a thing
-exists.
+the other half and reaches about 0.71.
+
+The first full pilot (11 November 2026, 5 rounds) went well above that: 0.832 on both networks,
+measured exactly on every input. Its entry takes each token's own output from a table computed
+from the weights on one or two tokens, and on three or four adds two columns of a precomputed table
+of sums for every two tokens. Every gain after the first round came from computing the network's
+own arithmetic more cheaply, not from a new description of what it does.
 
 One scoring is noisy: for an entry near 0.70, the reward of a single sample of 16,384 inputs has a
 standard deviation of about 0.005, and the eight samples above lie up to 0.02 apart. That is why
 the report scores each reference on `verifier.reference_samples` fixed samples and gives the mean.
+
+### On 1 to 8 tokens (`models/lin-b`, sampled)
+
+A network of the same design trained afresh (`withheld/lin-b/train.py`), asked about inputs of 1 to 8
+tokens: about 2.8 x 10^14 inputs, far too many to check. What it was trained on, and how often each
+network follows the task by number of tokens, is in `withheld/lin-b/task.yaml`. Rewards at alpha =
+10, each the mean of 8 scorings on fixed samples of 16,384 inputs; reproduce with
+`python -m level1.report --model models/lin-b --sample-size 16384` (about two minutes).
+
+| Entry | s0 | s1 | Coverage | Cost | In short |
+| --- | --- | --- | --- | --- | --- |
+| the network itself | -0.0023 | -0.0023 | 1.00 | 1.000 | the lower bound's charge |
+| contraction | 0.1765 | 0.1765 | 1.00 | 0.821 | the weights multiplied together once, all 8 slots read |
+| target_on_four | 0.1134 | 0.1130 | 0.12 | 0.039 | the task on the inputs of the training |
+| target_on_three_to_five | 0.3313 | 0.3289 | 0.37 | 0.033 | the task where it holds best |
+| target_everywhere | 0.3839 | 0.3796 | 1.00 | 0.021 | the task on every input: wrong on about one in eighteen |
+| per_length | 0.6669 | 0.6710 | 1.00 | 0.128 | one token from a table, the task on 2 to 7, the contraction on 8 |
+
+Unlike the network of the first two pilots, this one does not follow its task exactly even on its own
+inputs: it follows it on 99.8% of the inputs of the training, and on 81% to 99% of the others,
+depending on their length. Where it departs from the task, and how cheaply that can be said, is the
+work.
 
 ## 5. Ways to game a reward, and what stops each
 
