@@ -66,6 +66,21 @@ def test_the_restart_note_and_the_sandbox_folder_are_checked_too(model, cfg):
     assert "sandbox folder's location" not in loop.agent_surface({**cfg, "sandbox_dir": "/data/max2-boxes"}, model, "container")
 
 
+def test_the_wider_data_set_does_not_give_the_training_away(model4):
+    """On the model asked about 1 to 4 tokens, nothing the agent can reach says which inputs it was trained
+    on: not the prompt, not the sandbox's files, not the model folder's own files."""
+    cfg4 = run_config.load("config/pilot/lin-a-1to4.yaml")
+    forbidden = loop.forbidden_strings(cfg4, model4)
+    assert {"pairs", "two tokens", "2 tokens", "exactly two", "trained on", "largest"} <= set(forbidden)
+    texts = loop.agent_surface(cfg4, model4)
+    texts["prompt"] = prompt.build(cfg4, model4, 1, [], 671, False)
+    texts.update({f"model folder {p.name}": p.read_text() for p in model4.path.iterdir() if p.is_file()})
+    hygiene.check(texts, forbidden)
+    assert "n_ctx = 4" in texts["prompt"] and "n_ctx = 2" not in texts["prompt"] and "16,384 inputs drawn afresh" in texts["prompt"]
+    assert "lin-a" not in texts["prompt"] and '"says"' not in texts["sandbox info"]
+    assert len(hygiene.hits({p.name: p.read_text() for p in model4.withheld().iterdir() if p.is_file()}, forbidden)) > 5
+
+
 def test_the_check_finds_what_it_looks_for(model, cfg):
     forbidden = loop.forbidden_strings(cfg, model)
     found = hygiene.hits({"a file": "line one\nIt outputs the LARGER token.\nmax OF two"}, forbidden)

@@ -173,8 +173,10 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     log = Log(path, out)
     verifier = Verifier(model, cfg["network"], cfg)
     itself = verifier.score(verifier.reference)
-    if itself["status"] != "scored" or abs(itself["reward"]) > 1e-12 or itself["parts"]["fidelity"] != 1.0:
-        raise RuntimeError(f"the network written as an entry does not score 0: {describe(itself)}")
+    # The network as an entry: right on every input, at exactly one forward pass each. (Its reward is then 0
+    # when every input is checked, and a little below on a sample, where the fidelity's lower bound is used.)
+    if itself["status"] != "scored" or itself["parts"]["fidelity"] != 1.0 or itself["parts"]["cost"] != 1.0:
+        raise RuntimeError(f"the network written as an entry does not come out at fidelity 1 and cost 1: {describe(itself)}")
     sb = choose(cfg, protected_paths(cfg, model, path))
     first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
@@ -192,9 +194,10 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     write_json(path / "run.json", {
         "run_id": cfg["run_id"], "config": cfg, "created": now(), "git": git_state(), "trusted_hash": trusted_hash(model),
         "sandbox": {**sb.describe(), "probe": report}, "prices": lang.PRICES, "model_ops": itself["parts"]["model_ops"],
-        "n_total": model.n_total, "enumerated": verifier.enumerated,
+        "n_total": model.n_total, "enumerated": verifier.enumerated, "check": verifier.check, "n_inputs": verifier.n_inputs(),
     })
-    log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}")
+    log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
+        + (f"every one of {model.n_total:,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
     drive(path, fake_scripts=fake_scripts, out=out)
     return path
 
@@ -276,6 +279,9 @@ def finish(path: Path, out=print) -> dict:
     done = completed(path)
     best = best_submission(done)
     second = (cfg.get("seed_check") or {}).get("network")
+    # What an earlier finish measured on a sample is a result and is kept: finishing again never redraws it.
+    old_lock = read_json(path / "lock.json") if (path / "lock.json").is_file() else {}
+    old_seed = read_json(path / "seed_check.json") if (path / "seed_check.json").is_file() else {}
     if best is None:
         lock = {"locked": False, "reason": "no submission was scored"}
         write_json(path / "lock.json", lock)
@@ -288,9 +294,23 @@ def finish(path: Path, out=print) -> dict:
         lock = {"locked": True, "entry_sha256": best["entry_sha256"], "network": cfg["network"],
                 **{k: best[k] for k in ("round", "submission", "name", "carried_as", "reward", "parts", "size", "claimed_fidelity",
                                         "expected_fidelity_other")}}
+        first = Verifier(model, cfg["network"], cfg)
+        if old_lock.get("entry_sha256") == lock["entry_sha256"] and old_lock.get("measured_again"):
+            lock["measured_again"] = old_lock["measured_again"]
+        elif not first.enumerated:
+            # The locked entry was picked as the best of several scorings, each on its own sample, so its recorded
+            # reward leans high. One more scoring on a fresh sample is a fair measurement of it.
+            again = first.score(entry, claimed=best.get("claimed_fidelity"))
+            if again["entry_sha256"] != lock["entry_sha256"]:
+                raise RuntimeError("the second scoring did not score the locked entry")
+            lock["measured_again"] = {k: again[k] for k in ("status", "reason", "reward", "parts", "inputs")}
         write_json(path / "lock.json", lock)
         log(f"locked {best['carried_as']} ({best['entry_sha256'][:12]}): " + describe(best))
-        if second:
+        if lock.get("measured_again"):
+            log(f"the locked entry on a fresh sample: {describe(lock['measured_again'])}")
+        if second and old_seed.get("entry_sha256") == lock["entry_sha256"] and old_seed.get("status") == "scored":
+            log(f"seed check on the second network (as measured before): {describe(old_seed)}")
+        elif second:
             receipt = Verifier(model, second, cfg).score(read_json(path / "locked_entry.json"), claimed=best.get("expected_fidelity_other"))
             if receipt["entry_sha256"] != lock["entry_sha256"]:
                 raise RuntimeError("the seed check did not score the locked entry")

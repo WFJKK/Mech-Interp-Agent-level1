@@ -66,14 +66,14 @@ def make_result(weights, info, extra):
         return g.entry(predict=model.reference(g, lv1))
 
     def network_outputs():
-        """(inputs, the network's outputs on them, operations of one forward pass): every input of the data
-        set when it has at most info["enumerate_up_to"] inputs, else a sample of info["sample_size"]."""
+        """(inputs, the network's outputs on them, operations of one forward pass). The inputs are every
+        input of the data set when info["check"] is "all"; otherwise a sample of info["sample_size"] inputs
+        drawn from it (the same sample at every call: the verifier draws a fresh one for each submission)."""
         if "out" not in cache:
-            if info["n_total"] <= info["enumerate_up_to"]:
+            if info["check"] == "all":
                 x = lv1.all_inputs(info["input_space"])
             else:
-                rng = np.random.default_rng(0)
-                x = np.stack([rng.integers(0, k, size=info["sample_size"]) for k in info["input_space"]], axis=1)
+                x = lv1.draw_inputs(info["data_set"], info["input_space"], info["sample_size"], np.random.default_rng(0))
             answers, ops = lv1.run_reference(reference_entry(), weights, n_ctx, x)
             cache["out"] = (x, answers, ops)
         return cache["out"]
@@ -82,8 +82,9 @@ def make_result(weights, info, extra):
         """What the verifier measures of an entry, with the reward: the same code on the same kind of inputs."""
         lv1.check_structure(entry, extra["limits"]["max_nodes"], extra["limits"]["max_const_scalars"])
         x, answers, ops = network_outputs()
-        parts = lv1.measure(entry, weights, n_ctx, x, answers, ops, info["n_total"])
-        parts["fidelity_low"] = parts["fidelity"]
+        parts = lv1.measure(entry, weights, n_ctx, x, answers, ops)
+        sampled = info["check"] != "all" and parts["n_in_region"]
+        parts["fidelity_low"] = lv1.wilson_lower(parts["n_agree"], parts["n_in_region"]) if sampled else parts["fidelity"]
         parts["reward"] = rewards.compute(parts, extra["reward"])["reward"]
         return parts
 
@@ -110,21 +111,22 @@ TOOLS = {
     "run_python": {
         "description": (
             "Run Python code in a sandbox and get back what it printed. In scope: `weights` (a dict of numpy arrays), "
-            "`info` (sizes, input_space and limits), `np`, `lv1` (the entry language), `model` (the network's "
-            "definition, model.reference(g, lv1)), `graph()` (a new lv1.Graph on these weights), "
-            "`network_outputs()` (inputs, the network's outputs, operations of a forward pass), "
-            "`measure(entry)` (what the verifier measures, with the reward), `entries` (the saved entries by name) "
-            "and `save_entry(name, entry)`. No network access; nothing persists between calls except saved "
-            "entries. Each call counts against the python budget."),
+            "`info` (sizes, input_space, the data set and how it is checked), `np`, `lv1` (the entry language), "
+            "`model` (the network's definition, model.reference(g, lv1)), `graph()` (a new lv1.Graph on these weights), "
+            "`network_outputs()` (inputs of the data set, every one of them or a fixed sample as `info['check']` says, "
+            "the network's outputs on them, and the operations of a forward pass), "
+            "`measure(entry)` (what the verifier measures: coverage, fidelity, cost and the reward), `entries` (the "
+            "saved entries by name) and `save_entry(name, entry)`. No network access; nothing persists between "
+            "calls except saved entries. Each call counts against the python budget."),
         "schema": {"type": "object", "properties": {"code": {"type": "string"}}, "required": ["code"]},
     },
     "submit_entry": {
         "description": (
             "Hand a saved entry to the verifier. It measures the entry on its own inputs and returns the receipt: "
-            "status scored or refused (with the reason), coverage, fidelity, the three costs and the reward. "
-            "claimed_fidelity is the share of the entry's region on which you say it gives the network's output "
-            "(0 to 1); expected_fidelity_other is the same for the second network, which you do not see. Each "
-            "call counts against the submission budget."),
+            "status scored or refused (with the reason), coverage, fidelity, cost (with its three parts) and the "
+            "reward. claimed_fidelity is the share of the entry's region on which you say its interpretation gives "
+            "the network's output (0 to 1); expected_fidelity_other is the same for the second network, which you "
+            "do not see. Each call counts against the submission budget."),
         "schema": {"type": "object", "properties": {
             "name": {"type": "string", "description": "the name the entry was saved under"},
             "claimed_fidelity": {"type": "number"},
@@ -135,10 +137,12 @@ TOOLS = {
 
 
 def agent_info(model, verifier_cfg: dict) -> dict:
-    """What the agent's code is handed about the network and the run's limits. No name in it says more than
-    the model folder's own agent-facing files."""
-    return {**model.info(), "n_total": model.n_total, "enumerate_up_to": int(verifier_cfg["enumerate_up_to"]),
-            "sample_size": int(verifier_cfg["sample_size"])}
+    """What the agent's code is handed about the network, its data set and how the verifier checks it. No
+    name in it says more than the model folder's own agent-facing files."""
+    from .verifier import DEFAULTS, resolve_check
+
+    cfg = {**DEFAULTS, **(verifier_cfg or {})}
+    return {**model.info(), "n_total": model.n_total, "check": resolve_check(model, cfg), "sample_size": int(cfg["sample_size"])}
 
 
 def box_files(model) -> dict:

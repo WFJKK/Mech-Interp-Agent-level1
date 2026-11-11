@@ -99,14 +99,69 @@ def test_sampling_above_the_enumeration_limit(model, nets):
     target = model.reference_entries(w)["target"]
     a, b = v.score(target, seed=7), v.score(target, seed=7)
     assert a["inputs"] == {"mode": "sample", "n": 500, "seed": 7} and a["parts"] == b["parts"]
-    assert a["parts"]["n_inputs"] == 500 and a["parts"]["n_total"] == 4096
+    assert a["parts"]["n_inputs"] == 500 and v.check == "sample" and v.n_inputs() == 500
     assert a["parts"]["fidelity_low"] < a["parts"]["fidelity"] <= 1.0
     assert a["reward_detail"]["fidelity_used"] == a["parts"]["fidelity_low"]  # luck in the sample does not pay
     fresh = v.score(target)
     assert fresh["inputs"]["seed"] not in (None, 7)
     g = Graph(w, 2)
     table = v.score(g.entry(predict=(g.weight("unembed") @ (g.weight("hidden") @ g.weight("embed")))[0, 0].argmax()))
-    assert table["parts"]["b"] == pytest.approx(36864 / (4096 * 655))  # the build is paid for the whole data set
+    assert table["parts"]["b"] == pytest.approx(36864 / (500 * 655))  # the build is spread over the inputs scored
+
+
+def test_how_the_verifier_checks_is_a_setting(model, model4, nets):
+    """Every input or a sample: verifier.check says which, and auto decides by the data set."""
+    assert Verifier(model, "lin-a-s0", CFG).check == "all"                                    # auto: 4,096 inputs can be listed
+    forced = Verifier(model, "lin-a-s0", {**CFG, "verifier": {"check": "sample", "sample_size": 300}})
+    assert forced.check == "sample" and forced.n_inputs() == 300 and forced.score(forced.reference)["inputs"]["mode"] == "sample"
+    listed = Verifier(model, "lin-a-s0", {**CFG, "verifier": {"check": "all", "enumerate_up_to": 10}})
+    assert listed.check == "all" and listed.n_inputs() == 4096                                # asked for: the limit does not apply
+    assert Verifier(model4, "lin-a-1to4-s0", CFG).check == "sample"                           # auto: its inputs are drawn
+    with pytest.raises(RuntimeError, match="cannot be checked on every input"):
+        Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"check": "all"}})
+    with pytest.raises(RuntimeError, match="verifier.check must be one of"):
+        Verifier(model, "lin-a-s0", {**CFG, "verifier": {"check": "some"}})
+
+
+def test_one_cost_and_the_reward_written_with_it(model, nets):
+    """cost is the entry's whole work per input of its region; coverage * [(1 - cost) - alpha * (1 - fidelity)]
+    is the reward, whatever the split into build, region test and interpretation."""
+    w = nets["lin-a-s0"][0]
+    v = Verifier(model, "lin-a-s0", CFG)
+    for name, entry in {"the network": v.reference, **model.reference_entries(w)}.items():
+        r = v.score(entry)
+        p = r["parts"]
+        assert p["cost"] == pytest.approx(p["r"] + (p["r_rule"] + p["b"]) / p["coverage"]), name
+        assert r["reward"] == pytest.approx(p["coverage"] * ((1 - p["cost"]) - 10 * (1 - p["fidelity"]))), name
+        assert rewards.cost_of(p) == p["cost"] and rewards.cost_of({k: x for k, x in p.items() if k != "cost"}) == pytest.approx(p["cost"])
+    g = Graph(w, 2)
+    empty = v.score(g.entry(interpretation=g.token(0), region=g.token(0) > 99))["parts"]
+    assert empty["cost"] is None and rewards.cost_of(empty) is None
+
+
+def test_the_network_on_one_to_four_tokens(model, model4, nets):
+    """The same weights with a zero column for an empty slot: 671 operations per forward pass, the same outputs
+    as lin-a wherever an input has two tokens, and a data set drawn with every number of tokens equally likely."""
+    assert model4.n_total == 64 + 64**2 + 64**3 + 64**4 and not model4.can_enumerate()
+    w4 = model4.load_weights("lin-a-1to4-s0")
+    assert not w4["embed"][:, 64].any() and (w4["embed"][:, :64] == nets["lin-a-s0"][0]["embed"]).all()
+    ref = model4.reference_entry(w4)
+    x = lang.draw_inputs(model4.data_set, model4.input_space, 2000, np.random.default_rng(5))
+    answers, ops = lang.run_reference(ref, w4, 4, x)
+    assert ops == 671
+    n_tokens = (x < 64).sum(axis=1)
+    assert set(n_tokens.tolist()) == {1, 2, 3, 4} and all(0.2 < (n_tokens == k).mean() < 0.3 for k in (1, 2, 3, 4))
+    assert ((x[:, :-1] == 64) <= (x[:, 1:] == 64)).all() and x.min() >= 0 and x.max() == 64   # tokens first, then empty slots
+    two = n_tokens == 2
+    lin_a = {(int(a), int(b)): int(o) for (a, b), o in zip(nets["lin-a-s0"][2], nets["lin-a-s0"][3])}
+    assert all(lin_a[(int(r[0]), int(r[1]))] == int(o) for r, o in zip(x[two], answers[two]))
+    v = Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"sample_size": 3000}})
+    itself = v.score(v.reference, seed=1)
+    assert itself["parts"]["fidelity"] == 1.0 and itself["parts"]["cost"] == 1.0 and -0.02 < itself["reward"] < 0   # the lower bound's small charge
+    scores = {name: v.score(e, seed=1) for name, e in model4.reference_entries(w4).items()}
+    assert scores["target_everywhere"]["reward"] < 0 < scores["target_on_two"]["reward"] < scores["target_up_to_two"]["reward"]
+    assert scores["target_up_to_two"]["reward"] < scores["contraction"]["reward"] < scores["target_then_contraction"]["reward"]
+    assert scores["contraction"]["parts"]["fidelity"] == 1.0 and 0.2 < scores["target_on_two"]["parts"]["coverage"] < 0.3
 
 
 def test_wilson_lower_bound():

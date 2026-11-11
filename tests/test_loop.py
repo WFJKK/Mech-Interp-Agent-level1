@@ -78,16 +78,19 @@ def test_the_report(finished):
     assert rep["references"]["the network itself"]["lin-a-s0"]["reward"] == 0.0
     assert rep["references"]["target"]["lin-a-s1"]["parts"]["n_agree"] == 4092
     assert "| lin-a-s1 (the seed check) | 0.9887 | 1.0000 | 0.99902 |" in text
-    assert "n2 = maximum(n0, n1)   <- predict" in text and "| r4s2 | `best` | 0.9960 |" in text
+    assert "n2 = maximum(n0, n1)   <- interpretation" in text and "| r4s2 | `best` | 0.9960 |" in text
     assert "(weak: the agent's code could read any file" in text and "—" not in text
     rows = loop.rescore(path, {"name": "r_alpha", "alpha": 1}, out=lambda *_: None)
     assert rows[0]["rescored"] == pytest.approx(rows[0]["recorded"]) and rows[1]["rescored"] > rows[1]["recorded"]
-    # the frontier of coverage, fidelity and whole cost: the half region, the whole one and the exact one each
+    # the frontier of right share, wrong share and cost: the half region, the whole one and the exact one each
     # hold a corner; the same entry sent again does not
     assert {s["carried_as"]: s["on_frontier"] for s in rep["submissions"]} == \
         {"r1s1": True, "r2s1": True, "r3s1": True, "r4s1": False, "r4s2": False}
-    assert rep["submissions"][0]["whole_cost"] == pytest.approx(3 / 655) and "| 0.0046 | yes |" in text
-    assert rep["rounds"][0]["seconds"] is not None and "| Minutes | Output tokens |" in text
+    assert rep["submissions"][0]["whole_cost"] == pytest.approx(3 / 655)
+    assert "| r1s1 | `half` | 0.4977 | 0.5000 | 1.00000 | 0.0046 | 0.5000 | 0.00000 | yes |" in text
+    assert rep["submissions"][1]["wrong_share"] == pytest.approx(1 / 4096) and "measured again" not in text   # every input was checked
+    assert rep["rounds"][0]["seconds"] is not None and "| Minutes | Output tokens | Programs run | Sandbox minutes |" in text
+    assert rep["rounds"][0]["exploration"]["programs"] == 1 and "No program reaches for files or the system." in text
 
 
 def test_the_frontier_needs_no_reward():
@@ -98,6 +101,73 @@ def test_the_frontier_needs_no_reward():
             sub("d", 0.5, 0.99, 0.08, b=0.01), sub("e", 1.0, 0.95, 0.10), sub("f", 0.0, None, None), sub("g", 1.0, 1.0, 0.0, status="refused")]
     assert report.frontier(subs) == {"b", "c"}  # a and d are dominated; e repeats b; f covers nothing; g was refused
     assert report.whole_cost(subs[2]["parts"]) == pytest.approx(0.05 + 0.01 / 0.5) and report.whole_cost(subs[5]["parts"]) is None
+    # the axes are the share answered rightly and the share answered wrongly, not coverage and fidelity: an entry
+    # that answers the same inputs rightly and more of them wrongly is dominated, though it covers more
+    careful, careless = sub("careful", 0.5, 1.0, 0.01), sub("careless", 1.0, 0.5, 0.01)
+    assert report.shares(careful["parts"]) == (0.5, 0.0) and report.shares(careless["parts"]) == (0.5, 0.5)
+    assert report.frontier([careless, careful]) == {"careful"}
+
+
+FAKE_1TO4 = Path(__file__).parent / "fake_run_1to4"
+
+
+@pytest.fixture(scope="module")
+def finished_1to4(tmp_path_factory):
+    """A scripted run on the data set of 1 to 4 tokens, which the verifier samples."""
+    base = {"runs_dir": str(tmp_path_factory.mktemp("runs4")), "backend": "fake", "sandbox": "process", "rounds_max": 2,
+            "verifier": {"sample_size": 1500, "reference_samples": 3}, "session": {"python_calls": 3, "submissions": 2}}
+    lines = []
+    path = loop.start(run_config.load("config/pilot/lin-a-1to4.yaml", base), fake_scripts=FAKE_1TO4, out=lines.append)
+    return path, lines
+
+
+def test_a_run_on_a_sampled_data_set(finished_1to4, model4):
+    path, lines = finished_1to4
+    run = read_json(path / "run.json")
+    assert (run["check"], run["n_inputs"], run["enumerated"], run["model_ops"]) == ("sample", 1500, False, 671)
+    assert any("1,500 inputs sampled per scoring" in line for line in lines)
+    first = (path / "round_001" / "prompt.md").read_text()
+    assert "An input is drawn like this." in first and "1,500 inputs drawn afresh from the data set for each submission" in first
+    assert "Because the verifier scores a sample" in first and "n_ctx = 4" in first and "{{" not in first
+    forbidden = loop.forbidden_strings(run["config"], model4)
+    assert {"pairs", "two tokens", "trained on"} <= set(forbidden) and not hygiene.hits({"prompt": first}, forbidden)
+    r1, r2 = loop.completed(path)
+    s1, s2 = r1["submissions"][0], r2["submissions"][0]
+    assert s1["inputs"]["mode"] == "sample" and s1["inputs"]["seed"] != s2["inputs"]["seed"]
+    assert 0.2 < s1["parts"]["coverage"] < 0.3 and s1["parts"]["fidelity_low"] < s1["parts"]["fidelity"] and 0.1 < s1["reward"] < 0.3
+    assert s2["reward"] > 0.6 and r2["improved"] and r1["notes"].startswith("## What the network does") and "## How you found it" in r1["notes"]
+    out1 = (path / "round_001" / "session" / "python" / "001.txt").read_text()
+    assert "inputs (1500, 4) forward operations 671 check sample tokens per input [1, 2, 3, 4]" in out1 and "True" in out1
+
+
+def test_the_locked_entry_is_measured_again_and_results_are_kept(finished_1to4):
+    path, _ = finished_1to4
+    lock, seed = read_json(path / "lock.json"), read_json(path / "seed_check.json")
+    sub = loop.completed(path)[1]["submissions"][0]
+    assert lock["carried_as"] == "r2s1" and lock["measured_again"]["status"] == "scored"
+    assert lock["measured_again"]["inputs"]["seed"] != sub["inputs"]["seed"]        # a sample of its own
+    assert abs(lock["measured_again"]["reward"] - lock["reward"]) < 0.1 and seed["network"] == "lin-a-1to4-s1"
+    again = loop.finish(path, out=lambda *_: None)                                  # nothing measured on a sample is redrawn
+    assert again == lock and read_json(path / "seed_check.json") == seed
+    text = (path / "report.md").read_text()
+    assert "lin-a-1to4-s0 (measured again, on a fresh sample)" in text and "The first row is the best of several scorings" in text
+    assert "1,500 drawn afresh for each scoring" in text and "| target_then_contraction | lin-a-1to4-s1 |" in text
+    # a reference is scored on several fixed samples and its mean given, with how far the scorings lay apart
+    ref = read_json(path / "report.json")["references"]["target_then_contraction"]["lin-a-1to4-s0"]
+    assert ref["scorings"] == 3 and 0 < ref["reward_spread"] < 0.1 and 0.6 < ref["reward"] < 0.8
+    assert "Each number is the mean of 3 scorings on fixed samples." in text and "| Cost | Reward, highest less lowest |" in text
+    itself = read_json(path / "report.json")["references"]["the network itself"]["lin-a-1to4-s0"]
+    assert itself["parts"]["fidelity"] == 1.0 and itself["parts"]["cost"] == 1.0 and itself["reward_spread"] == 0.0
+
+
+def test_the_report_says_what_the_agent_ran(finished_1to4):
+    path, _ = finished_1to4
+    rep = read_json(path / "report.json")
+    text = (path / "report.md").read_text()
+    assert [rd["exploration"]["programs"] for rd in rep["rounds"]] == [1, 1]
+    assert rep["rounds"][0]["exploration"]["flagged"] == []
+    assert rep["rounds"][1]["exploration"]["flagged"] == [{"program": "round_002/session/python/001.py", "reaches": ["open("]}]
+    assert "- `round_002/session/python/001.py`: open(" in text and "in this run's weak sandbox nothing stopped such a reach" in text
 
 
 def test_a_stopped_run_resumes_where_it_was(tmp_path):
@@ -150,6 +220,12 @@ def test_the_smoke_config_is_the_pilot_made_small(tmp_path):
     assert smoke["rounds_max"] == 1 and smoke["session"] == {"python_calls": 8, "submissions": 2, "max_turns": 40, "seconds": 1200}
     same = set(pilot) - {"run_id", "rounds_max", "session"}
     assert all(smoke[k] == pilot[k] for k in same) and smoke["run_id"] != pilot["run_id"]
+    wide, wide_smoke = run_config.load("config/pilot/lin-a-1to4.yaml"), run_config.load("config/pilot/lin-a-1to4-smoke.yaml")
+    assert wide_smoke["rounds_max"] == 1 and wide_smoke["session"] == smoke["session"]
+    assert all(wide_smoke[k] == wide[k] for k in set(wide) - {"run_id", "rounds_max", "session"}) and wide_smoke["run_id"] != wide["run_id"]
+    assert (wide["model"], wide["network"], wide["seed_check"]["network"]) == ("models/lin-a-1to4", "lin-a-1to4-s0", "lin-a-1to4-s1")
+    assert wide["verifier"]["check"] == "sample" and wide["verifier"]["sample_size"] == 16384
+    assert all(wide[k] == pilot[k] for k in set(pilot) - {"run_id", "model", "network", "seed_check", "verifier"})   # only the data set differs
 
 
 def test_the_command_line_says_what_is_wrong_without_a_traceback(tmp_path, capsys):

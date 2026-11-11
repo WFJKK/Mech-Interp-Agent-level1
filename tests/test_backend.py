@@ -67,6 +67,9 @@ def test_a_round_through_the_cli(setup):
     assert r.meta["stop_reason"] == "end_turn" and r.meta["output_tokens"] == 50 and r.meta["cost_usd"] == 0.0
     assert r.meta["api_equivalent_usd"] == 1.25 and r.meta["models_used"] == {MODEL: 50} and r.meta["submissions"] == 0
     assert json.loads((where / "response_raw.json").read_text())["session_id"] == "abc"
+    # everything the CLI printed is kept as it came: the model's text between its tool calls, in order
+    stream = [json.loads(line) for line in (where / "stream_01.jsonl").read_text().splitlines() if line.strip()]
+    assert [e["type"] for e in stream] == ["assistant", "assistant", "assistant", "result"]
 
 
 def test_another_model_answering_stops_the_run(setup):

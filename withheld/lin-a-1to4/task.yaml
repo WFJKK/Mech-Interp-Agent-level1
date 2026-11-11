@@ -1,0 +1,30 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The network was trained to output the larger of its two tokens (max of 2), on inputs of exactly two
+  tokens and on nothing else. Inputs of one, three or four tokens are outside what it was trained on;
+  it still gives an output there, because it only adds up one embedding column per token.
+provenance:
+  source: models/lin-a of this repository (the proof pilot's two linear networks), with one all-zero column
+    added to embed for the empty slot. hidden and unembed are unchanged.
+  networks:
+    lin-a-1to4-s0: {was: lin-a-s0}
+    lin-a-1to4-s1: {was: lin-a-s1}
+  how_often_the_output_is_the_largest_token:   # measured on 11 November 2026; four tokens on a sample of 200,000
+    lin-a-1to4-s0: {one_token: "63 of 64", two_tokens: "4,095 of 4,096", three_tokens: 0.786, four_tokens: 0.600}
+    lin-a-1to4-s1: {one_token: "62 of 64", two_tokens: "4,092 of 4,096", three_tokens: 0.759, four_tokens: 0.570}
+hygiene:
+  - max2
+  - max-of
+  - max of
+  - largest
+  - larger
+  - greater of
+  - bigger of
+  - Gross
+  - compact proof
+  - pairs
+  - two tokens
+  - 2 tokens
+  - exactly two
+  - trained on

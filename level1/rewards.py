@@ -4,15 +4,21 @@ The verifier's parts (verifier.py) are kept with every receipt, so a run can be 
 reward without running anything (python -m level1.loop rescore), and the reference entries of a model can
 be scored under any reward with no run at all (python -m level1.report --model ...).
 
-    coverage   mu     the share of the data set in the entry's region S
-    fidelity   p      the share of S on which the entry gives the network's output
-    r                 operations of the prediction per input of S, over one forward pass
-    r_rule            operations of the rule per input, over one forward pass
-    b                 operations of the build, over one forward pass on every input of the data set
+    coverage   mu     the share of the inputs in the entry's region S
+    fidelity   q      the share of S on which the interpretation gives the network's output
+    cost       c      everything the entry computes (its interpretation on S, its region test on every input,
+                      its build once), per input of S, over one forward pass
 
-Use the entry on S and the network elsewhere, and compare with running the network everywhere:
-mu * (1 - r) - r_rule - b is the share of the work saved, and mu * (1 - p) is the share of inputs now
-answered wrongly. The network itself, as an entry, saves nothing and errs nowhere: every reward here gives it 0.
+The cost has three parts, kept in every receipt:
+
+    r                 operations of the interpretation per input of S, over one forward pass
+    r_rule            operations of the region test per input, over one forward pass
+    b                 operations of the build, over one forward pass on every input scored
+
+so that c = r + (r_rule + b) / mu. Use the entry on S and the network elsewhere, and compare with running
+the network everywhere: mu * (1 - c) = mu * (1 - r) - r_rule - b is the share of the work saved, and
+mu * (1 - q) is the share of inputs now answered wrongly. The network itself, as an entry, saves nothing and
+errs nowhere: every reward here gives it 0.
 
 A new reward is a function here, taking the parts (and the claimed fidelity) and its own parameters by
 name, with an entry in REWARDS and its two texts for the agent's prompt in FORMULAS and EXPLANATIONS.
@@ -22,6 +28,16 @@ This file is also placed in the agent's sandbox, so nothing in it may say what a
 from __future__ import annotations
 
 import inspect
+
+
+def cost_of(parts: dict | None) -> float | None:
+    """The entry's one cost: its whole work per input of its region, over one forward pass. None for an
+    empty region."""
+    if not parts or not parts.get("coverage"):
+        return None
+    if parts.get("cost") is not None:
+        return parts["cost"]
+    return parts["r"] + (parts["r_rule"] + parts["b"]) / parts["coverage"]
 
 
 def terms(parts: dict, fidelity: float | None) -> dict:
@@ -58,22 +74,24 @@ REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed}
 # The reward as the agent's prompt states it, and one or two sentences on how to read it. Parameters in
 # braces are filled from the run config (or the function's defaults).
 FORMULAS = {
-    "r_alpha": "reward = coverage * (1 - r) - r_rule - b  -  alpha * coverage * (1 - fidelity),   alpha = {alpha:g}",
+    "r_alpha": "reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ],   alpha = {alpha:g}",
     "r_alpha_claimed": (
-        "reward = coverage * (1 - r) - r_rule - b  -  alpha * coverage * (1 - credited),   alpha = {alpha:g}\n"
+        "reward = coverage * [ (1 - cost) - alpha * (1 - credited) ],   alpha = {alpha:g}\n"
         "    credited = the fidelity you claimed, if the measured fidelity is at least that;\n"
         "               otherwise measured - {penalty:g} * (claimed - measured)"),
 }
 EXPLANATIONS = {
     "r_alpha": (
-        "The first part is the share of the work saved if the entry is used on its region and the network\n"
-        "elsewhere. The second part prices a wrong answer at {alpha:g} forward passes."),
+        "Read it for one input of the region: using the entry there in place of the network saves\n"
+        "(1 - cost) of a forward pass, and with probability (1 - fidelity) its answer is wrong, which is\n"
+        "charged at {alpha:g} forward passes. Coverage turns that into a share of the data set; the inputs\n"
+        "outside the region are left to the network and earn nothing."),
     "r_alpha_claimed": (
-        "The first part is the share of the work saved if the entry is used on its region and the network\n"
-        "elsewhere. The second part prices a wrong answer at {alpha:g} forward passes, with the fidelity you\n"
-        "claimed in place of the measured one when the measurement confirms it. A claim above what is measured\n"
-        "costs more than it could have gained, and a claim below it gives credit away: claim what you expect\n"
-        "to be measured."),
+        "Read it for one input of the region: using the entry there in place of the network saves\n"
+        "(1 - cost) of a forward pass, and a wrong answer is charged at {alpha:g} forward passes. The share\n"
+        "of wrong answers is taken from the fidelity you claimed when the measurement confirms it. A claim\n"
+        "above what is measured costs more than it could have gained, and a claim below it gives credit\n"
+        "away: claim what you expect to be measured. Coverage turns the result into a share of the data set."),
 }
 
 

@@ -1,0 +1,38 @@
+# The model lin-a-1to4: the two networks of lin-a, asked about inputs of 1 to 4 tokens. Sizes, the data set
+# and the networks; change values here, never in code.
+# What the networks were trained to do, and on which inputs, is not in this folder. It is in
+# withheld/lin-a-1to4/, which no tool of the agent reaches, and nothing here may say it (the hygiene check
+# reads this folder's agent-facing files).
+name: lin-a-1to4
+sizes:
+  n_ctx: 4        # slots per input; a slot holds a token or is empty
+  d_vocab: 64     # tokens are whole numbers 0 .. d_vocab - 1; the output is one of them too
+  d_model: 8
+input_space: [65, 65, 65, 65]   # per slot: a token 0 .. 63, or 64 for an empty slot
+n_outputs: 64
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: lengths
+  lengths: [1, 2, 3, 4]   # the number of tokens, each as likely as any other
+  vocab: 64               # then that many tokens, each below this and equally likely
+  empty: 64               # what the remaining slots hold
+  says: >
+    An input is drawn like this. First a number of tokens is picked from 1, 2, 3 and 4, each equally
+    likely. Then that many tokens are picked, each a whole number from 0 to 63 and equally likely.
+    The tokens fill the first slots and the remaining slots are empty (64). The data set is every
+    input that can be drawn this way, each counted as often as it is drawn: about 17 million
+    different inputs, far more with four tokens than with one, yet every number of tokens makes up
+    a quarter of the data set.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  embed: [8, 65]        # lin-a's embed with one more column, all zeros: the empty slot's
+  hidden: [8, 8]
+  unembed: [64, 8]
+# Two networks of the same sizes and training, with different seeds. A run works on one and checks its
+# locked entry on another.
+networks:
+  - id: lin-a-1to4-s0
+    weights: zoo/lin-a-1to4-s0.npz
+    sha256: c243d5662598ed2b1dbfd2ce4121a62f48bac9208e62e1625cc96664bde08be0
+  - id: lin-a-1to4-s1
+    weights: zoo/lin-a-1to4-s1.npz
+    sha256: 09aab28671852453c3a0af635645979c6f549ab2491fd3024eda4abb25a4da6a

@@ -2,7 +2,8 @@
 
 A model folder (models/<name>/) holds
 
-    config.yaml   sizes, the input space, the weights' names and shapes, the networks (id, file, sha256)
+    config.yaml   sizes, the input space, the data set (every input unless it says otherwise), the weights'
+                  names and shapes, the networks (id, file, sha256)
     model.py      reference(g, lv1): the network's own computation in the entry language
     zoo/*.npz     the networks' weights (no pickle)
 
@@ -44,8 +45,24 @@ class Model:
         self.input_space = [int(n) for n in self.config["input_space"]]
         if len(self.input_space) != self.n_ctx:
             raise ModelError("input_space needs one entry per token position")
-        self.n_total = int(np.prod(self.input_space, dtype=np.int64))
+        # The data set: every input of the input space unless config.yaml says otherwise (lang.py: data sets).
+        self.data_set = dict(self.config.get("data_set") or {"kind": "all"})
+        try:
+            self.n_total = lang.count_inputs(self.data_set, self.input_space)
+        except (ValueError, KeyError) as exc:
+            raise ModelError(f"the data set of {self.name} is not well described: {exc}") from None
         self._module = None
+
+    def can_enumerate(self) -> bool:
+        """Whether every input of the data set can be listed, each counting once."""
+        return lang.data_set_kind(self.data_set) == "all"
+
+    def data_set_text(self) -> str:
+        """The data set in words, for the agent's prompt: the model folder's own, or the default."""
+        says = self.data_set.get("says")
+        if says:
+            return " ".join(str(says).split())
+        return f"The data set is every input, each counted once: {self.n_total:,} inputs."
 
     # the networks
     def network(self, network_id: str) -> dict:
@@ -85,7 +102,8 @@ class Model:
     # what the agent is given about the network besides its weights and model.py
     def info(self) -> dict:
         return {"sizes": self.sizes, "input_space": self.input_space, "n_outputs": int(self.config["n_outputs"]),
-                "weights": {k: list(v) for k, v in self.config["weights"].items()}}
+                "weights": {k: list(v) for k, v in self.config["weights"].items()},
+                "data_set": {k: v for k, v in self.data_set.items() if k != "says"}}
 
     # the verifier's side only
     def withheld(self) -> Path:

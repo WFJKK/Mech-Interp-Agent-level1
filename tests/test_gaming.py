@@ -111,6 +111,34 @@ def test_luck_in_a_sample_does_not_pay(model, nets):
         assert receipt["reward"] < 1 - 1 / 655 - 10 * (1 - p["fidelity"]) + 1e-12
 
 
+def test_the_best_of_several_samples_is_not_the_number_reported(model4):
+    """On a sampled data set the same entry scores a little differently each time, and the lock takes the
+    highest: sending one entry again and again raises the recorded reward without predicting better or
+    computing less. So the locked entry is scored once more, on a sample of its own, and the report gives
+    that number beside the one it was locked on (tests/test_loop.py, the run on a sampled data set)."""
+    w = model4.load_weights("lin-a-1to4-s0")
+    v = Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"sample_size": 800}})
+    entry = model4.reference_entries(w)["target_then_contraction"]
+    rewards_seen = [v.score(entry, seed=s)["reward"] for s in range(12)]
+    assert max(rewards_seen) > sum(rewards_seen) / len(rewards_seen) + 0.002      # the best of twelve leans high
+    assert len(set(rewards_seen)) > 6                                             # because every scoring is its own sample
+    fresh = [v.score(entry)["inputs"]["seed"] for _ in range(3)]
+    assert len(set(fresh)) == 3 and not set(fresh) & set(range(12))               # and the verifier, not the agent, draws it
+
+
+def test_a_build_is_not_made_cheap_by_a_large_data_set(model4):
+    """A build is spread over the inputs it is scored on, not over the size of the data set: with 17 million
+    possible inputs, anything computed once would otherwise be nearly free, and an entry could run the network
+    ahead on a great many inputs and look the answers up."""
+    w = model4.load_weights("lin-a-1to4-s0")
+    entry = model4.reference_entries(w)["contraction"]
+    small = Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"sample_size": 500}}).score(entry, seed=1)["parts"]
+    large = Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"sample_size": 2000}}).score(entry, seed=1)["parts"]
+    assert small["build_ops"] == large["build_ops"] > 0
+    assert small["b"] == pytest.approx(small["build_ops"] / (500 * 671)) and large["b"] == pytest.approx(large["build_ops"] / (2000 * 671))
+    assert small["b"] > 1000 * small["build_ops"] / (model4.n_total * 671)
+
+
 def test_a_claim_is_never_worth_more_than_the_measurement(model, nets):
     """The default reward does not read the claim at all; the variant that does pays an overclaim back twice."""
     w = nets["lin-a-s0"][0]

@@ -1,0 +1,7 @@
+{
+ "calls": [
+  {"tool": "run_python", "args": {"code": {"$file": "mixed.py"}}},
+  {"tool": "submit_entry", "args": {"name": "mixed", "claimed_fidelity": 0.99, "expected_fidelity_other": 0.99}}
+ ],
+ "response": "## What the network does\nThe higher token on one or two tokens; on three or four its own sum of columns decides.\n\n## How you found it\nOutputs and the product of the three matrices.\n\n## The best entry\nmixed\n\n## Claims\nAs submitted.\n\n## Next\nSomething cheaper on three and four tokens."
+}

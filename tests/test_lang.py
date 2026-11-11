@@ -120,6 +120,43 @@ def test_moving_data_is_free(toy):
         assert val.shape == expect.shape and np.allclose(val, expect) and per_input == 0 and build == 0
 
 
+def test_an_entry_can_be_written_with_interpretation_and_region(toy):
+    g = Graph(toy, 2)
+    a, b = g.token(0), g.token(1)
+    one = g.entry(interpretation=lang.maximum(a, b), region=a < 3)
+    g = Graph(toy, 2)
+    a, b = g.token(0), g.token(1)
+    other = g.entry(predict=lang.maximum(a, b), rule=a < 3)
+    assert one == other and set(one) == {"format", "nodes", "rule", "predict"}        # the stored entry is the same
+    assert "<- region" in lang.show(one) and "<- interpretation" in lang.show(one)
+    with pytest.raises(TypeError, match="given once"):
+        g.entry(predict=a, interpretation=a)
+    with pytest.raises(TypeError, match="needs its interpretation"):
+        g.entry(region=a < 3)
+    with pytest.raises(TypeError, match="region once"):
+        g.entry(interpretation=a, region=a < 3, rule=a < 2)
+    assert Graph(toy, 2, example=[1, 2]).token(1).value == 2
+    with pytest.raises(ValueError, match="one whole number per position of the input: 3 here"):
+        Graph(toy, 3, example=[1, 2])
+
+
+def test_data_sets_that_are_listed_and_data_sets_that_are_drawn():
+    rng = np.random.default_rng(3)
+    assert lang.count_inputs(None, [64, 64]) == 4096 and lang.count_inputs({"kind": "all"}, [3, 5]) == 15
+    x = lang.draw_inputs(None, [3, 5], 400, rng)
+    assert x.shape == (400, 2) and x[:, 0].max() == 2 and x[:, 1].max() == 4
+    ds = {"kind": "lengths", "lengths": [1, 3], "vocab": 10, "empty": 10}
+    assert lang.count_inputs(ds, [11, 11, 11]) == 10 + 1000
+    y = lang.draw_inputs(ds, [11, 11, 11], 600, rng)
+    n = (y < 10).sum(axis=1)
+    assert set(n.tolist()) == {1, 3} and 0.4 < (n == 1).mean() < 0.6 and (y[n == 1][:, 1:] == 10).all()
+    with pytest.raises(ValueError, match="kind"):
+        lang.count_inputs({"kind": "weights"}, [3])
+    with pytest.raises(ValueError, match="fit the model's slots"):
+        lang.draw_inputs({"kind": "lengths", "lengths": [1, 4], "vocab": 10, "empty": 10}, [11, 11], 5, rng)
+    assert lang.wilson_lower(0, 0) == 0.0 and 0.99 < lang.wilson_lower(1000, 1000) < 1.0
+
+
 def test_a_cast_is_a_computation(toy):
     A = toy["A"]
     val, _, build = value_and_cost(lambda g: lang.cast(g.weight("A"), "int"), toy)

@@ -1,7 +1,8 @@
 # The level-1 pilot, without its model: what every pilot run shares. Not a run by itself. A run is a file
 # next to this one that extends it and names a model, one network of it and a second network for the seed
 # check:
-#   config/pilot/lin-a.yaml    the linear network on pairs of tokens, 64 tokens, width 8
+#   config/pilot/lin-a.yaml         the linear network on pairs of tokens, 64 tokens, width 8
+#   config/pilot/lin-a-1to4.yaml    the same network asked about inputs of 1 to 4 tokens
 #
 # A run has two parts (docs/DESIGN.md):
 #   1. the rounds: the agent explores one network and submits entries; the score is the reward;

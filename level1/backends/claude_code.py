@@ -17,7 +17,8 @@ billing an API key, and has CLAUDE_CODE_NO_MODEL_FALLBACK set, so it cannot answ
 the requested one declines. An answer that still shows another model stops the run; a refusal is recorded
 as one, and the loop counts refusals. Usage-limit and overload errors are retried with growing waits; a
 login problem stops the run, which `resume` continues later. The session's wall clock is session.seconds:
-when it runs out, what the session submitted stands. A try that finds the session already used (a retry
+when it runs out, what the session submitted stands. Each try's whole event stream is kept in the round's
+folder (stream_NN.jsonl). A try that finds the session already used (a retry
 after a dropped connection, or a resumed run) gets the same prompt with a note at its end: the budgets as
 they stand, the entries saved and the submissions made before the cut (prompt.restart_note).
 
@@ -255,6 +256,9 @@ class ClaudeCodeBackend:
                     raise StopRun(f"could not run the Claude Code CLI: {exc}") from exc
             if r is not None:
                 out = (r.stdout or "").strip()
+                # Everything the CLI emitted on this try, as it came: the messages, the tool calls and as much
+                # of the model's reasoning as the CLI shows. response.md keeps only the text; this keeps all.
+                atomic_write(where / f"stream_{attempt + 1:02d}.jsonl", (r.stdout or ""))
                 data, messages = parse_output(out)
                 events = model_events(out)
                 swap = swapped(events, data, self.cfg["agent_model"])

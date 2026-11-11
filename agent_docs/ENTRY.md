@@ -1,8 +1,9 @@
 An entry is a program with two results per input:
 
-- `rule`: a boolean. Is this input in the entry's region? Leave it out and the region is every input.
-- `predict`: a whole number, the network's output on this input as the entry predicts it. It is only
-  computed for inputs in the region.
+- its **region**: a boolean. Is this input one the entry speaks about? Leave it out and the region is
+  every input.
+- its **interpretation**: a whole number, the network's output on this input as the entry predicts
+  it. It is only computed for inputs in the region.
 
 An entry is a graph of operations on tensors, stored as JSON data. You write it in Python with the
 entry language `lv1`, and the verifier interprets the JSON; nothing of an entry is run as code, so
@@ -19,15 +20,17 @@ c = g.const([1.0, 2.0])          # a constant; plain Python numbers and numpy ar
 r = g.arange(8)                  # 0, 1, ..., 7
 
 x = W[:, a] * 2.0 + W[:, b]      # arithmetic and comparisons as in numpy, with broadcasting
-entry = g.entry(predict=(a + b) % info["n_outputs"], rule=a < 8)   # only an example of the format
+entry = g.entry(interpretation=(a + b) % info["n_outputs"], region=a < 8)   # only an example of the format
 save_entry("example", entry)     # keep it; submit_entry takes the name
-print(measure(entry))            # coverage, fidelity, the costs and the reward, as the verifier measures them
+print(measure(entry))            # coverage, fidelity, cost and the reward, as the verifier measures them
 ```
 
 Every expression is also computed on an example input (all tokens 0) while you build, so `x.shape`
 and `x.value` exist and a wrong shape fails at the line that makes it. `graph(example=[3, 5])`
-builds on another example input. `lv1.Graph.load(entry, weights, n_ctx)` opens a saved entry again
-and returns `(graph, predict, rule)`.
+builds on another example input, given as one number per position of the input.
+`lv1.Graph.load(entry, weights, n_ctx)` opens a saved entry again and returns
+`(graph, interpretation, region)`. In the stored JSON the interpretation is called `predict` and
+the region `rule`.
 
 Values are whole numbers, floats or booleans (64 bits). There are no loops and no Python `if` on
 expressions: use `lv1.where(c, x, y)` (both sides are computed) or `lv1.cond(c, x, y)` (c is one
@@ -58,20 +61,26 @@ Each operation on numbers costs 1. Per entry of the result unless said otherwise
 
 Reading costs 1 per number read: `T[a, b]` reads one number, `T[:, a]` a whole column.
 
-### Where the cost is charged
+### What an entry's cost is made of
 
-- **Build.** Whatever does not depend on the input is computed once, when first needed, and its
-  operations are the build. A table computed from the weights is paid for in full here.
-- **Rule.** The operations of the rule that depend on the input, charged for every input of the data
-  set.
-- **Prediction.** The operations of the prediction that depend on the input, charged for the inputs
-  of the region. A value the rule already computed for an input is not charged again.
+Everything an entry computes is counted, in three parts:
+
+- **Build.** Whatever does not depend on the input is computed once, when first needed. A table
+  computed from the weights is paid for in full here.
+- **Region test.** What the region computes from the input, charged for every input the verifier
+  runs, in the region or not.
+- **Interpretation.** What the interpretation computes from the input, charged for the inputs in the
+  region. A value the region test already computed for an input is not charged again.
+
+The entry's cost is the three together, per input of the region, as a share of one forward pass.
+`measure(entry)` gives it as `cost`, and the parts as `b`, `r_rule` and `r`.
 
 ### Limits
 
 The run limits an entry's size and the time the verifier gives it: the numbers are under "Tools,
 budgets and limits" in your message. A constant counts every number it holds, and no single value
 may hold more than 4,000,000 numbers. The verifier refuses an entry, and says why, when on any
-input an index is out of range, shapes do not fit, the rule is not one boolean, the prediction is
-not one whole number, or a float that is not finite is cast to a whole number. A prediction that
-is not one of the network's outputs counts as a wrong answer.
+input an index is out of range, shapes do not fit, the region is not one boolean, the
+interpretation is not one whole number, or a float that is not finite is cast to a whole number.
+An interpretation that gives something other than one of the network's outputs counts as a wrong
+answer.

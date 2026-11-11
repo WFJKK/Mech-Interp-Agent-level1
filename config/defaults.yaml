@@ -39,8 +39,12 @@ sandbox_dir: null
 
 # the verifier
 verifier:
-  enumerate_up_to: 200000             # a data set up to this size is checked on every input
-  sample_size: 4000                   # above it: a fresh uniform sample per scoring
+  check: auto                         # all: every input of the data set; sample: a fresh sample per scoring;
+                                      # auto: all if the data set can be listed and is small enough, else sample
+  enumerate_up_to: 200000             # auto checks every input of a data set up to this size
+  sample_size: 4000                   # inputs per scoring when it samples
+  reference_samples: 8                # when it samples, the report scores each reference entry on this many
+                                      # fixed samples and gives the mean
   time_limit_s: 120                   # per entry
 
 # what an entry may hold

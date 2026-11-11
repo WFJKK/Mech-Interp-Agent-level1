@@ -23,6 +23,12 @@ def nets(model):
     return out
 
 
+@pytest.fixture(scope="session")
+def model4():
+    """The same networks on a data set of inputs with 1 to 4 tokens."""
+    return load_model("models/lin-a-1to4")
+
+
 @pytest.fixture()
 def toy():
     """Small weights for tests of the language itself."""

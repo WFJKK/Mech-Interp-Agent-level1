@@ -2,8 +2,8 @@
 
 An entry is a small program, stored as JSON data, with two results per input:
 
-    rule      a boolean: is this input in the entry's region S?  (absent: every input is)
-    predict   an integer: the network's output on this input, as the entry predicts it
+    rule      the region test, a boolean: is this input in the entry's region S?  (absent: every input is)
+    predict   the interpretation, an integer: the network's output on this input, as the entry predicts it
 
 It is a graph of operations on tensors. The sources are the input tokens, the
 network's weights (by name), constants and ranges; every other node applies one
@@ -35,6 +35,10 @@ What does not depend on the input is computed once per entry and charged to the
 build; the rest is charged per input, to the rule (for every input) or to the
 prediction (for the inputs of the region). A value the rule already computed for
 an input is not charged again to the prediction.
+
+In the words used with the agent: the prediction is the entry's interpretation,
+the rule is the test for its region, and an entry's cost is all three charges
+together, per input of the region, over one forward pass.
 
 The same file gives the builder that writes entries (Graph and its expressions),
 the interpreter (Evaluator) and measure(), which the verifier and the agent's
@@ -404,7 +408,7 @@ def show(entry: dict) -> str:
                 parts.append(f"value={v}")
             else:
                 parts.append(f"{k}={json.dumps(v)}")
-        mark = "".join(f"   <- {name}" for name in ("rule", "predict") if entry.get(name) == i)
+        mark = "".join(f"   <- {label}" for name, label in (("rule", "region"), ("predict", "interpretation")) if entry.get(name) == i)
         lines.append(f"n{i} = {op}({', '.join(parts)}){mark}")
     return "\n".join(lines)
 
@@ -494,13 +498,13 @@ class Evaluator:
         if self.rule is not None:
             v = self._eval(self.rule, memo, c_rule, tokens)
             if v.dtype != np.bool_ or v.size != 1:
-                raise EntryError("the rule must give one boolean per input")
+                raise EntryError("the region test must give one boolean per input")
             inside = bool(v.reshape(()))
         answer = None
         if inside:
             v = self._eval(self.predict, memo, c_pred, tokens)
             if not np.issubdtype(v.dtype, np.integer) or v.size != 1:
-                raise EntryError("the prediction must give one whole number per input")
+                raise EntryError("the interpretation must give one whole number per input")
             answer = int(v.reshape(()))
         return inside, answer, c_rule[0], c_pred[0]
 
@@ -509,6 +513,51 @@ def all_inputs(input_space) -> np.ndarray:
     """Every input of a product space [n0, n1, ...], one row per input, in lexicographic order."""
     grids = np.indices([int(n) for n in input_space]).reshape(len(input_space), -1)
     return grids.T.astype(np.int64)
+
+
+# data sets -----------------------------------------------------------------------------------
+# A model says what its data set is (config.yaml: data_set). Two kinds:
+#   all       every input of the input space, each as likely as any other (the default)
+#   lengths   an input has a varying number of tokens: a number is drawn from `lengths` (each as likely as
+#             any other), then that many tokens below `vocab`; they fill the first slots, and the rest hold
+#             the value `empty`
+def data_set_kind(data_set) -> str:
+    kind = (data_set or {}).get("kind", "all")
+    if kind not in ("all", "lengths"):
+        raise ValueError(f"a data set is of kind all or lengths, not {kind!r}")
+    return kind
+
+
+def count_inputs(data_set, input_space) -> int:
+    """How many different inputs the data set holds."""
+    if data_set_kind(data_set) == "all":
+        return int(np.prod([int(n) for n in input_space], dtype=object))
+    return int(sum(int(data_set["vocab"]) ** int(k) for k in data_set["lengths"]))
+
+
+def draw_inputs(data_set, input_space, n: int, rng) -> np.ndarray:
+    """n inputs drawn from the data set, one row each. The verifier and the agent's sandbox both draw with
+    this, from different seeds."""
+    slots = len(input_space)
+    if data_set_kind(data_set) == "all":
+        return np.stack([rng.integers(0, int(k), size=n) for k in input_space], axis=1).astype(np.int64)
+    lengths = np.array([int(k) for k in data_set["lengths"]])
+    if lengths.min() < 1 or lengths.max() > slots:
+        raise ValueError("a data set's lengths must fit the model's slots")
+    length = rng.choice(lengths, size=n)
+    x = rng.integers(0, int(data_set["vocab"]), size=(n, slots))
+    x[np.arange(slots)[None, :] >= length[:, None]] = int(data_set["empty"])
+    return x.astype(np.int64)
+
+
+def wilson_lower(k: int, n: int, z: float = 1.96) -> float:
+    """The lower end of the Wilson interval for k successes in n draws."""
+    if n == 0:
+        return 0.0
+    p = k / n
+    centre = p + z * z / (2 * n)
+    spread = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n))
+    return max(0.0, (centre - spread) / (1 + z * z / n))
 
 
 def run_reference(reference: dict, weights: dict, n_ctx: int, inputs) -> tuple:
@@ -527,12 +576,16 @@ def run_reference(reference: dict, weights: dict, n_ctx: int, inputs) -> tuple:
     return np.array(answers, dtype=np.int64), costs.pop()
 
 
-def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model_ops: int, n_total: int,
+def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model_ops: int,
             deadline: float | None = None) -> dict:
     """What the verifier measures of an entry on these inputs.
 
-    model_answers and model_ops come from run_reference on the same inputs; n_total is the size of the whole
-    data set (the build is paid once for all of it, so it is divided by n_total forward passes)."""
+    model_answers and model_ops come from run_reference on the same inputs. The job is these inputs: the
+    entry's build is done once for them, so it is spread over as many forward passes as there are inputs
+    (all of the data set when every input is checked, the sample when one is drawn).
+
+    cost is the entry's whole work per input of its region, over one forward pass: r + (r_rule + b) /
+    coverage. With it, coverage * (1 - cost) is the share of the forward passes the entry saves."""
     ev = Evaluator(entry, weights, n_ctx, deadline)
     n = len(inputs)
     inside_n = agree = rule_ops = predict_ops = 0
@@ -545,13 +598,14 @@ def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model
             agree += int(answer == int(truth))
     f = float(model_ops)
     return {
-        "n_inputs": n, "n_total": int(n_total), "n_in_region": inside_n, "n_agree": agree,
+        "n_inputs": n, "n_in_region": inside_n, "n_agree": agree,
         "model_ops": int(model_ops), "rule_ops": int(rule_ops), "predict_ops": int(predict_ops), "build_ops": int(ev.build_cost),
         "coverage": inside_n / n,
         "fidelity": (agree / inside_n) if inside_n else None,
+        "cost": ((predict_ops + rule_ops + ev.build_cost) / (inside_n * f)) if inside_n else None,
         "r": (predict_ops / (inside_n * f)) if inside_n else None,
         "r_rule": rule_ops / (n * f),
-        "b": ev.build_cost / (int(n_total) * f),
+        "b": ev.build_cost / (n * f),
     }
 
 
@@ -703,6 +757,8 @@ class Graph:
         self.weights = {k: _norm(v) for k, v in weights.items()}
         self.n_ctx = int(n_ctx)
         self.example = np.zeros(self.n_ctx, dtype=np.int64) if example is None else np.asarray(example, dtype=np.int64)
+        if self.example.shape != (self.n_ctx,):
+            raise ValueError(f"an example input has one whole number per position of the input: {self.n_ctx} here")
         self.nodes: list[dict] = []
         self.values: list[np.ndarray] = []
         self._seen: dict[str, int] = {}
@@ -767,8 +823,16 @@ class Graph:
         self._seen[key] = len(self.nodes) - 1
         return Expr(self, len(self.nodes) - 1)
 
-    def entry(self, predict, rule=None) -> dict:
-        """The entry as JSON data: the nodes the two results need, renumbered."""
+    def entry(self, predict=None, rule=None, *, interpretation=None, region=None) -> dict:
+        """The entry as JSON data: the nodes the two results need, renumbered. The interpretation may be
+        given as `interpretation` or `predict`, the region test as `region` or `rule`; the stored entry
+        names them predict and rule either way."""
+        if (predict is None) == (interpretation is None):
+            raise TypeError("an entry needs its interpretation, given once (interpretation=... or predict=...)")
+        if rule is not None and region is not None:
+            raise TypeError("give the region once (region=... or rule=...)")
+        predict = interpretation if predict is None else predict
+        rule = region if rule is None else rule
         predict = self.wrap(predict)
         roots = [predict.id] + ([self.wrap(rule).id] if rule is not None else [])
         need, stack = set(), list(roots)
