@@ -181,12 +181,32 @@ Three things carry it:
 
 ## 6. Who answers a round
 
-`backend: claude_code` runs the Claude Code CLI headless, once per round, under your own login:
-no built-in tools, no files, no project settings, one tool server with the session's two tools. The
-CLI's environment has the API key variables removed, so it cannot bill a key, and model fallback is
-switched off; an answer that still shows another model stops the run rather than record that
-model's work under the run's model. Usage limits and overloads are waited out with growing pauses.
-A login problem stops the run cleanly.
+`backend: claude_code` runs the Claude Code CLI headless, once per round: no built-in tools, no
+files, no project settings, one tool server with the session's two tools. Model fallback is switched
+off; an answer that still shows another model stops the run rather than record that model's work
+under the run's model. Usage limits and overloads are waited out with growing pauses. A login
+problem stops the run cleanly.
+
+Who pays is the run config's `auth`:
+
+- `login`, the default: your own Claude Code login. The CLI's environment has the API key variables
+  removed, so it cannot bill a key.
+- `api_key`: the key in the variable `api_key_env` names (`CPL_ANTHROPIC_KEY`), billed per token.
+  The CLI runs in its `--bare` mode, which reads no login, and gets the key from a helper that
+  prints that variable, so the key's value is on no command line and in no file. Before the first
+  round the key is checked against the API's model list, which costs nothing. The run has a budget
+  (`budget.run_usd`, and `budget.round_usd` for one round), counted in `spend.jsonl` by the CLI's
+  own count; every session is started with what is left as its cap. A round that reaches its cap
+  ends with what it submitted, and the rounds end when the run's budget is spent.
+
+Every session's first event says what the CLI billed; one that does not fit `auth` stops the run.
+An account that cannot pay (no credit, a spend limit) stops it too, rather than wait.
+
+The two modes differ a little in what the agent reads besides the run's own text. With a stand-in
+for the API, the CLI under `--bare` sent one line of its own ("You are a Claude agent, built on
+Anthropic's Claude Agent SDK.") and the run's system prompt and prompt, nothing else; under a login
+it also adds a short note on its environment (working folder, platform, date). Neither says
+anything about the network.
 
 `backend: fake` replays scripted tool calls from JSON files against the real session, sandbox and
 verifier. The tests and dry runs use it; no model is called.
@@ -197,6 +217,7 @@ Everything a run knows is in its folder, written as it happens:
 
     run.json            config, commit, hash of the trusted files, sandbox and its probe
     log.jsonl           what happened, appended
+    spend.jsonl         billed to an API key: every session's cap and cost, appended
     round_001/          prompt.md, session/, response.md, stream_01.jsonl, meta.json, round.json
     locked_entry.json, lock.json, seed_check.json, report.md, report.json
 

@@ -15,8 +15,11 @@ that predicts a small network's outputs in fewer operations, and a verifier meas
   decline.
 - Commit after each step. Never rewrite or delete existing results.
 - Make no LLM API calls while building or testing; the fake backend covers everything.
-- Never read or set `ANTHROPIC_API_KEY`. The Claude Code backend runs under the user's own login
-  and removes the key variables from the CLI's environment.
+- Never read or set `ANTHROPIC_API_KEY`. The Claude Code backend removes the key variables from the
+  CLI's environment and runs under the user's own login, unless the run config says
+  `auth: api_key`: then the key comes from the variable `api_key_env` names (`CPL_ANTHROPIC_KEY`),
+  reaches the CLI only through its `apiKeyHelper` under `--bare`, is never written to a file or a
+  log, and the run stops at its budget. Tests use stand-ins for the CLI and the API.
 - Nothing model-specific goes in `level1/`: an architecture lives only in its
   `models/<name>/model.py`, and numbers live only in config files.
 - Run small tests before large runs, and keep logs append-only so any run can resume.

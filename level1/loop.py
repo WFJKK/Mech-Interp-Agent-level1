@@ -1,7 +1,8 @@
 """The loop: the rounds on one network, then the lock, the seed check and the report.
 
     python -m level1.loop run --config config/pilot/lin-a.yaml [--run-id X] [--sandbox hardened] [--fake DIR]
-    python -m level1.loop resume --run <run folder>
+                              [--auth api_key] [--budget-usd 60]
+    python -m level1.loop resume --run <run folder> [--budget-usd 80]
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop rescore --run <run folder> --name r_alpha --alpha 1    the records under another reward
                                   (--param KEY=VALUE for any other parameter of a reward)
@@ -10,6 +11,7 @@ A run folder (outside the repository, <runs_dir>/<run_id>):
 
     run.json            the config, the commit, the hash of the trusted files, the sandbox and its probe
     log.jsonl           what happened, appended
+    spend.jsonl         a run billed to an API key: every try's cap and cost, appended (budget.py)
     round_001/          prompt.md, session/ (session.py), response.md, meta.json, round.json
     locked_entry.json   the best entry of the rounds, as submitted
     lock.json           which submission it is, its hash and its receipt
@@ -18,7 +20,8 @@ A run folder (outside the repository, <runs_dir>/<run_id>):
 
 A round is done when its round.json is written. `resume` starts at the first round that is not, and a
 session that was cut off keeps its budgets and submissions. The rounds end at rounds_max, after `patience`
-rounds in a row that did not raise the best reward, or after max_consecutive_refusals refusals in a row.
+rounds in a row that did not raise the best reward, after max_consecutive_refusals refusals in a row, or,
+billed to an API key, when the run's budget is spent (a round that was under way is ended and kept first).
 
 When they end, the submission with the highest reward is locked: the entry as it was submitted, byte for
 byte (its hash is checked). The seed check hands that entry to the verifier on the second network. No agent
@@ -34,7 +37,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import hygiene, lang, prompt, rewards, run_config
+from . import budget, hygiene, lang, prompt, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session, surface
@@ -202,16 +205,33 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
         + (f"every one of {model.n_total:,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
+    if cfg["backend"] == "claude_code" and cfg["auth"] == "api_key":
+        b = cfg["budget"]
+        log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
+            f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
+    elif cfg["backend"] == "claude_code":
+        log("under your Claude Code login: no API key is used")
     drive(path, fake_scripts=fake_scripts, out=out)
     return path
 
 
-def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False) -> str:
-    """Run the rounds that are left, then finish. Returns how it ended: finished, or stopped (resume later)."""
+def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False, budget_usd: float | None = None) -> str:
+    """Run the rounds that are left, then finish. Returns how it ended: finished, or stopped (resume later).
+    budget_usd: a new budget for a run billed to an API key, kept in its spend log."""
     path = Path(path)
     run = read_json(path / "run.json")
     cfg = run["config"]
     log = Log(path, out)
+    if budget_usd is not None:
+        if cfg.get("auth") != "api_key":
+            raise RuntimeError("this run is not billed to an API key, so it has no budget to change")
+        errors = budget.check({**cfg["budget"], "run_usd": budget_usd})
+        if errors:
+            raise RuntimeError("; ".join(errors))
+        before = budget.state(path, cfg["budget"])
+        budget.set_run_budget(path, budget_usd)
+        log(f"the run's API budget is now ${budget_usd:.2f} (was ${before['run_usd']:.2f}; ${before['spent']:.2f} counted so far)",
+            budget_usd=budget_usd)
     model = load_model(cfg["model"])
     if trusted_hash(model) != run["trusted_hash"]:
         if not accept_changes:
@@ -225,6 +245,10 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
         why = stop_reason(done, cfg)
         if why is None and not backend.available(len(done)):
             why = "the backend has no answer for another round"
+        # A spent budget ends the rounds; a round that was under way runs first, and ends at once with what it
+        # submitted, so that its submissions are kept.
+        if why is None and hasattr(backend, "exhausted") and not (path / f"round_{len(done) + 1:03d}").exists():
+            why = backend.exhausted(path)
         if why is not None:
             log(f"the rounds end: {why}", ended=why)
             break
@@ -356,10 +380,13 @@ def main(argv=None) -> int:
     r.add_argument("--runs-dir")
     r.add_argument("--fake", help="a folder of scripted rounds: sets the backend to fake")
     r.add_argument("--sandbox", help="auto, hardened, container, landlock, seatbelt or process (default: the config's)")
+    r.add_argument("--auth", choices=("login", "api_key"), help="who pays for the rounds (default: the config's)")
+    r.add_argument("--budget-usd", type=float, help="api_key: what the whole run may spend, in dollars (default: the config's)")
     s = sub.add_parser("resume")
     s.add_argument("--run", required=True)
     s.add_argument("--fake")
     s.add_argument("--accept-changes", action="store_true")
+    s.add_argument("--budget-usd", type=float, help="api_key: a new budget for the whole run, in dollars")
     f = sub.add_parser("finish")
     f.add_argument("--run", required=True)
     c = sub.add_parser("rescore")
@@ -375,14 +402,18 @@ def main(argv=None) -> int:
 
     try:
         if args.cmd == "run":
-            over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox)) if v}
+            over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox),
+                                      ("auth", args.auth)) if v}
+            if args.budget_usd is not None:
+                over["budget"] = {"run_usd": args.budget_usd}
             if args.fake:
                 over["backend"] = "fake"
             cfg = run_config.load(args.config, over)
             start(cfg, fake_scripts=args.fake)
             return 0
         if args.cmd == "resume":
-            return 0 if drive(Path(args.run), fake_scripts=args.fake, accept_changes=args.accept_changes) == "finished" else 2
+            return 0 if drive(Path(args.run), fake_scripts=args.fake, accept_changes=args.accept_changes,
+                              budget_usd=args.budget_usd) == "finished" else 2
         if args.cmd == "finish":
             finish(Path(args.run))
             return 0

@@ -1,0 +1,14 @@
+# The lin-b pilot billed to an API key instead of a Claude login: the same run as lin-b.yaml in every other
+# way, so that the two can be compared. The key is read from the variable named by api_key_env
+# (CPL_ANTHROPIC_KEY, see config/defaults.yaml), never from ANTHROPIC_API_KEY.
+#
+# The budget is by Claude Code's own count. The lin-a-1to4 pilot's five rounds cost $1.20 to $3.06 each
+# ($10.84 in all), and the lin-b smoke run's one short round $1.82; a lin-b round with the full session is
+# expected to cost a few dollars, perhaps up to $10. A round that reaches round_usd ends there and what it
+# submitted stands; the rounds end when the run reaches run_usd. `resume --budget-usd` raises it.
+extends: lin-b.yaml
+run_id: pilot-lin-b-api
+auth: api_key
+budget:
+  run_usd: 60
+  round_usd: 20

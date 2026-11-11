@@ -262,3 +262,60 @@ def test_config_errors(tmp_path):
     cfg = config(tmp_path, run_id="same", seed_check={"network": "lin-a-s0"})
     with pytest.raises(RuntimeError, match="another network"):
         loop.start(cfg, fake_scripts=FAKE)
+
+
+def test_an_api_budget_ends_the_rounds_and_a_resume_can_raise_it(tmp_path, monkeypatch):
+    """Billed to an API key, with the CLI replaced by a stand-in: the run stops at its budget, a round that was
+    under way when the loop was killed is ended and kept, and a resume with a larger budget goes on."""
+    import json
+    from types import SimpleNamespace
+
+    from level1.backends.claude_code import ClaudeCodeBackend
+    from level1.session import Session
+
+    cfg = config(tmp_path, run_id="billed", backend="claude_code", auth="api_key", budget={"run_usd": 3, "round_usd": 2}, patience=5)
+    path = run_config.run_path(cfg)
+    seen = []
+
+    def runner(cmd, prompt_text, env, cwd, timeout_s):
+        k = max(int(p.name[-3:]) for p in path.glob("round_*"))
+        cap = float(cmd[cmd.index("--max-budget-usd") + 1])
+        seen.append((k, cap))
+        s = Session(path / f"round_{k:03d}" / "session")
+        s.run_python(f"g = graph()\nsave_entry('t{k}', g.entry(predict=g.token({k % 2})))")
+        s.submit_entry(f"t{k}", 0.5, 0.5)
+        if k == 2 and len(seen) == 2:
+            raise RuntimeError("the loop was killed")  # mid-session, after a submission: no cost reported
+        lines = [{"type": "system", "subtype": "init", "apiKeySource": "apiKeyHelper"},
+                 {"type": "assistant", "message": {"content": [{"type": "text", "text": "## What the network does\nnotes"}], "stop_reason": "end_turn"}},
+                 {"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": min(1.5, cap),
+                  "modelUsage": {cfg["agent_model"]: {"outputTokens": 10}}}]
+        return SimpleNamespace(stdout="\n".join(json.dumps(x) for x in lines), stderr="", returncode=0)
+
+    monkeypatch.setattr(loop, "make", lambda c, log=print, fake_scripts=None: ClaudeCodeBackend(
+        c, log=log, runner=runner, environ={"PATH": "/usr/bin", "CPL_ANTHROPIC_KEY": "sk-test"}))
+    lines = []
+    with pytest.raises(RuntimeError, match="killed"):
+        loop.start(cfg, out=lines.append)
+    assert seen == [(1, 2.0), (2, 1.5)] and any("billed to the API key in CPL_ANTHROPIC_KEY: at most $3.00" in line for line in lines)
+
+    # The killed try counts at its cap, which spends the budget; the round under way is ended and kept, then the rounds end.
+    assert loop.drive(path, out=lines.append) == "finished"
+    rounds = loop.completed(path)
+    assert len(seen) == 2 and len(rounds) == 2 and len(rounds[1]["submissions"]) == 1 and rounds[1]["stop_reason"] == "budget"
+    assert "the run's API budget is spent: $3.00 counted of $3.00" in next(e["ended"] for e in reversed(read_jsonl(path / "log.jsonl")) if e.get("ended"))
+    assert "billed to an API key: $1.50" in (path / "report.md").read_text()
+
+    # A larger budget: the rounds go on until it is spent too.
+    assert loop.drive(path, out=lines.append, budget_usd=5) == "finished"
+    assert seen[2:] == [(3, 2.0), (4, 0.5)] and len(loop.completed(path)) == 4
+    assert any("the run's API budget is now $5.00 (was $3.00; $3.00 counted so far)" in line for line in lines)
+    with pytest.raises(RuntimeError, match="positive number"):
+        loop.drive(path, out=lines.append, budget_usd=-1)
+
+
+def test_the_api_config_is_the_pilot_billed_to_a_key():
+    pilot, api = run_config.load("config/pilot/lin-b.yaml"), run_config.load("config/pilot/lin-b-api.yaml")
+    assert api["auth"] == "api_key" and pilot["auth"] == "login" and api["run_id"] != pilot["run_id"]
+    assert all(api[k] == pilot[k] for k in set(pilot) - {"run_id", "auth", "budget"})
+    assert api["api_key_env"] == "CPL_ANTHROPIC_KEY" and api["budget"]["run_usd"] > api["budget"]["round_usd"] > 0

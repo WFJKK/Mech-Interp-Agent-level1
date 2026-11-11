@@ -9,11 +9,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from . import rewards
+from . import budget, rewards
 from .util import REPO_ROOT, read_yaml
 
 DEFAULTS = REPO_ROOT / "config" / "defaults.yaml"
 REQUIRED = ("run_id", "model", "network")
+KEY_VARIABLES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")  # the CLI's own; the backend removes them
 
 
 class ConfigError(ValueError):
@@ -58,6 +59,18 @@ def load(path, overrides: dict | None = None) -> dict:
         rewards.check(cfg["reward"])
     except ValueError as exc:
         raise ConfigError(str(exc)) from None
+    if cfg.get("auth") not in ("login", "api_key"):
+        raise ConfigError(f"auth must be login or api_key, not {cfg.get('auth')!r}")
+    for key in ("api_key_env", "api_workspace_env"):
+        var = cfg.get(key)
+        if var is not None and (not isinstance(var, str) or not var.isidentifier() or var in KEY_VARIABLES):
+            raise ConfigError(f"{key} must name an environment variable other than {' and '.join(KEY_VARIABLES)}, not {var!r}")
+    if cfg["auth"] == "api_key":
+        if not cfg.get("api_key_env"):
+            raise ConfigError("auth api_key needs api_key_env: the variable that holds the key")
+        errors = budget.check(cfg.get("budget"))
+        if errors:
+            raise ConfigError("; ".join(errors))
     return cfg
 
 

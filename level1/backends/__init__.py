@@ -5,7 +5,8 @@ rounds this backend has answered in the run, so a resumed run asks for the same 
 the round's folder; session is the round's Session (its tools, budgets and log). The answer is the agent's
 closing notes; what it did, it did through the session's tools.
 
-    claude_code   the Claude Code CLI, headless, under the user's own login, with the two tools attached
+    claude_code   the Claude Code CLI, headless, with the two tools attached; under the user's own login, or
+                  billed to an API key within a budget (auth: api_key)
     fake          scripted tool calls replayed from JSON files: tests, dry runs
 """
 
@@ -25,7 +26,8 @@ class BackendError(RuntimeError):
 
 
 class StopRun(RuntimeError):
-    """The run cannot go on now (a login problem, a usage limit that did not lift, another model answering).
+    """The run cannot go on now (a login or key problem, a usage limit that did not lift, an account that cannot
+    pay, another model answering).
     The loop stops cleanly; `resume` continues it later."""
 
 

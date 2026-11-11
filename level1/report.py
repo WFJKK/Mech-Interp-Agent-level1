@@ -27,7 +27,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import lang, rewards, run_config
+from . import budget, lang, rewards, run_config
 from .networks import load_model
 from .util import atomic_write, read_json, read_jsonl, write_json
 from .verifier import DEFAULTS, Verifier
@@ -70,12 +70,13 @@ def _parts_row(receipt: dict | None) -> list:
 
 
 def _session_meta(path: Path, k: int) -> dict:
-    """What a round's session took, from its meta.json: seconds, output tokens, and what the same tokens
-    would have cost through the API when the backend says (a subscription is not billed per call)."""
+    """What a round's session took, from its meta.json: seconds, output tokens, what it was billed (an API key)
+    or what the same tokens would have cost through the API (a subscription is not billed per call)."""
     f = Path(path) / f"round_{k:03d}" / "meta.json"
     meta = read_json(f) if f.is_file() else {}
     return {"seconds": meta.get("seconds"), "output_tokens": meta.get("output_tokens"),
-            "api_equivalent_usd": meta.get("api_equivalent_usd"), "failed_tries": len(meta.get("failed_tries") or [])}
+            "api_equivalent_usd": meta.get("api_equivalent_usd"), "failed_tries": len(meta.get("failed_tries") or []),
+            "cost_usd": meta.get("cost_usd"), "billed_to": meta.get("billed_to"), "auth": meta.get("auth")}
 
 
 def exploration(path: Path, k: int) -> dict:
@@ -226,6 +227,8 @@ def build(path: Path) -> dict:
         "lock": lock, "seed_check": seed, "locked_entry": entry,
         "locked_entry_shown": lang.show(entry) if entry else None,
         "references": references(model, cfg, networks), "notes": notes, "task": model.task().get("task"),
+        "auth": cfg.get("auth", "login"),
+        "spend": budget.state(path, cfg["budget"]) if cfg.get("auth") == "api_key" else None,
     }
 
 
@@ -288,8 +291,14 @@ def markdown(rep: dict) -> str:
         out.append(f"| {rd['round']} | {rd['submissions']} | {_f(rd['best_reward_after'])} | {'yes' if rd['improved'] else 'no'} | "
                    f"{rd['stop_reason'] or ''} | " + ", ".join(f"{v} {k}" for k, v in (rd["tools_used"] or {}).items())
                    + f" | {minutes} | {tokens} | {ex.get('programs', '')} | {ex.get('sandbox_seconds', 0) / 60:.1f} |")
+    billed = [rd for rd in rep["rounds"] if rd.get("auth") == "api_key" or rd.get("billed_to") in ("apiKeyHelper", "/login managed key")]
     usd = [rd["api_equivalent_usd"] for rd in rep["rounds"] if isinstance(rd.get("api_equivalent_usd"), (int, float))]
-    if usd:
+    if billed:
+        spent = sum(rd["cost_usd"] for rd in billed if isinstance(rd.get("cost_usd"), (int, float)))
+        out += ["", f"The rounds were billed to an API key: ${spent:.2f} by Claude Code's count"
+                + (f" (spend.jsonl counts ${rep['spend']['spent']:.2f}, with every try that reported no cost at its cap)."
+                   if rep.get("spend") and abs(rep["spend"]["spent"] - spent) > 0.005 else ".")]
+    elif usd:
         out += ["", f"The same tokens through the API would have cost about ${sum(usd):.2f} (a subscription is not billed per call)."]
 
     flagged = [f for rd in rep["rounds"] for f in (rd.get("exploration") or {}).get("flagged", [])]

@@ -12,7 +12,8 @@ measuring it on inputs the verifier picks, and nothing is proved. Levels 2 (an a
 budget) and 3 (an argument that convinces) are not in this repository.
 
 Status, 11 November 2026: three pilots are set up (see "The pilots"). The pilot on 1 to 4 tokens
-has been run once, with a smoke run before it; the other two have not been run yet.
+has been run once, with a smoke run before it, and lin-b has had its smoke run. Rounds run under a
+Claude Code login or billed to an API key ("On an API key").
 
 ## How a run goes
 
@@ -74,7 +75,8 @@ per 10,000 steps on a laptop's CPU). In the last two the networks are asked abou
 they were trained on, and the agent is not told which ones those were: finding where the network's
 behaviour can be described cheaply is part of the work. On lin-b there are too many inputs for the
 agent, or anyone, to check them all. Each pilot has a small smoke config next to it
-(`lin-a-smoke.yaml`, `lin-a-1to4-smoke.yaml`, `lin-b-smoke.yaml`).
+(`lin-a-smoke.yaml`, `lin-a-1to4-smoke.yaml`, `lin-b-smoke.yaml`), and `lin-b-api.yaml` is the
+lin-b pilot billed to an API key.
 
 ## Quick start
 
@@ -107,6 +109,28 @@ If it stops (a usage limit, a dropped connection, a closed laptop), continue wit
 
 The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`.
 
+### On an API key
+
+A run can be billed to an API key instead of your login (`auth: api_key`). Put the key in
+`CPL_ANTHROPIC_KEY`, never in `ANTHROPIC_API_KEY`, for example by loading the file you keep it in;
+`CPL_ANTHROPIC_WORKSPACE` takes a workspace ID if the key is not scoped to one workspace. Then
+
+    python -m level1.loop run --config config/pilot/lin-b-api.yaml --sandbox seatbelt
+
+Before the first round the key is checked against the API's list of models, which costs nothing.
+The run has a budget, by Claude Code's own count: `budget.run_usd` for the run (60 dollars) and
+`budget.round_usd` for one round (20). Every session starts with what is left as its cap. A round
+that reaches its cap ends with what it submitted; the rounds end when the run's budget is spent.
+Claude Code checks its spending after every answer, so a session can go over its cap by one answer.
+The run folder's `spend.jsonl` has every session's cap and cost; a session that reported no cost
+(stopped at its time limit, or the loop was killed) counts at its cap. To go on with more:
+
+    python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-b-api --budget-usd 90
+
+`--auth api_key` and `--budget-usd` work on `run` with any config. The CLI's `--bare` mode, which
+this uses, reads no login, so an API run cannot draw on a subscription, and a login run cannot bill
+a key: the CLI's first event says what it billed, and a session that does not fit stops the run.
+
 In every mode a guard inside Python refuses the agent's code files outside its folder, the network
 and other programs, and records every attempt; the report lists them. The guard shares a process
 with the code it watches, so for a run that is meant to count add `--sandbox hardened` (Docker or
@@ -136,7 +160,8 @@ Everything is written as it happens, so a run can stop and resume, and can be re
   and what the guard refused it (`NNN.audit.json`);
 - everything the CLI emitted, the agent's text between its tool calls included
   (`round_k/stream_NN.jsonl`);
-- every submission's receipt, with the parts measured.
+- every submission's receipt, with the parts measured;
+- billed to an API key, every session's cap and cost (`spend.jsonl`).
 
 The report counts the programs and the sandbox time per round, lists every attempt the guard
 refused, and lists the programs whose text reaches for files or the system.
@@ -160,6 +185,7 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
       report.py      the report; the reference entries under any reward
       hygiene.py     the check that the agent is not told what the model does
       backends/      who answers a round: claude_code, fake
+      budget.py      what a run billed to an API key may spend, and what it has spent
       sandbox.py, runner.py, harness.py    where the agent's code runs
     models/lin-a/         a linear network on pairs of tokens, two seeds
     models/lin-a-1to4/    the same two networks, asked about inputs of 1 to 4 tokens
