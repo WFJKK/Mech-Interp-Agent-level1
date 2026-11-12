@@ -1,0 +1,10 @@
+# A first contact with a real model on the att-b pilot, kept small on purpose: one round with a short session,
+# to see that everything works together on this machine before the pilot proper (config/pilot/att-b.yaml).
+extends: att-b.yaml
+run_id: pilot-att-b-smoke
+rounds_max: 1
+session:
+  python_calls: 8
+  submissions: 2
+  max_turns: 40
+  seconds: 1200

@@ -1,0 +1,44 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The network was trained to output the smallest of its four tokens (min of 4), on inputs of exactly four
+  tokens and on nothing else. Inputs of one to three and of five to eight tokens are outside what it was
+  trained on; it still gives an output there, because it only adds up one embedding column per token. It is
+  lin-b's counterpart: the same design and recipe, the other task.
+provenance:
+  trained_by: withheld/lin-d/train.py, 12 November 2026 (lin-b's trainer with the smallest token as the label;
+    the proof pipeline's linear network and training recipe, models/max2/model.py and core/train.py of
+    Compact-Proof-Agent, written in numpy)
+  recipe: 4 tokens of 0..63 per input, uniformly random, fresh at every step; label the smallest token;
+    cross-entropy; AdamW lr 0.001, betas 0.9 and 0.999, eps 1e-8, weight decay 0.01; batch 1,024; width 8;
+    initial weights uniform in +-1/sqrt(fan_in); float32
+  how_long: in blocks of 10,000 steps until the share of all 64^4 four-token inputs on which the output is the
+    smallest token gains less than 0.05 percentage points over 20,000 steps, the rule lin-b was trained by
+    (Joshua, 11 November 2026, "until the loss is acceptable or the performance")
+  networks:
+    lin-d-s0: {seed: 0, steps: 50000, final_loss: 0.0134, smallest_on_all_four_token_inputs: 0.99719}
+    lin-d-s1: {seed: 1, steps: 70000, final_loss: 0.0099, smallest_on_all_four_token_inputs: 0.99805}
+  lin_b_for_comparison: 80,000 and 70,000 steps, right on 0.99830 and 0.99785 of all four-token inputs
+  training_curve:   # step, mean loss over the block, share of all four-token inputs answered with the smallest
+    lin-d-s0: [[10000, 0.324, 0.99170], [20000, 0.031, 0.99510], [30000, 0.019, 0.99677], [40000, 0.015, 0.99724],
+               [50000, 0.013, 0.99719]]
+    lin-d-s1: [[10000, 0.333, 0.99148], [20000, 0.030, 0.99538], [30000, 0.018, 0.99650], [40000, 0.014, 0.99726],
+               [50000, 0.012, 0.99773], [60000, 0.011, 0.99799], [70000, 0.010, 0.99805]]
+  how_often_the_output_is_the_smallest_token:   # 1 to 4 tokens: every input; 5 to 8 tokens: a sample of 1,000,000
+    lin-d-s0: {1: "50 of 64", 2: "3,948 of 4,096", 3: "260,261 of 262,144", 4: 0.9972, 5: 0.9902, 6: 0.9724, 7: 0.9468, 8: 0.9163}
+    lin-d-s1: {1: "53 of 64", 2: "3,973 of 4,096", 3: "260,726 of 262,144", 4: 0.9981, 5: 0.9919, 6: 0.9738, 7: 0.9460, 8: 0.9118}
+hygiene:
+  - min4
+  - min-of
+  - min of
+  - minimum of
+  - smallest
+  - smaller
+  - lesser of
+  - lowest
+  - Gross
+  - compact proof
+  - four tokens
+  - 4 tokens
+  - exactly four
+  - trained on

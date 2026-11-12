@@ -1,0 +1,16 @@
+# The pilot on att-a: a transformer with one layer and one attention head, asked about inputs that fill one of its 2 slots or both
+# (models/att-a: 2 slots, 64 tokens, width 32), 8,621 operations per forward pass. The agent is told what an input is and how the data set is
+# drawn. It is not told which inputs the network was trained on, or to do what; finding where its behaviour
+# can be described is the work.
+# 4,160 inputs, sampled like the others, so the verifier scores a fresh sample for every submission.
+#   rounds on      att-a-s0
+#   seed check on  att-a-s1   the same sizes and training, another seed
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-att-a
+model: models/att-a
+network: att-a-s0
+seed_check: {network: att-a-s1}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

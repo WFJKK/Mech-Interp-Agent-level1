@@ -1,0 +1,43 @@
+# The model att-c: a transformer with one layer and one attention head, asked about inputs that fill from one to all of its 4 slots.
+# Sizes, the data set and the networks; change values here, never in code.
+# What the networks were trained to do, and on which inputs, is not in this folder. It is in
+# withheld/att-c/, which no tool of the agent reaches, and nothing here may say it (the hygiene check reads
+# this folder's agent-facing files).
+name: att-c
+sizes:
+  n_ctx: 4        # slots per input; a slot holds a token or is empty
+  d_vocab: 64     # tokens are whole numbers 0 .. d_vocab - 1; the output is one of them too
+  d_model: 32
+  d_head: 32
+input_space: [65, 65, 65, 65]   # per slot: a token 0 .. 63, or 64 for an empty slot
+n_outputs: 64
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: lengths
+  lengths: [1, 2, 3, 4]   # the number of tokens, each as likely as any other
+  vocab: 64               # then that many tokens, each below this and equally likely
+  empty: 64               # what the remaining slots hold
+  says: >
+    An input is drawn like this. First a number of tokens is picked from 1, 2, 3 and 4, each equally
+    likely. Then that many tokens are picked, each a whole number from 0 to 63 and equally likely.
+    The tokens fill the first slots and the remaining slots are empty (64). The data set is every
+    input that can be drawn this way, each counted as often as it is drawn: about 17 million
+    different inputs, most of them filling every slot, yet every number of tokens makes up a quarter
+    of the data set.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  embed: [65, 32]       # its last row, the empty slot's, is all zeros
+  pos: [4, 32]
+  query: [32, 32]
+  key: [32, 32]
+  value: [32, 32]
+  out: [32, 32]
+  unembed: [32, 64]
+# Two networks of the same sizes and training, with different seeds. A run works on one and checks its
+# locked entry on another.
+networks:
+  - id: att-c-s0
+    weights: zoo/att-c-s0.npz
+    sha256: 9b5d8b49392cb650ab08a44a4a5625051dfd8a8c3d2deb6403dba96d01fcac68
+  - id: att-c-s1
+    weights: zoo/att-c-s1.npz
+    sha256: bfb8c85b930a419226200ffc259f3596edae1e4177dc42592c1a76b57bb34d53

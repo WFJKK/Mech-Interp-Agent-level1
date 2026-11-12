@@ -1,0 +1,38 @@
+# The model lin-d: a linear network of the same design as lin-b, trained afresh, asked about inputs of 1 to 8 tokens.
+# Sizes, the data set and the networks; change values here, never in code.
+# What the networks were trained to do, and on which inputs, is not in this folder. It is in
+# withheld/lin-d/, which no tool of the agent reaches, and nothing here may say it (the hygiene check reads
+# this folder's agent-facing files).
+name: lin-d
+sizes:
+  n_ctx: 8        # slots per input; a slot holds a token or is empty
+  d_vocab: 64     # tokens are whole numbers 0 .. d_vocab - 1; the output is one of them too
+  d_model: 8
+input_space: [65, 65, 65, 65, 65, 65, 65, 65]   # per slot: a token 0 .. 63, or 64 for an empty slot
+n_outputs: 64
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: lengths
+  lengths: [1, 2, 3, 4, 5, 6, 7, 8]   # the number of tokens, each as likely as any other
+  vocab: 64               # then that many tokens, each below this and equally likely
+  empty: 64               # what the remaining slots hold
+  says: >
+    An input is drawn like this. First a number of tokens is picked from 1 to 8, each equally
+    likely. Then that many tokens are picked, each a whole number from 0 to 63 and equally likely.
+    The tokens fill the first slots and the remaining slots are empty (64). The data set is every
+    input that can be drawn this way, each counted as often as it is drawn: about 2.8 x 10^14
+    different inputs, far more with eight tokens than with one, yet every number of tokens makes up
+    an eighth of the data set.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  embed: [8, 65]        # its last column, the empty slot's, is all zeros
+  hidden: [8, 8]
+  unembed: [64, 8]
+# Two networks of the same sizes and training, with different seeds. A run works on one and checks its
+# locked entry on another.
+networks:
+  - id: lin-d-s0
+    weights: zoo/lin-d-s0.npz
+    sha256: e74d65c1e039777063148fa6c4ff85eb0cf3084a65bf3e167988413b3541a944
+  - id: lin-d-s1
+    weights: zoo/lin-d-s1.npz
+    sha256: 92c0af59a5cfb5dc156a308bc738cfa8f26532921f4f629a3727778fbfcba951

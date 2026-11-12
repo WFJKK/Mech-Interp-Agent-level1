@@ -1,0 +1,46 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The network was trained to output the smallest of its four tokens (min of 4), on inputs of exactly four
+  tokens and on nothing else: Gross et al.'s one-layer, one-head, attention-only transformer at 64 tokens,
+  width 32, att-c's counterpart (the proof pipeline has no min-of-4 network of this size, so it was trained
+  here by the same recipe). Inputs of one to three tokens are outside what it was trained on; it still
+  gives an output there, read at the last token given.
+provenance:
+  trained_by: withheld/att-d/train.py, 12 November 2026 (the proof pipeline's attention network and recipe,
+    models/attn-max4 and core/train.py of Compact-Proof-Agent, written in numpy; gradients checked against
+    finite differences)
+  recipe: 4 tokens of 0..63 per input, uniformly random, a fresh batch of 512 at every step, drawn column by
+    column; label the smallest token; cross-entropy at the last position; AdamW lr 0.001, betas 0.9 and 0.999,
+    eps 1e-8, weight decay 0.01; 4,000 steps; d_model = d_head = 32; no biases; initial weights uniform in
+    +-1/sqrt(shape[0]), in the order E, P, WQ, WK, WV, WO, U; float32; numpy's random generator, so the seeds
+    are not torch's
+  networks:
+    att-d-s0: {seed: 0, steps: 4000, smallest_on_all_four_token_inputs: 0.999936}
+    att-d-s1: {seed: 1, steps: 4000, smallest_on_all_four_token_inputs: 0.999923}
+  att_c_for_comparison: right on 0.999923 and 0.999964 of all four-token inputs
+  training_curve:   # step, mean loss over the last 500 steps
+    att-d-s0: [[500, 1.4815], [1000, 0.0221], [1500, 0.0086], [2000, 0.0028], [2500, 0.0038], [3000, 0.0008], [3500, 0.0006], [4000, 0.0043]]
+    att-d-s1: [[500, 1.6100], [1000, 0.0262], [1500, 0.0093], [2000, 0.0027], [2500, 0.0028], [3000, 0.0011], [3500, 0.0007], [4000, 0.0005]]
+  architecture: one layer, one attention head, attention only (no MLP, no layer norm, no biases), learned
+    positional embeddings, read at the last position; models/att-d/model.py reads an input of fewer tokens
+    at its last token given, attending over the tokens given, which is what a causal transformer computes
+    there (the proof pipeline's module reads only at its last position)
+  how_often_the_output_is_the_smallest_token:   # every input of one to three tokens; four: the zoo record above
+    att-d-s0: {1: "59 of 64", 2: "3,670 of 4,096", 3: "169,871 of 262,144", 4: 0.999936}
+    att-d-s1: {1: "58 of 64", 2: "887 of 4,096", 3: "70,088 of 262,144", 4: 0.999923}
+hygiene:
+  - min4
+  - min-of
+  - min of
+  - minimum of
+  - smallest
+  - smaller
+  - lesser of
+  - lowest
+  - Gross
+  - compact proof
+  - four tokens
+  - 4 tokens
+  - exactly four
+  - trained on

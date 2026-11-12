@@ -1,0 +1,41 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The network was trained to output the smallest of its two tokens (min of 2), on inputs of exactly two
+  tokens and on nothing else. Inputs of one, three or four tokens are outside what it was trained on; it
+  still gives an output there, because it only adds up one embedding column per token. It is lin-a's
+  counterpart: the same design and recipe, the other task.
+provenance:
+  trained_by: withheld/lin-c/train.py, 12 November 2026 (the proof pipeline's linear network and training
+    recipe, models/max2/model.py and core/train.py of Compact-Proof-Agent, written in numpy, as for lin-b)
+  recipe: 2 tokens of 0..63 per input, uniformly random, fresh at every step; label the smallest token;
+    cross-entropy; AdamW lr 0.001, betas 0.9 and 0.999, eps 1e-8, weight decay 0.01; batch 1,024; width 8;
+    initial weights uniform in +-1/sqrt(fan_in); float32
+  how_long: 4,000 steps, the proof pipeline's max2 recipe, by which lin-a's networks were trained (they were
+    then right on 99.976% and 99.902% of their 4,096 inputs)
+  networks:
+    lin-c-s0: {seed: 0, steps: 4000, final_loss: 0.0343, smallest_on_all_two_token_inputs: 0.99976}
+    lin-c-s1: {seed: 1, steps: 4000, final_loss: 0.0461, smallest_on_all_two_token_inputs: 0.99927}
+  training_curve:   # step, mean loss over the block, share of all two-token inputs answered with the smallest
+    lin-c-s0: [[1000, 1.939, 0.87891], [2000, 0.301, 0.98096], [3000, 0.089, 0.99707], [4000, 0.034, 0.99976]]
+    lin-c-s1: [[1000, 1.854, 0.87866], [2000, 0.329, 0.96216], [3000, 0.128, 0.99390], [4000, 0.046, 0.99927]]
+  how_often_the_output_is_the_smallest_token:   # every input
+    lin-c-s0: {1: "63 of 64", 2: "4,095 of 4,096", 3: "203,748 of 262,144", 4: 0.5865}
+    lin-c-s1: {1: "63 of 64", 2: "4,093 of 4,096", 3: "211,095 of 262,144", 4: 0.6327}
+  lin_a_for_comparison: one token 63 of 64, two tokens 4,095 of 4,096, three tokens 79%, four tokens 60% (s0)
+hygiene:
+  - min2
+  - min-of
+  - min of
+  - minimum of
+  - smallest
+  - smaller
+  - lesser of
+  - lowest
+  - Gross
+  - compact proof
+  - pairs
+  - two tokens
+  - 2 tokens
+  - exactly two
+  - trained on
