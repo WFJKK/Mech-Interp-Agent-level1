@@ -11,9 +11,9 @@ This is level 1 of the three levels for loosening compact proofs: the claim is c
 measuring it on inputs the verifier picks, and nothing is proved. Levels 2 (an adversary with a
 budget) and 3 (an argument that convinces) are not in this repository.
 
-Status, 11 November 2026: three pilots are set up (see "The pilots"). The pilot on 1 to 4 tokens
-has been run once, with a smoke run before it, and lin-b has had its smoke run. Rounds run under a
-Claude Code login or billed to an API key ("On an API key").
+Status, 12 November 2026: nine pilots are set up (see "The pilots"). The pilot on 1 to 4 tokens
+has been run once, with a smoke run before it; lin-b has had its smoke run, and its pilot is under
+way. Rounds run under a Claude Code login or billed to an API key ("On an API key").
 
 ## How a run goes
 
@@ -68,15 +68,33 @@ its prompt. The run config says how the verifier checks an entry (`verifier.chec
 | `config/pilot/lin-a.yaml` | `models/lin-a` | every pair of tokens: 4,096 inputs | every input |
 | `config/pilot/lin-a-1to4.yaml` | `models/lin-a-1to4` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
 | `config/pilot/lin-b.yaml` | `models/lin-b` | inputs of 1 to 8 tokens, each length an eighth: about 2.8 x 10^14 inputs | 16,384 sampled per scoring |
+| `config/pilot/lin-c.yaml` | `models/lin-c` | as lin-a-1to4 | 16,384 sampled per scoring |
+| `config/pilot/lin-d.yaml` | `models/lin-d` | as lin-b | 16,384 sampled per scoring |
+| `config/pilot/att-a.yaml` | `models/att-a` | inputs of 1 or 2 tokens, each half: 4,160 inputs | 16,384 sampled per scoring |
+| `config/pilot/att-b.yaml` | `models/att-b` | as att-a | 16,384 sampled per scoring |
+| `config/pilot/att-c.yaml` | `models/att-c` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
+| `config/pilot/att-d.yaml` | `models/att-d` | as att-c | 16,384 sampled per scoring |
 
-The first two use the same two trained networks (two seeds). `lin-b` is a network of the same
-design trained afresh, also with two seeds (`withheld/lin-b/train.py`, resumable, a minute or two
-per 10,000 steps on a laptop's CPU). In the last two the networks are asked about more inputs than
-they were trained on, and the agent is not told which ones those were: finding where the network's
-behaviour can be described cheaply is part of the work. On lin-b there are too many inputs for the
-agent, or anyone, to check them all. Each pilot has a small smoke config next to it
-(`lin-a-smoke.yaml`, `lin-a-1to4-smoke.yaml`, `lin-b-smoke.yaml`), and `lin-b-api.yaml` is the
-lin-b pilot billed to an API key.
+Every model has two trained networks (two seeds): the rounds work on s0, the seed check runs the
+locked entry on s1. The first two pilots use the same two networks. `lin-b` is a network of the
+same design trained afresh (`withheld/lin-b/train.py`, resumable, a minute or two per 10,000 steps
+on a laptop's CPU), and `lin-c` and `lin-d` are the designs of lin-a and lin-b trained afresh on
+another task (`withheld/lin-c/train.py`, `withheld/lin-d/train.py`).
+
+`att-a` to `att-d` are transformers with one layer, one attention head and nothing else (no MLP, no
+layer norm, no biases), 64 tokens, width 32. The network is read at the slot of the last token
+given, attending over the tokens given, so it has an output for inputs that leave slots empty.
+Three come from the proof pipeline's zoo; `att-d` was trained here by the same recipe
+(`withheld/att-d/train.py`, numpy, half a minute per network). A forward pass costs 8,621
+operations at 2 slots and 12,987 at 4, against about 700 for the linear networks.
+
+In all but the pilot on pairs the networks are asked about more inputs than they were trained on,
+and the agent is not told which ones those were: finding where the network's behaviour can be
+described cheaply is part of the work. On lin-b and lin-d there are too many inputs for the agent,
+or anyone, to check them all. On att-a and att-b a short rule gives the network's output on every
+input, so their pilots check that a run finds it rather than pose a problem (a reference entry
+scores 0.997). Each pilot has a small smoke config next to it (`<name>-smoke.yaml`), and
+`lin-b-api.yaml` is the lin-b pilot billed to an API key; `--auth api_key` bills any of them.
 
 ## Quick start
 
@@ -107,7 +125,8 @@ If it stops (a usage limit, a dropped connection, a closed laptop), continue wit
 
     python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-a-1to4
 
-The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`.
+The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`. A
+dry run of any pilot can use `tests/fake_run_any`, one scripted round that fits every model.
 
 ### On an API key
 
@@ -190,6 +209,8 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
     models/lin-a/         a linear network on pairs of tokens, two seeds
     models/lin-a-1to4/    the same two networks, asked about inputs of 1 to 4 tokens
     models/lin-b/         a network of the same design trained afresh, asked about inputs of 1 to 8 tokens
+    models/lin-c/, lin-d/ the designs of lin-a and lin-b trained afresh on another task
+    models/att-a/ .. att-d/   one-layer, one-head transformers: two with 2 slots, two with 4
     withheld/<model>/     what it was trained to do, and reference entries (never shown to the agent)
     agent_docs/      the entry guide the agent reads
     prompts/         the round's prompt template

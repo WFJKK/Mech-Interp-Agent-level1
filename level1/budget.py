@@ -22,7 +22,7 @@ from pathlib import Path
 from .util import append_jsonl, now, read_jsonl
 
 LOG = "spend.jsonl"
-SMALLEST_CAP_USD = 0.01  # the CLI takes the cap in cents; less than a cent left is nothing left
+MIN_CAP_USD = 0.01  # the CLI takes the cap in cents; less than a cent left is nothing left
 
 
 def state(run_path: Path, budget: dict) -> dict:
@@ -58,12 +58,12 @@ def left(st: dict, k: int | None = None) -> float:
 def cap(st: dict, k: int) -> float:
     """The cap for the next try of round k, in whole cents, rounded down; 0 when less than a cent is left."""
     usd = left(st, k)
-    return 0.0 if usd < SMALLEST_CAP_USD else math.floor(usd * 100 + 1e-9) / 100
+    return 0.0 if usd < MIN_CAP_USD else math.floor(usd * 100 + 1e-9) / 100
 
 
 def spent_why(st: dict, k: int | None = None) -> str:
     """Which budget is spent, in words."""
-    if st["run_usd"] - st["spent"] < SMALLEST_CAP_USD:
+    if st["run_usd"] - st["spent"] < MIN_CAP_USD:
         return f"the run's API budget is spent: ${st['spent']:.2f} counted of ${st['run_usd']:.2f}"
     return f"round {k}'s API budget is spent: ${st['rounds'].get(k, 0.0):.2f} counted of ${st['round_usd']:.2f}"
 

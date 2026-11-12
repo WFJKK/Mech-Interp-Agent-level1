@@ -1,0 +1,8 @@
+x, out, ops = network_outputs()
+n = (x < 64).sum(axis=1)
+print("inputs", x.shape, "forward operations", ops, "check", info["check"], "tokens per input", sorted(set(n.tolist())))
+g = graph()
+high = (g.tokens() % 64).max()
+whole = g.entry(interpretation=high)
+m = measure(whole)
+print(save_entry("high", whole), round(m["coverage"], 2), m["fidelity_low"] <= m["fidelity"], round(m["cost"], 4))

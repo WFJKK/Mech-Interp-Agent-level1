@@ -245,6 +245,11 @@ from the records alone, and `rescore` prints the records under another reward.
 column added to `embed` for an empty slot, four slots in place of two, and a `lengths` data set.
 `models/lin-b` shows a model with networks trained here: the training script lives in
 `withheld/lin-b/train.py`, since it has to say what the networks are trained to do.
+`models/att-a` to `att-d` show another architecture, a transformer with one attention head, written
+with the language's softmax. An input with empty slots is read at its last token given; the empty
+slots are masked out of the softmax rather than cut off, so the cost is the same on every input.
+Three of them were taken from the proof pipeline's zoo (`withheld/<name>/task.yaml` gives the source
+file and its checksum) and one was trained here.
 
 Names are part of what the agent can reach: a model folder, a network id or a weight's name must
 not say what the network does. The hygiene check reads them. If the network needs an operation the

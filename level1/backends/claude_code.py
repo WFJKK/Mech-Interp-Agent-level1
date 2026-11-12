@@ -365,7 +365,7 @@ class ClaudeCodeBackend:
         if self.auth != "api_key":
             return None
         st = budget.state(run_path, self.cfg["budget"])
-        return budget.spent_why(st) if budget.left(st) < budget.SMALLEST_CAP_USD else None
+        return budget.spent_why(st) if budget.left(st) < budget.MIN_CAP_USD else None
 
     def command_line(self, mcp_config: Path) -> list[str]:
         cmd = [self.command, "-p"]

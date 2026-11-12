@@ -173,6 +173,39 @@ inputs: it follows it on 99.8% of the inputs of the training, and on 81% to 99% 
 depending on their length. Where it departs from the task, and how cheaply that can be said, is the
 work.
 
+### The six models of 12 November (sampled)
+
+`lin-c` and `lin-d` are the designs of lin-a and lin-b trained afresh on another task, asked about 1
+to 4 and 1 to 8 tokens; `att-a` to `att-d` are one-layer, one-head transformers asked about inputs
+that fill one slot or more (2 slots for att-a and att-b, 4 for att-c and att-d). What each was trained
+on is in `withheld/<name>/task.yaml`. Rewards at alpha = 10, each the mean of 8 scorings on fixed
+samples of 16,384 inputs; reproduce with `python -m level1.report --model models/<name> --sample-size
+16384` (a few minutes for the linear models, about ten for a transformer, whose forward pass is longer).
+
+| Model | Entry | s0 | s1 | In short |
+| --- | --- | --- | --- | --- |
+| lin-c | target_then_contraction | 0.7031 | 0.7015 | the task on 1 or 2 tokens, the contraction on 3 or 4 |
+| lin-c | contraction | 0.5188 | 0.5188 | the weights multiplied together once |
+| lin-c | target_everywhere | -0.6959 | -0.5241 | the task on every input |
+| lin-d | per_length | 0.6914 | 0.7082 | one token from a table, the task on 2 to 7, the contraction on 8 |
+| lin-d | target_everywhere | 0.4024 | 0.4789 | the task on every input |
+| lin-d | contraction | 0.1765 | 0.1765 | the weights multiplied together once |
+| att-a | target_everywhere | 0.9973 | 0.9973 | the task on every input, right on all of them |
+| att-b | target_everywhere | 0.9975 | 0.9975 | the same |
+| att-c | per_length | 0.4985 | 0.4985 | one token from a table, the network itself on 2 or 3, the task on 4 |
+| att-c | target_on_full | 0.2480 | 0.2480 | the task on the inputs of the training only |
+| att-c | target_everywhere | -1.4089 | 0.1098 | the task on every input |
+| att-d | per_length | 0.4985 | 0.4982 | as for att-c |
+| att-d | target_everywhere | -0.3880 | -3.0919 | the task on every input |
+
+lin-c and lin-d behave much like their counterparts (on lin-a-1to4 the same kind of entry as lin-c's
+best scores 0.715 and 0.674; on lin-b, per_length 0.667 and 0.671). On att-a and att-b the task
+itself is right on every input: a run there checks that the pipeline finds it, no more. att-c and
+att-d are right on 99.99% of the inputs of their training and far from the task on fewer tokens, very
+differently per seed: att-d's s1 follows it on 22% of its two-token inputs and 27% of its three-token
+ones, att-c's s0 on 17% of its three-token ones. An entry tuned to s0 can do badly on s1 (the task on
+every input: -1.41 on att-c's s0, 0.11 on its s1), so on these two the seed check matters most.
+
 ## 5. Ways to game a reward, and what stops each
 
 Each has a test in `tests/test_gaming.py`, unless another test is named or it holds by

@@ -1,0 +1,7 @@
+{
+ "calls": [
+  {"tool": "run_python", "args": {"code": {"$file": "explore.py"}}},
+  {"tool": "submit_entry", "args": {"name": "high", "claimed_fidelity": 0.5, "expected_fidelity_other": 0.5}}
+ ],
+ "response": "## What the network does\nNot yet known: one guess tried, the highest token of the input.\n\n## How you found it\nFrom its outputs on a sample.\n\n## The best entry\nhigh\n\n## Claims\nAs submitted.\n\n## Next\nLook at the weights."
+}
