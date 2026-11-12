@@ -11,6 +11,10 @@ from level1 import hygiene, lang, loop, prompt, run_config
 from level1.networks import load_model
 from level1.verifier import Verifier
 
+# Some Macs' numpy warns of an overflow, an invalid value or a division by zero in every matmul, with nothing
+# wrong (docs/SANDBOX.md; the agent's sandbox drops the same three messages). Any other warning still shows.
+pytestmark = pytest.mark.filterwarnings("ignore:(divide by zero|overflow|invalid value) encountered in matmul:RuntimeWarning")
+
 CFG = {"reward": {"name": "r_alpha", "alpha": 10.0}}
 SIZES = {"lin-c": (4, 671), "lin-d": (8, 703), "att-a": (2, 8621), "att-b": (2, 8621), "att-c": (4, 12987), "att-d": (4, 12987)}
 LINEAR = {"embed": (8, 65), "hidden": (8, 8), "unembed": (64, 8)}
