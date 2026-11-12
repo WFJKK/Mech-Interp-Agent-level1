@@ -232,7 +232,96 @@ def build(path: Path) -> dict:
         "references": references(model, cfg, networks), "notes": notes, "task": model.task().get("task"),
         "auth": cfg.get("auth", "login"),
         "spend": budget.state(path, cfg["budget"]) if cfg.get("auth") == "api_key" else None,
+        "baseline": _baseline(path),
     }
+
+
+def _baseline(path: Path) -> dict:
+    from . import baseline
+
+    try:
+        return baseline.reading(path)
+    except Exception as exc:  # the report is written all the same
+        return {"kind": "error", "why": f"{type(exc).__name__}: {exc}"}
+
+
+def _range(r) -> str:
+    lo, hi = r
+    return "" if lo is None else (f"{lo:.4f}" if abs(hi - lo) < 5e-5 else f"{lo:.4f} to {hi:.4f}")
+
+
+def _signed(v: float) -> str:
+    return f"{v:+.4f}"
+
+
+def baseline_lines(rep: dict) -> list:
+    """The report's section on the baseline: for a baseline run, what was frozen; for any other run, the run read
+    against the baseline of its shape."""
+    b = rep.get("baseline") or {}
+    if b.get("kind") == "baseline run":
+        out = ["## The baseline", "",
+               f"This is a baseline run: its networks are those of a baseline model, for the shape of {', '.join(b['twins'])}, and its "
+               "agent was given what a run on those is given. What it achieved is generic; runs of that shape are read against it.", ""]
+        f = b.get("frozen")
+        if not f:
+            return out + ["Nothing is frozen yet: that happens when the run finishes.", ""]
+        if not f.get("entry_sha256"):
+            return out + [f"Nothing was frozen: {f.get('why')}.", ""]
+        out += [f"Frozen: {f['chosen']} (`{f['name']}`), sha256 `{f['entry_sha256'][:16]}`, chosen as {f['chosen_by']} "
+                f"({f['on_second']['reward']:.4f} on {f['on_second']['network']}). Scored again on the model's other networks, all on one "
+                f"fresh sample (seed {f['confirmation']['inputs_seed']}):", "",
+                "| Network | Reward | With its sampling interval | Coverage | Fidelity | Cost | Build part | Per input |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+        for nid, r in f["confirmation"]["networks"].items():
+            if r.get("status") != "scored":
+                out.append(f"| {nid} | refused: {str(r.get('reason'))[:80]} | | | | | | |")
+                continue
+            q = r["parts"]
+            out.append(f"| {nid} | {r['reward']:.4f} | {_range(r['reward_range'])} | {q['coverage']:.4f} | {q['fidelity']:.5f} | "
+                       f"{rewards.cost_of(q):.4f} | {q['b']:.4f} | {q['r']:.4f} |")
+        out += ["", f"Verdict, with a tolerance of {f['tolerance']:g}: **{f['label']}**: {f['why']}."]
+        if len(f.get("tried") or []) > 1 or not f.get("established", f.get("label") == "passes"):
+            out += ["", "Tried, in the order of their reward on the second network:", ""]
+            out += [f"- {x['chosen']} (`{x['name']}`), {x['on_second_reward']:.4f} on the second network: {x['label']}" for x in f.get("tried") or []]
+        if not f.get("established", f.get("label") == "passes"):
+            out += ["", "No entry tried passed, so this baseline is not established: read runs against it with that in mind."]
+        return out + [""]
+    if b.get("kind") != "run" or b.get("state") == "no baseline model":
+        return [] if b.get("kind") != "error" else ["## Against the baseline", "", f"The baseline could not be read: {b.get('why')}", ""]
+    out = ["## Against the baseline", ""]
+    state = b.get("state")
+    if state == "none":
+        return out + [f"No baseline run for this shape and these conditions yet. To make one: `{b['command']}`.", ""]
+    if state in ("unfinished", "finished"):
+        return out + [f"The baseline run {b['baseline_run']} has not been frozen yet; run `finish` on this run again once it has.", ""]
+    if state == "empty":
+        return out + [f"The baseline run {b['baseline_run']} froze nothing: {b.get('why')}.", ""]
+    same = {True: "yes", False: "no", None: "not known"}[b.get("same_first_prompt")]
+    out += [f"The baseline run {b['baseline_run']} froze {b.get('chosen')}, which **{b.get('label')}** the check on its model's other "
+            f"networks ({b.get('why')}). Its agent was given the same first prompt as this run's, byte for byte: {same}.", ""]
+    if b.get("label") != "passes":
+        out += ["**The baseline is not established**: the frozen entry did not pass the check on its own model's other networks, "
+                "so its scores below may owe something to the networks it was made on.", ""]
+    if state != "read":
+        return out + [f"It is not read against this run yet ({state}); run `finish` on this run again.", ""]
+    n0, n1 = b["networks"]["first"], b["networks"]["held out"]
+    R0, R1, B0, B1 = (b["ranges"][k] for k in ("R0", "R1", "B0", "B1"))
+    out += [f"| | On {n0} (this run's network) | On {n1} (held out) |", "| --- | --- | --- |",
+            f"| The locked entry | {_range(R0)} | {_range(R1)} |",
+            f"| The baseline, on the same inputs | {_range(B0)} | {_range(B1)} |",
+            f"| The locked entry above the baseline | {_signed(R0[0] - B0[0])} | {_signed(R1[0] - B1[0])} |", "",
+            "| Part | Reward | With the sampling intervals |", "| --- | --- | --- |"]
+    s = b["split"]
+    out += [f"| The baseline on this run's network | {s['baseline'][0]:.4f} | {_range(s['baseline'][1])} |",
+            f"| The excess kept on the held-out network | {_signed(s['kept'][0])} | {s['kept'][1][0]:+.4f} to {s['kept'][1][1]:+.4f} |",
+            f"| The gap between this run's network and the held-out one | {_signed(s['gap'][0])} | {s['gap'][1][0]:+.4f} to {s['gap'][1][1]:+.4f} |",
+            f"| Together: the locked entry on this run's network | {R0[0]:.4f} | |", "",
+            "Each number is measured on the same inputs as the locked entry's own: its second scoring, on a fresh sample, and the "
+            "seed check. This is accounting, not a causal split. The baseline is a generic score an agent reached, not the best "
+            "possible one, so the excess can hold generic tricks the baseline run did not find as well as what the networks "
+            "learned; and the gap can be sampling noise or a difference between the two networks as well as fitting this run's "
+            "own network.", ""]
+    return out
 
 
 def _sandbox_note(rep: dict) -> str:
@@ -278,6 +367,8 @@ def markdown(rep: dict) -> str:
             out += ["", "The first row is the best of several scorings, each on its own sample, so it leans high; the second "
                     "row is one more scoring of the same entry."]
         out += ["", "```", rep["locked_entry_shown"] or "", "```", ""]
+
+    out += baseline_lines(rep)
 
     out += ["## Reference entries", "",
             "Scored here for comparison. They are withheld from the agent." + _references_note(rep["references"])

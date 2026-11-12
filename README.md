@@ -101,7 +101,7 @@ input, so their pilots check that a run finds it rather than pose a problem (a r
 scores 0.997). Each pilot has a small smoke config next to it (`<name>-smoke.yaml`), and
 `lin-b-api.yaml` is the lin-b pilot billed to an API key; `--auth api_key` bills any of them.
 
-`lin-e`, `lin-f` and `att-e` are baseline models. Each has the design, sizes and data set of the
+`lin-e`, `lin-f` and `att-e` are baseline models (`docs/DESIGN.md`, section 10). Each has the design, sizes and data set of the
 models whose shape it shares (lin-e: lin-c and lin-a-1to4; lin-f: lin-d and lin-b; att-e: att-c
 and att-d), and six networks with nothing in them for an agent to find; what they are is in
 `withheld/<name>/`. A run on one gives the agent exactly what a run on its twin gives it, the same
@@ -141,6 +141,19 @@ If it stops (a usage limit, a dropped connection, a closed laptop), continue wit
 
 The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`. A
 dry run of any pilot can use `tests/fake_run_any`, one scripted round that fits every model.
+
+### With its baseline
+
+A run is read against the baseline of its shape when one is frozen: what an agent achieves under the
+same conditions on networks with nothing to find (`docs/DESIGN.md`, section 10). Three ways to start:
+
+    python -m level1.loop run --config config/pilot/att-c.yaml                   the run only, as above
+    python -m level1.loop baseline --config config/pilot/att-c.yaml              its baseline only
+    python -m level1.loop run --config config/pilot/att-c.yaml --with-baseline   both, side by side
+
+The baseline is made once for a shape and its conditions and serves every run that matches; a
+finished run gets one with `python -m level1.loop baseline --run <run folder>`. Each takes the same
+`--sandbox`, `--auth` and `--budget-usd` as `run`.
 
 ### On an API key
 
@@ -217,6 +230,7 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
       rewards.py     reward functions
       session.py     one agent session: the two tools, budgets, log
       loop.py        rounds, lock, seed check; the command line
+      baseline.py    the baseline of a run's shape: found, run, frozen, and a run read against it
       report.py      the report; the reference entries under any reward
       hygiene.py     the check that the agent is not told what the model does
       backends/      who answers a round: claude_code, fake

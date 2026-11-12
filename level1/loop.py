@@ -4,6 +4,9 @@
                               [--auth api_key] [--budget-usd 60]
     python -m level1.loop resume --run <run folder> [--budget-usd 80]
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
+    python -m level1.loop baseline --config <config> | --run <run folder>    the baseline for that shape and those
+                                  conditions: found, or run, then frozen (level1/baseline.py)
+    run and resume also take --with-baseline: the run's baseline goes alongside, in a second process
     python -m level1.loop rescore --run <run folder> --name r_alpha --alpha 1    the records under another reward
                                   (--param KEY=VALUE for any other parameter of a reward)
 
@@ -19,6 +22,8 @@ A run folder (outside the repository, <runs_dir>/<run_id>):
     seed_scores.jsonl   every scored submission also scored on the second network, on one fixed sample,
                         appended after each round; nothing the agent sees reads it, and nothing is chosen by it
     report.md, report.json
+    baseline_scores.jsonl   the frozen baseline of this run's shape, scored on this run's own inputs (baseline.py)
+    baseline.json, baseline_entry.json   in a baseline run: what was frozen, and how it fared on the other networks
 
 A round is done when its round.json is written. `resume` starts at the first round that is not, and a
 session that was cut off keeps its budgets and submissions. The rounds end at rounds_max, after `patience`
@@ -36,6 +41,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import os
+import subprocess
 import sys
 import tempfile
 from pathlib import Path
@@ -391,9 +397,115 @@ def finish(path: Path, out=print) -> dict:
                 raise RuntimeError("the seed check did not score the locked entry")
             write_json(path / "seed_check.json", {**receipt, "at": now()})
             log(f"seed check on the second network: {describe(receipt)}")
+    _baseline_step(path, model, log)
     report.write(path)
     log(f"report: {path / 'report.md'}")
     return lock
+
+
+def _baseline_step(path: Path, model, log) -> None:
+    """A baseline run is frozen, and the finished runs it serves are read against it; any other run is read
+    against its baseline when one is frozen. For the record only: a failure here does not cost the run."""
+    from . import baseline, report
+
+    try:
+        if baseline.is_baseline(model):
+            baseline.freeze(path, log)
+            for other in baseline.runs_it_serves(path):  # finished runs of its shape not yet read against it
+                if baseline.reading(other).get("state") != "read" and baseline.compare(other, log).get("state") == "read":
+                    report.write(other)
+                    log(f"  {other.name} is read against this baseline: {other / 'report.md'}")
+            return
+        r = baseline.compare(path, log)
+        if r["state"] == "pending":
+            log(f"the baseline run {r['baseline_run']} has not finished; finish this run again once it has")
+        elif r["state"] == "none":
+            log(f"no baseline run for this shape and these conditions yet; to make one: {r['command']}")
+    except Exception as exc:
+        log(f"the baseline could not be read ({type(exc).__name__}: {exc})")
+
+
+def run_baseline(cfg: dict, fake_scripts=None, out=print, prices: str | None = None, accept_changes: bool = False,
+                 budget_usd: float | None = None) -> Path:
+    """The baseline for a run's config: found and frozen if it is on record, resumed if it was stopped, made if it is
+    not. One process at a time runs a baseline; another one waits for it."""
+    from . import baseline
+
+    if (prices or lang.PRICES) != lang.PRICES:
+        raise RuntimeError(f"the run was measured under {prices}, and this code prices under {lang.PRICES}: no baseline "
+                           "made now could be compared with it")
+    from . import report
+
+    p = baseline.plan(cfg, prices)
+    path = p["path"]
+    if p["state"] != "frozen":
+        if not baseline.take_lock(path):
+            baseline.wait_for(path, out)  # another process runs it: what it leaves is the baseline
+        else:
+            try:
+                out(f"the baseline: {path} ({'a new run' if p['state'] == 'new' else p['state']})")
+                if p["state"] == "new":
+                    start(p["config"], fake_scripts=fake_scripts, out=out)
+                elif p["state"] == "unfinished":
+                    drive(path, fake_scripts=fake_scripts, out=out, accept_changes=accept_changes, budget_usd=budget_usd)
+                else:
+                    finish(path, out=out)
+            finally:
+                baseline.release_lock(path)
+        p = baseline.plan(cfg, prices)
+        if p["state"] != "frozen":
+            out(f"the baseline run {p['path']} has not finished ({p['state']}); go on with it the same way")
+            return p["path"]
+    rec = baseline.freeze(p["path"], out)
+    out(f"the baseline for these conditions is {p['path']}: {rec.get('chosen') or 'nothing'} frozen, {rec.get('label')} "
+        f"({rec.get('why')})")
+    for other in baseline.runs_it_serves(p["path"]):  # finished runs of this shape not yet read against it
+        if baseline.reading(other).get("state") != "read" and baseline.compare(other, out).get("state") == "read":
+            report.write(other)
+            out(f"  {other.name} is read against it: {other / 'report.md'}")
+    return p["path"]
+
+
+def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | None = None, accept_changes: bool = False,
+                      budget_usd: float | None = None) -> str:
+    """A run and its baseline side by side: the baseline in a second process (what it prints goes to console.txt in
+    its folder), the run in this one; at the end this one waits for the baseline and reads the run against it."""
+    from . import baseline
+
+    prices = read_json(Path(resume) / "run.json").get("prices") if resume else lang.PRICES
+    if prices != lang.PRICES:
+        raise RuntimeError(f"{resume} was measured under {prices}, and this code prices under {lang.PRICES}")
+    p = baseline.plan(cfg, prices)
+    child = None
+    if p["state"] == "frozen":
+        out(f"its baseline is on record: {p['path']}")
+    elif baseline.running(p["path"]):
+        out(f"its baseline is being run already, by process {baseline.running(p['path'])}: {p['path']}")
+    else:
+        p["path"].mkdir(parents=True, exist_ok=True)
+        write_json(p["path"] / baseline.REQUEST, {"config": cfg, "prices": prices, "at": now()})
+        cmd = [sys.executable, "-m", "level1.loop", "baseline", "--request", str(p["path"] / baseline.REQUEST)]
+        cmd += (["--fake", str(fake_scripts)] if fake_scripts else []) + (["--accept-changes"] if accept_changes else [])
+        console = open(p["path"] / "console.txt", "a")
+        child = subprocess.Popen(cmd, cwd=str(REPO_ROOT), stdout=console, stderr=subprocess.STDOUT)
+        out(f"its baseline goes alongside, in process {child.pid}: {p['path']} (what it prints: {p['path'] / 'console.txt'})")
+    try:
+        if resume:
+            ended, path = drive(Path(resume), fake_scripts=fake_scripts, out=out, accept_changes=accept_changes, budget_usd=budget_usd), Path(resume)
+        else:
+            path = start(cfg, fake_scripts=fake_scripts, out=out)
+            ended = "finished" if (path / "lock.json").is_file() else "stopped"
+    finally:
+        if child is not None:
+            out(f"waiting for the baseline run to end (process {child.pid})")
+            code = child.wait()
+            console.close()
+            out("the baseline run ended" + ("" if code == 0 else f" with exit code {code}; see {p['path'] / 'console.txt'}"))
+        else:
+            baseline.wait_for(p["path"], out)
+    if ended == "finished" and baseline.reading(path).get("state") != "read":
+        finish(path, out=out)
+    return ended
 
 
 def rescore(path: Path, reward_cfg: dict, out=print) -> list:
@@ -429,13 +541,27 @@ def main(argv=None) -> int:
     r.add_argument("--sandbox", help="auto, hardened, container, landlock, seatbelt or process (default: the config's)")
     r.add_argument("--auth", choices=("login", "api_key"), help="who pays for the rounds (default: the config's)")
     r.add_argument("--budget-usd", type=float, help="api_key: what the whole run may spend, in dollars (default: the config's)")
+    r.add_argument("--with-baseline", action="store_true", help="run the baseline of this shape and these conditions alongside, "
+                   "unless it is on record (level1/baseline.py)")
     s = sub.add_parser("resume")
     s.add_argument("--run", required=True)
     s.add_argument("--fake")
     s.add_argument("--accept-changes", action="store_true")
     s.add_argument("--budget-usd", type=float, help="api_key: a new budget for the whole run, in dollars")
+    s.add_argument("--with-baseline", action="store_true", help="run, or go on with, the run's baseline alongside")
     f = sub.add_parser("finish")
     f.add_argument("--run", required=True)
+    b = sub.add_parser("baseline", help="the baseline for a config's or a run's shape and conditions: found, run or resumed, frozen")
+    which = b.add_mutually_exclusive_group(required=True)
+    which.add_argument("--config", help="a run config: the baseline for its conditions")
+    which.add_argument("--run", help="a run folder: the baseline for its conditions")
+    which.add_argument("--request", help=argparse.SUPPRESS)  # written by run --with-baseline for its second process
+    b.add_argument("--runs-dir")
+    b.add_argument("--sandbox", help="as for run (default: the config's)")
+    b.add_argument("--auth", choices=("login", "api_key"), help="as for run (default: the config's)")
+    b.add_argument("--budget-usd", type=float, help="api_key: what the baseline run may spend, in dollars")
+    b.add_argument("--fake", help="a folder of scripted rounds: sets the backend to fake")
+    b.add_argument("--accept-changes", action="store_true", help="go on with a stopped baseline run although the code changed")
     c = sub.add_parser("rescore")
     c.add_argument("--run", required=True)
     c.add_argument("--name", default="r_alpha", help="a reward of level1/rewards.py")
@@ -456,13 +582,38 @@ def main(argv=None) -> int:
             if args.fake:
                 over["backend"] = "fake"
             cfg = run_config.load(args.config, over)
+            if args.with_baseline:
+                return 0 if run_with_baseline(cfg, fake_scripts=args.fake) == "finished" else 2
             start(cfg, fake_scripts=args.fake)
             return 0
         if args.cmd == "resume":
+            if args.with_baseline:
+                cfg = read_json(Path(args.run) / "run.json")["config"]
+                return 0 if run_with_baseline(cfg, fake_scripts=args.fake, resume=Path(args.run), accept_changes=args.accept_changes,
+                                              budget_usd=args.budget_usd) == "finished" else 2
             return 0 if drive(Path(args.run), fake_scripts=args.fake, accept_changes=args.accept_changes,
                               budget_usd=args.budget_usd) == "finished" else 2
         if args.cmd == "finish":
             finish(Path(args.run))
+            return 0
+        if args.cmd == "baseline":
+            prices = None
+            if args.request:
+                req = read_json(Path(args.request))
+                cfg, prices = req["config"], req.get("prices")
+            elif args.run:
+                run = read_json(Path(args.run) / "run.json")
+                cfg, prices = run["config"], run.get("prices")
+            else:
+                over = {k: v for k, v in (("runs_dir", args.runs_dir), ("sandbox", args.sandbox), ("auth", args.auth)) if v}
+                cfg = run_config.load(args.config, over)
+            if args.run or args.request:
+                cfg = run_config.merge(cfg, {k: v for k, v in (("runs_dir", args.runs_dir), ("sandbox", args.sandbox), ("auth", args.auth)) if v})
+            if args.budget_usd is not None:
+                cfg = run_config.merge(cfg, {"budget": {"run_usd": args.budget_usd}})
+            if args.fake:
+                cfg = {**cfg, "backend": "fake"}
+            run_baseline(cfg, fake_scripts=args.fake, prices=prices, accept_changes=args.accept_changes, budget_usd=args.budget_usd)
             return 0
         rescore(Path(args.run), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty))
         return 0

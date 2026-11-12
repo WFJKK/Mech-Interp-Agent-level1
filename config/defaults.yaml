@@ -70,3 +70,9 @@ hygiene: ["Gross", "compact proof", "Compact-Proof"]
 
 # after the rounds: the best entry, locked, is run unchanged on this network (a run config names it)
 seed_check: {network: null}
+
+# the baseline of a run's shape (level1/baseline.py; docs/DESIGN.md, section 10)
+baseline:
+  tolerance: 0.01                     # a frozen entry passes the check on its baseline model's other networks when its
+                                      # rewards there agree within this, counting their sampling intervals
+  candidates: 3                       # how many different entries are tried, best on the second network first, until one passes

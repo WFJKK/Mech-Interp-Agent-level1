@@ -16,6 +16,10 @@ from level1.networks import load_model
 from level1.util import read_yaml
 from level1.verifier import Verifier
 
+# Some Macs' numpy warns of an overflow, an invalid value or a division by zero in every matmul, with nothing
+# wrong (docs/SANDBOX.md; the agent's sandbox drops the same three messages). Any other warning still shows.
+pytestmark = pytest.mark.filterwarnings("ignore:(divide by zero|overflow|invalid value) encountered in matmul:RuntimeWarning")
+
 REPO = Path(__file__).resolve().parent.parent
 BASELINES = {"lin-e": ("lin-c", "lin-a-1to4"), "lin-f": ("lin-d", "lin-b"), "att-e": ("att-c", "att-d")}
 NETWORKS = [f"s{i}" for i in range(6)]

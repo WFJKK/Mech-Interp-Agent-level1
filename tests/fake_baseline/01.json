@@ -1,0 +1,8 @@
+{
+ "calls": [
+  {"tool": "run_python", "args": {"code": {"$file": "explore.py"}}},
+  {"tool": "submit_entry", "args": {"name": "exact", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+  {"tool": "submit_entry", "args": {"name": "high", "claimed_fidelity": 0.5, "expected_fidelity_other": 0.5}}
+ ],
+ "response": "## What the network does\nIts three matrices multiplied once give every output.\n\n## How you found it\nFrom the weights.\n\n## The best entry\nexact\n\n## Claims\nAs submitted.\n\n## Next\nNothing."
+}

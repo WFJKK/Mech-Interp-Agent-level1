@@ -1,0 +1,6 @@
+g = graph()
+product = g.weight("unembed") @ (g.weight("hidden") @ g.weight("embed"))
+exact = g.entry(interpretation=lv1.take_sum(product, g.tokens(), axis=1).argmax())
+print(save_entry("exact", exact), round(measure(exact)["fidelity"], 4))
+h = graph()
+print(save_entry("high", h.entry(interpretation=(h.tokens() % 64).max())))

@@ -276,10 +276,80 @@ language lacks, add it to `level1/lang.py` with a price, and say so in `agent_do
 | Verifier | `check: auto`: every input up to 200,000, else a sample of 4,000; 120 s per entry; references on 8 fixed samples | `verifier` |
 | Agent | `claude-fable-5-1`, effort high (the proof pipeline's pilots used this model) | `agent_model`, `effort` |
 | Sandbox | `auto`: the strongest mode that works | `sandbox` |
+| Baseline | a frozen entry passes the check on its model's other networks within 0.01; up to 3 entries tried | `baseline` |
 
 Numbers live in the config files and never in code. Nothing specific to one model is in `level1/`.
 
-## 10. What is not here
+## 10. The baseline
+
+The reward compares an entry with the network's own forward pass. Much of what an entry saves can come
+from the algebra of the architecture alone: the forward pass repeats the same products for the same
+token in the same slot, and tables computed once from the weights remove that, on any network of the
+design. The baseline separates that from the rest (`level1/baseline.py`).
+
+**A baseline model** has the design, sizes and data set of the models whose shape it shares, its twins,
+and networks with nothing in them for an agent to find; what they are is in `withheld/<name>/`, like
+a task (`task.yaml`, and `draw.py`, which makes them). `lin-e`, `lin-f` and `att-e` are the baseline
+models of the shapes of lin-c, lin-d and att-c. The first network is for the rounds, the second for
+the seed check, the others for freezing.
+
+**A baseline run** is a usual run on a baseline model, under the same conditions as the runs it serves:
+the same prompt, rounds, budgets, entry limits, verifier and reward (`baseline.CONDITIONS`) and the same
+price list. The agent is given exactly what a run on a twin gives it and is not told the difference: a
+test checks that the two first prompts are the same, byte for byte. What it achieves there is generic.
+
+**Freezing.** When a baseline run finishes, its scored submissions are taken in the order of their
+reward on its second network (every submission is scored there on one fixed sample), one per different
+entry, and each is scored again on every one of the model's other networks, all on one fresh sample.
+The first that passes is frozen; if none of the first `baseline.candidates` (3) does, the first is
+frozen with its verdict and the reports say the baseline is not established. The verdict, with the
+tolerance in `baseline.tolerance`:
+
+- *passes*: its rewards there agree within the tolerance, counting each reward's sampling interval
+  (the reward with the fidelity's 95% interval at either end);
+- *fails*: two of them are further apart than that even with their intervals;
+- *inconclusive*: neither.
+
+On the pilots' 16,384 inputs, an entry right on every input of every network passes; on a sample of a
+few thousand, the intervals alone are wider than the tolerance, and the verdict is inconclusive, as it
+should be.
+
+The choice, every score with its parts and seed, and the verdict are written once (`baseline.json`, and
+the entry in `baseline_entry.json`). One baseline run gives a known achievable generic score, not the
+best possible one.
+
+**Reading a run against it.** When a run finishes and a matching baseline is frozen, the frozen entry is
+scored on the run's network and on its seed check's network, on the very inputs of the run's own
+measurements of its locked entry: the second scoring on a fresh sample, and the seed check
+(`baseline_scores.jsonl` in the run's folder). With R0 and R1 the locked entry's rewards there and B0
+and B1 the baseline's, the report gives three parts that add up to R0:
+
+| Part | |
+| --- | --- |
+| The baseline on the run's network | B0 |
+| The excess kept on the held-out network | R1 - B1 |
+| The gap between the run's network and the held-out one | (R0 - B0) - (R1 - B1) |
+
+Negative values are kept. This is accounting, not a causal split: the excess can hold generic tricks
+the baseline run did not find as well as what the networks learned, and the gap can be sampling noise
+or a difference between the networks as well as fitting the run's own network.
+
+**Three ways to start.**
+
+    python -m level1.loop run --config config/pilot/att-c.yaml                   a run, as before
+    python -m level1.loop baseline --config config/pilot/att-c.yaml              its baseline only
+    python -m level1.loop run --config config/pilot/att-c.yaml --with-baseline   both, side by side
+
+`baseline` finds the matching baseline run in the runs folder (frozen first), goes on with it if it was
+stopped, or makes it; when it is frozen, it reads every finished run of its shape and conditions
+against it and rewrites their reports. `baseline --run <run folder>` does the same for a run's own
+conditions, which is how a finished run gets its baseline. `--with-baseline` starts the baseline in a
+second process, unless it is on record, and waits for it at the end; what that process prints goes to
+`console.txt` in its folder. A lock file there keeps two processes from running one baseline. Ctrl-C
+stops both, and `resume --run <run folder> --with-baseline` goes on with both. A run of the pilot
+configs of the baseline models (`config/pilot/att-e.yaml`) is a baseline run as well.
+
+## 11. What is not here
 
 - Levels 2 and 3.
 - KL as the measure of fidelity.
