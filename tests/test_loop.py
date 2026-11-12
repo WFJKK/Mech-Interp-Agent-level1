@@ -182,7 +182,9 @@ def test_the_locked_entry_is_measured_again_and_results_are_kept(finished_1to4):
     sub = loop.completed(path)[1]["submissions"][0]
     assert lock["carried_as"] == "r2s1" and lock["measured_again"]["status"] == "scored"
     assert lock["measured_again"]["inputs"]["seed"] != sub["inputs"]["seed"]        # a sample of its own
-    assert abs(lock["measured_again"]["reward"] - lock["reward"]) < 0.1 and seed["network"] == "lin-a-1to4-s1"
+    # The same entry on two samples of 1,500: its rewards spread with a standard deviation of 0.025 (about six wrong
+    # answers a sample), and one pair in 200 lies 0.1 apart, so the bound is wider than that; another entry is 0.4 away.
+    assert abs(lock["measured_again"]["reward"] - lock["reward"]) < 0.16 and seed["network"] == "lin-a-1to4-s1"
     again = loop.finish(path, out=lambda *_: None)                                  # nothing measured on a sample is redrawn
     assert again == lock and read_json(path / "seed_check.json") == seed
     text = (path / "report.md").read_text()
