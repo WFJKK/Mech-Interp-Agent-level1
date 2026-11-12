@@ -1,0 +1,36 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  Untrained. The networks were never trained: each is the state att-d's trainer starts from, drawn
+  and kept as drawn. A model for the baseline of the shape it shares with att-c, att-d: a run on it is a usual run in
+  everything the agent is given (the same prompt, sizes, data set, rounds, budgets and reward), with nothing
+  learned to find, so what the agent achieves here is generic. Its networks behave like none of the trained
+  ones; whatever regularity a run finds in one of them is an accident of that network, which its other
+  networks show up.
+baseline_of: [att-c, att-d]
+initialization:
+  how: withheld/att-d/train.py, init(numpy.random.default_rng(seed)), every matrix uniform in +-1/sqrt(shape[0]), E (64 x 32), P (4 x 32), WQ, WK, WV, WO (32 x 32), U (32 x 64), float32; then embed given one more row, all zeros, for an empty slot
+  drawn_by: withheld/att-e/draw.py
+  networks:
+    att-e-s0: {seed: 3000}
+    att-e-s1: {seed: 3001}
+    att-e-s2: {seed: 3002}
+    att-e-s3: {seed: 3003}
+    att-e-s4: {seed: 3004}
+    att-e-s5: {seed: 3005}
+  roles: s0 for the rounds, s1 for the seed check, s2 to s5 for checking an entry again later
+hygiene:
+  - untrained
+  - not trained
+  - never trained
+  - before training
+  - random weights
+  - randomly initialized
+  - randomly initialised
+  - random init
+  - initialization
+  - initialisation
+  - baseline
+  - trained on
+  - Gross
+  - compact proof

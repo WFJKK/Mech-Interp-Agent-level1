@@ -1,0 +1,16 @@
+# The baseline pilot for the shape of lin-d and lin-b (models/lin-f: 8 slots, 64 tokens, width 8), 703 operations per
+# forward pass. Everything the agent is given is what a pilot on lin-d gives it: the same prompt, data set,
+# rounds, budgets and reward. Only the networks differ; what they are is in withheld/lin-f/. What the agent
+# achieves here is the baseline that runs of this shape are read against.
+# About 2.8 x 10^14 inputs, so the verifier scores a fresh sample for every submission.
+#   rounds on      lin-f-s0
+#   seed check on  lin-f-s1   the same sizes, another seed (lin-f-s2 to s5 are for checking an entry again later)
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-lin-f
+model: models/lin-f
+network: lin-f-s0
+seed_check: {network: lin-f-s1}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

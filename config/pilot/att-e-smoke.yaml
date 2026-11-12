@@ -1,0 +1,10 @@
+# A first contact with the baseline pilot of att-c and att-d's shape, kept small on purpose: one round with a short
+# session, to see that everything works together on this machine before the pilot proper (config/pilot/att-e.yaml).
+extends: att-e.yaml
+run_id: pilot-att-e-smoke
+rounds_max: 1
+session:
+  python_calls: 8
+  submissions: 2
+  max_turns: 40
+  seconds: 1200

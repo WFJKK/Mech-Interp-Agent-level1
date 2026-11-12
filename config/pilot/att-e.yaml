@@ -1,0 +1,16 @@
+# The baseline pilot for the shape of att-c and att-d (models/att-e: 4 slots, 64 tokens, width 32), 12,987 operations per
+# forward pass. Everything the agent is given is what a pilot on att-c gives it: the same prompt, data set,
+# rounds, budgets and reward. Only the networks differ; what they are is in withheld/att-e/. What the agent
+# achieves here is the baseline that runs of this shape are read against.
+# About 17 million inputs, so the verifier scores a fresh sample for every submission.
+#   rounds on      att-e-s0
+#   seed check on  att-e-s1   the same sizes, another seed (att-e-s2 to s5 are for checking an entry again later)
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-att-e
+model: models/att-e
+network: att-e-s0
+seed_check: {network: att-e-s1}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

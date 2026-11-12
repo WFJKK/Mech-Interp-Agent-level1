@@ -76,8 +76,11 @@ its prompt. The run config says how the verifier checks an entry (`verifier.chec
 | `config/pilot/att-b.yaml` | `models/att-b` | as att-a | 16,384 sampled per scoring |
 | `config/pilot/att-c.yaml` | `models/att-c` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
 | `config/pilot/att-d.yaml` | `models/att-d` | as att-c | 16,384 sampled per scoring |
+| `config/pilot/lin-e.yaml` | `models/lin-e` | as lin-c (baseline of lin-c's shape) | 16,384 sampled per scoring |
+| `config/pilot/lin-f.yaml` | `models/lin-f` | as lin-d (baseline of lin-d's shape) | 16,384 sampled per scoring |
+| `config/pilot/att-e.yaml` | `models/att-e` | as att-c (baseline of att-c's shape) | 16,384 sampled per scoring |
 
-Every model has two trained networks (two seeds): the rounds work on s0, the seed check runs the
+Every model up to att-d has two trained networks (two seeds): the rounds work on s0, the seed check runs the
 locked entry on s1. The first two pilots use the same two networks. `lin-b` is a network of the
 same design trained afresh (`withheld/lin-b/train.py`, resumable, a minute or two per 10,000 steps
 on a laptop's CPU), and `lin-c` and `lin-d` are the designs of lin-a and lin-b trained afresh on
@@ -97,6 +100,15 @@ or anyone, to check them all. On att-a and att-b a short rule gives the network'
 input, so their pilots check that a run finds it rather than pose a problem (a reference entry
 scores 0.997). Each pilot has a small smoke config next to it (`<name>-smoke.yaml`), and
 `lin-b-api.yaml` is the lin-b pilot billed to an API key; `--auth api_key` bills any of them.
+
+`lin-e`, `lin-f` and `att-e` are baseline models. Each has the design, sizes and data set of the
+models whose shape it shares (lin-e: lin-c and lin-a-1to4; lin-f: lin-d and lin-b; att-e: att-c
+and att-d), and six networks with nothing in them for an agent to find; what they are is in
+`withheld/<name>/`. A run on one gives the agent exactly what a run on its twin gives it, the same
+prompt, rounds, budgets and reward, so what it achieves there is generic: the baseline that runs of
+that shape are read against. The rounds use s0 and the seed check s1; s2 to s5 are for checking an
+entry again later. A hand-written reference, `tables` on att-e, scores 0.955 on every network of
+att-c's shape, trained or not.
 
 ## Quick start
 
@@ -215,6 +227,7 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
     models/lin-b/         a network of the same design trained afresh, asked about inputs of 1 to 8 tokens
     models/lin-c/, lin-d/ the designs of lin-a and lin-b trained afresh on another task
     models/att-a/ .. att-d/   one-layer, one-head transformers: two with 2 slots, two with 4
+    models/lin-e/, lin-f/, att-e/   baseline models of the shapes of lin-c, lin-d and att-c
     withheld/<model>/     what it was trained to do, and reference entries (never shown to the agent)
     agent_docs/      the entry guide the agent reads
     prompts/         the round's prompt template

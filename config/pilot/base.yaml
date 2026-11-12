@@ -10,6 +10,9 @@
 #   config/pilot/att-b.yaml         another transformer of att-a's design and sizes
 #   config/pilot/att-c.yaml         a transformer of the same design with 4 slots
 #   config/pilot/att-d.yaml         another transformer of att-c's design and sizes
+#   config/pilot/lin-e.yaml         the baseline of lin-c's shape (and lin-a-1to4's)
+#   config/pilot/lin-f.yaml         the baseline of lin-d's shape (and lin-b's)
+#   config/pilot/att-e.yaml         the baseline of att-c's shape (and att-d's)
 #
 # A run has two parts (docs/DESIGN.md):
 #   1. the rounds: the agent explores one network and submits entries; the score is the reward;
