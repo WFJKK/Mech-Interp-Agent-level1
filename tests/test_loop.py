@@ -96,6 +96,39 @@ def test_the_report(finished):
     assert "The guard inside Python refused nothing" in text and rep["guard_escapes"] == []
 
 
+def test_every_submission_is_also_scored_on_the_second_network_and_the_agent_never_sees_it(finished):
+    path, lines = finished
+    subs = loop.scored(loop.completed(path))
+    on_second = read_jsonl(path / "seed_scores.jsonl")
+    assert [e["carried_as"] for e in on_second] == [s["carried_as"] for s in subs] == ["r1s1", "r2s1", "r3s1", "r4s1", "r4s2"]
+    assert all(e["network"] == "lin-a-s1" and e["status"] == "scored" for e in on_second)
+    # the locked entry's line agrees with the seed check, which measured it the same way here (every input)
+    seed = read_json(path / "seed_check.json")
+    r2 = next(e for e in on_second if e["carried_as"] == "r2s1")
+    assert r2["reward"] == pytest.approx(seed["reward"]) and r2["parts"]["n_agree"] == seed["parts"]["n_agree"]
+    assert any(line.startswith("  r1s1 on the second network: reward") for line in lines)
+    # nothing the agent saw holds them: the rounds are recorded without them, and no prompt names that network
+    for k in range(1, 5):
+        rdir = path / f"round_{k:03d}"
+        assert "second_network" not in (rdir / "round.json").read_text()
+        assert "lin-a-s1" not in (rdir / "prompt.md").read_text() and not list(rdir.rglob("seed_scores*"))
+    text = (path / "report.md").read_text()
+    assert "| On the second network | Fidelity there |" in text and "On the second network the best submission was" in text
+    n = len(on_second)
+    loop.finish(path, out=lambda *_: None)  # finishing again adds nothing
+    assert len(read_jsonl(path / "seed_scores.jsonl")) == n
+
+
+def test_a_run_from_before_gets_its_seed_scores_when_finished(tmp_path, monkeypatch):
+    real = loop.seed_scores
+    monkeypatch.setattr(loop, "seed_scores", lambda *a, **k: [])
+    path = loop.start(config(tmp_path, run_id="from-before"), fake_scripts=FAKE, out=lambda *_: None)
+    assert not (path / "seed_scores.jsonl").exists()
+    monkeypatch.setattr(loop, "seed_scores", real)
+    loop.finish(path, out=lambda *_: None)
+    assert len(read_jsonl(path / "seed_scores.jsonl")) == len(loop.scored(loop.completed(path))) == 5
+
+
 def test_the_frontier_needs_no_reward():
     def sub(name, coverage, fidelity, r, r_rule=0.0, b=0.0, status="scored"):
         return {"carried_as": name, "status": status, "parts": {"coverage": coverage, "fidelity": fidelity, "r": r, "r_rule": r_rule, "b": b}}
@@ -161,6 +194,15 @@ def test_the_locked_entry_is_measured_again_and_results_are_kept(finished_1to4):
     assert "Each number is the mean of 3 scorings on fixed samples." in text and "| Cost | Reward, highest less lowest |" in text
     itself = read_json(path / "report.json")["references"]["the network itself"]["lin-a-1to4-s0"]
     assert itself["parts"]["fidelity"] == 1.0 and itself["parts"]["cost"] == 1.0 and itself["reward_spread"] == 0.0
+
+
+def test_on_a_sampled_data_set_every_submission_is_scored_on_one_fixed_sample(finished_1to4):
+    path, _ = finished_1to4
+    on_second = read_jsonl(path / "seed_scores.jsonl")
+    run = read_json(path / "run.json")
+    assert len(on_second) == len(loop.scored(loop.completed(path))) > 0
+    assert {e["inputs"]["seed"] for e in on_second} == {loop.seed_score_sample(run["config"]["run_id"])}
+    assert all(e["inputs"]["mode"] == "sample" and e["network"] == run["config"]["seed_check"]["network"] for e in on_second)
 
 
 def test_the_report_says_what_the_agent_ran(finished_1to4):

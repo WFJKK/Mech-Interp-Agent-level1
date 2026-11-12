@@ -26,7 +26,9 @@ way. Rounds run under a Claude Code login or billed to an API key ("On an API ke
 3. **The lock.** When the rounds end, the submission with the highest reward is locked as it was
    submitted. If the verifier samples, the locked entry is scored once more on a fresh sample.
 4. **The seed check.** The locked entry is run, unchanged, on a second network of the same sizes
-   and training with another seed. No agent takes part.
+   and training with another seed. No agent takes part. Every other submission is also scored
+   there after its round, for the record only: the agent never sees those scores and they choose
+   nothing (`seed_scores.jsonl`, and a column of the report).
 5. **The report.** `report.md` and `report.json`: the locked entry on both networks, every
    submission, the withheld reference entries for comparison, what the agent ran, and its notes.
 
@@ -158,7 +160,8 @@ Linux) or, on a Mac, `--sandbox seatbelt`, which still needs its first test on a
 
 Other commands:
 
-    python -m level1.loop finish --run <run folder>              # lock, seed check and report again
+    python -m level1.loop finish --run <run folder>              # lock, seed check and report again; scores
+                                                                 # any submission not yet on the second network
     python -m level1.loop rescore --run <run folder> --alpha 1   # the records under another reward
     python -m level1.report --model models/lin-a --alpha 1       # the reference entries under a reward
     python -m level1.report --model models/lin-a-1to4 --sample-size 16384
@@ -180,7 +183,8 @@ Everything is written as it happens, so a run can stop and resume, and can be re
 - everything the CLI emitted, the agent's text between its tool calls included
   (`round_k/stream_NN.jsonl`);
 - every submission's receipt, with the parts measured;
-- billed to an API key, every session's cap and cost (`spend.jsonl`).
+- billed to an API key, every session's cap and cost (`spend.jsonl`);
+- every scored submission on the second network (`seed_scores.jsonl`).
 
 The report counts the programs and the sandbox time per round, lists every attempt the guard
 refused, and lists the programs whose text reaches for files or the system.

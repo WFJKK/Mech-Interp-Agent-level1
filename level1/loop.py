@@ -16,6 +16,8 @@ A run folder (outside the repository, <runs_dir>/<run_id>):
     locked_entry.json   the best entry of the rounds, as submitted
     lock.json           which submission it is, its hash and its receipt
     seed_check.json     the verifier's receipt for the locked entry on the second network
+    seed_scores.jsonl   every scored submission also scored on the second network, on one fixed sample,
+                        appended after each round; nothing the agent sees reads it, and nothing is chosen by it
     report.md, report.json
 
 A round is done when its round.json is written. `resume` starts at the first round that is not, and a
@@ -32,6 +34,7 @@ does on one it was not written on.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import os
 import sys
 import tempfile
@@ -41,7 +44,7 @@ from . import budget, hygiene, lang, prompt, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session, surface
-from .util import REPO_ROOT, append_jsonl, atomic_write, git_state, now, read_json, sha256_file, write_json
+from .util import REPO_ROOT, append_jsonl, atomic_write, git_state, now, read_json, read_jsonl, sha256_file, write_json
 from .verifier import Verifier, describe
 
 TRUSTED_GLOBS = ("level1/**/*.py", "prompts/*.md", "agent_docs/*.md")
@@ -129,6 +132,45 @@ def carried_entries(path: Path, rounds: list) -> dict:
     best = best_submission(rounds)
     if best is not None:
         out["best"] = entry_of(path, best)
+    return out
+
+
+SEED_SCORES = "seed_scores.jsonl"
+
+
+def seed_score_sample(run_id: str) -> int:
+    """The one sample on which every submission of a run is scored on the second network. It is the same for all
+    of them, so that they can be compared with each other without the noise of separate samples."""
+    return int.from_bytes(hashlib.sha256(f"{run_id}: every submission on the second network".encode()).digest()[:8], "big")
+
+
+def seed_scores(path: Path, cfg: dict, model, rounds: list, log=None) -> list:
+    """Score every scored submission of these rounds on the second network, unless seed_scores.jsonl has it
+    already, and append it there. The agent never sees these scores (the prompt reads round.json, not this file),
+    and nothing is chosen by them: the lock stays the best submission on the first network, and the seed check of
+    the locked entry stays the run's one fresh measurement on the second."""
+    path = Path(path)
+    second = (cfg.get("seed_check") or {}).get("network")
+    if not second:
+        return []
+    have = {(e.get("carried_as"), e.get("entry_sha256")) for e in read_jsonl(path / SEED_SCORES)}
+    todo = [s for s in scored(rounds) if (s["carried_as"], s["entry_sha256"]) not in have]
+    if not todo:
+        return []
+    verifier, sample = Verifier(model, second, cfg), seed_score_sample(cfg["run_id"])
+    out = []
+    for s in todo:
+        entry = entry_of(path, s)
+        if lang.entry_hash(entry) != s["entry_sha256"]:
+            raise RuntimeError(f"{s['carried_as']}'s entry on disk is not the one the verifier scored")
+        r = verifier.score(entry, claimed=s.get("expected_fidelity_other"), seed=sample)
+        line = {"round": s["round"], "submission": s["submission"], "carried_as": s["carried_as"], "name": s["name"],
+                "entry_sha256": s["entry_sha256"], "network": second, "status": r["status"], "reason": r["reason"],
+                "reward": r["reward"], "parts": r["parts"], "inputs": r["inputs"], "at": now()}
+        append_jsonl(path / SEED_SCORES, line)
+        out.append(line)
+        if log:
+            log(f"  {s['carried_as']} on the second network: {describe(r)}")
     return out
 
 
@@ -292,6 +334,10 @@ def run_round(path: Path, cfg: dict, model, k: int, done: list, backend, forbidd
         log(f"  {s['carried_as']} ({s['name']}): " + (describe(s) if s["status"] == "scored" else f"refused: {s['reason']}"))
     best_text = "none" if record["best_reward_after"] is None else f"{record['best_reward_after']:.4f}"
     log(f"round {k} done: {len(subs)} submissions, best reward so far {best_text}", round=k, improved=improved)
+    try:  # for the record only; a failure here must not cost the run, and finish tries again
+        seed_scores(path, cfg, model, [record], log)
+    except Exception as exc:
+        log(f"  could not score round {k}'s submissions on the second network ({type(exc).__name__}: {exc}); finish tries again")
     return record
 
 
@@ -310,6 +356,7 @@ def finish(path: Path, out=print) -> dict:
     # What an earlier finish measured on a sample is a result and is kept: finishing again never redraws it.
     old_lock = read_json(path / "lock.json") if (path / "lock.json").is_file() else {}
     old_seed = read_json(path / "seed_check.json") if (path / "seed_check.json").is_file() else {}
+    seed_scores(path, cfg, model, done, log)  # any a round could not do, or a run from before they were kept
     if best is None:
         lock = {"locked": False, "reason": "no submission was scored"}
         write_json(path / "lock.json", lock)

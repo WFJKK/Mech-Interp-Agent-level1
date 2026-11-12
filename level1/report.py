@@ -206,8 +206,11 @@ def build(path: Path) -> dict:
     entry = read_json(path / "locked_entry.json") if (path / "locked_entry.json").is_file() else None
     subs = [dict(s) for rd in rounds for s in rd["submissions"]]
     on_frontier = frontier(subs)
+    on_second = {(e.get("carried_as"), e.get("entry_sha256")): e for e in read_jsonl(path / "seed_scores.jsonl")}
     for s in subs:
         scored = s["status"] == "scored"
+        e = on_second.get((s["carried_as"], s.get("entry_sha256")))
+        s["second_network"] = {k: e.get(k) for k in ("network", "status", "reward", "parts", "inputs")} if e else None
         s["whole_cost"] = whole_cost(s.get("parts")) if scored else None
         s["right_share"], s["wrong_share"] = shares(s.get("parts")) if scored else (None, None)
         s["on_frontier"] = s["carried_as"] in on_frontier
@@ -332,16 +335,30 @@ def markdown(rep: dict) -> str:
     out += ["", "## Submissions", "",
             "Cost: everything the entry computes, per input of its region, over one forward pass. Right and wrong: the "
             "share of the inputs the entry answers rightly and wrongly. On the frontier: no other submission is at least "
-            "as good in right share, wrong share and cost, and better in one.", "",
-            "| Entry | Saved as | Reward | Coverage | Fidelity | Cost | Right | Wrong | On the frontier | Claimed | Overclaim |",
-            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+            "as good in right share, wrong share and cost, and better in one. On the second network: the reward and the "
+            "fidelity of the same entry on the seed check's network, every submission on one fixed sample, scored after "
+            "its round; the agent never saw these, and they chose nothing.", "",
+            "| Entry | Saved as | Reward | Coverage | Fidelity | Cost | Right | Wrong | On the frontier | Claimed | Overclaim "
+            "| On the second network | Fidelity there |",
+            "| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
     for s in rep["submissions"]:
+        two = s.get("second_network") or {}
+        there = [_f(two.get("reward")), _f((two.get("parts") or {}).get("fidelity"), 5)] if two.get("status") == "scored" else \
+            ([f"refused: {str(two.get('reason'))[:60]}", ""] if two else ["", ""])
         if s["status"] == "scored":
             out.append("| " + " | ".join([s["carried_as"], f"`{s['name']}`"] + _parts_row(s) + [
                 _f(s.get("right_share")), _f(s.get("wrong_share"), 5), "yes" if s.get("on_frontier") else "no",
-                _f(s.get("claimed_fidelity"), 5), _f(s.get("overclaim"), 5)]) + " |")
+                _f(s.get("claimed_fidelity"), 5), _f(s.get("overclaim"), 5)] + there) + " |")
         else:
-            out.append(f"| {s['carried_as']} | `{s['name']}` | refused: {str(s['reason'])[:100]} | | | | | | | | |")
+            out.append(f"| {s['carried_as']} | `{s['name']}` | refused: {str(s['reason'])[:100]} | | | | | | | | | | |")
+    best_there = max((s for s in rep["submissions"] if (s.get("second_network") or {}).get("status") == "scored"),
+                     key=lambda s: s["second_network"]["reward"], default=None)
+    if best_there is not None and rep.get("lock") and rep["lock"].get("locked"):
+        locked = next((s for s in rep["submissions"] if s["carried_as"] == rep["lock"]["carried_as"]), None)
+        mine = (locked or {}).get("second_network") or {}
+        out += ["", f"On the second network the best submission was {best_there['carried_as']} (`{best_there['name']}`), "
+                f"{best_there['second_network']['reward']:.4f}; the locked entry, {rep['lock']['carried_as']}, scored "
+                + (f"{mine['reward']:.4f} there on the same sample." if mine.get("status") == "scored" else "nothing there.")]
     out += ["", "## The agent's closing notes", "", "\n".join("> " + line for line in (rep["notes"] or "(none)").splitlines()), ""]
     return "\n".join(out)
 

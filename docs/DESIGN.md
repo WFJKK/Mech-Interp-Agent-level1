@@ -171,6 +171,13 @@ Three things carry it:
 - **The seed check**: the locked entry on the second network. What the entry computes from the
   weights is computed afresh there; a number read off the first network and written in as a
   constant stays what it was. This is the check on hard-coded exceptions.
+- **Every submission on the second network**, for the record: after each round its scored
+  submissions are scored there too, all of a run's on one fixed sample so they can be compared
+  with each other, and appended to `seed_scores.jsonl`. They show round by round whether the
+  agent's entries drift towards the first network's quirks. The agent never sees them (the prompt
+  reads `round.json`, which does not hold them), and they choose nothing: the lock is still the
+  best submission on the first network. `finish` scores any that are missing, so an older run
+  gets them too.
 - **The report**: the locked entry on both networks, every submission with its parts, the withheld
   reference entries on both networks (on a sampled data set, the mean of several fixed samples),
   what the agent ran, and its closing notes. It also marks
@@ -218,6 +225,7 @@ Everything a run knows is in its folder, written as it happens:
     run.json            config, commit, hash of the trusted files, sandbox and its probe
     log.jsonl           what happened, appended
     spend.jsonl         billed to an API key: every session's cap and cost, appended
+    seed_scores.jsonl   every scored submission on the second network, appended after each round
     round_001/          prompt.md, session/, response.md, stream_01.jsonl, meta.json, round.json
     locked_entry.json, lock.json, seed_check.json, report.md, report.json
 
