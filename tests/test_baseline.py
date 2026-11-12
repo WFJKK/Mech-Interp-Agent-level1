@@ -270,3 +270,17 @@ def test_when_none_passes_the_first_is_frozen_and_not_established(two_entries, t
     assert f["name"] == "exact" and f["label"] == "fails" and f["established"] is False and len(f["tried"]) == 2
     text = "\n".join(report.baseline_lines({"baseline": baseline.reading(copy)}))
     assert "not established" in text and "Tried, in the order of their reward on the second network" in text
+
+
+def test_a_report_written_again_scores_the_references_once(pair, monkeypatch):
+    calls = []
+    real = report.references
+    monkeypatch.setattr(report, "references", lambda *a, **k: calls.append(1) or real(*a, **k))
+    (pair["run"] / report.REFERENCES_CACHE).unlink(missing_ok=True)
+    first = report.build(pair["run"])["references"]
+    second = report.build(pair["run"])["references"]
+    assert len(calls) == 1 and first == second
+    cached = read_json(pair["run"] / report.REFERENCES_CACHE)
+    write_json(pair["run"] / report.REFERENCES_CACHE, {**cached, "key": {**cached["key"], "prices": "prices-v0"}})
+    report.build(pair["run"])  # anything it depends on changed: scored again
+    assert len(calls) == 2

@@ -165,6 +165,31 @@ def references(model, cfg: dict, networks: list) -> dict:
     return out
 
 
+REFERENCES_CACHE = "references.json"  # in a run's folder: the reference entries' scores, so a report is rewritten quickly
+
+
+def cached_references(path: Path, model, cfg: dict, networks: list) -> dict:
+    """references(), kept in the run's folder and used again while nothing it depends on has changed: the networks'
+    weights, the model's code and withheld references, the verifier and reward settings and the price list. Scoring
+    them takes minutes on a transformer, and a report is written again whenever a run is finished again."""
+    from .util import sha256_file
+
+    files = [model.path / "model.py", model.withheld() / "references.py"]
+    key = {"networks": {n: model.network(n)["sha256"] for n in networks}, "verifier": cfg.get("verifier"), "reward": cfg.get("reward"),
+           "prices": lang.PRICES, "files": {f.name: sha256_file(f) for f in files if f.is_file()}}
+    f = Path(path) / REFERENCES_CACHE
+    if f.is_file():
+        try:
+            cached = read_json(f)
+            if cached.get("key") == key:
+                return cached["references"]
+        except (OSError, ValueError):
+            pass
+    refs = references(model, cfg, networks)
+    write_json(f, {"key": key, "references": refs})
+    return refs
+
+
 def _references_scorings(refs: dict) -> int:
     """On how many samples each reference was scored; 0 when every input was checked."""
     return max([r.get("scorings") or 0 for by_net in refs.values() for r in by_net.values()] or [0])
@@ -229,7 +254,7 @@ def build(path: Path) -> dict:
         "submissions": subs,
         "lock": lock, "seed_check": seed, "locked_entry": entry,
         "locked_entry_shown": lang.show(entry) if entry else None,
-        "references": references(model, cfg, networks), "notes": notes, "task": model.task().get("task"),
+        "references": cached_references(path, model, cfg, networks), "notes": notes, "task": model.task().get("task"),
         "auth": cfg.get("auth", "login"),
         "spend": budget.state(path, cfg["budget"]) if cfg.get("auth") == "api_key" else None,
         "baseline": _baseline(path),
