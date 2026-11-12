@@ -487,7 +487,7 @@ def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | No
         cmd = [sys.executable, "-m", "level1.loop", "baseline", "--request", str(p["path"] / baseline.REQUEST)]
         cmd += (["--fake", str(fake_scripts)] if fake_scripts else []) + (["--accept-changes"] if accept_changes else [])
         console = open(p["path"] / "console.txt", "a")
-        child = subprocess.Popen(cmd, cwd=str(REPO_ROOT), stdout=console, stderr=subprocess.STDOUT)
+        child = subprocess.Popen(cmd, cwd=str(REPO_ROOT), stdin=subprocess.DEVNULL, stdout=console, stderr=subprocess.STDOUT)
         out(f"its baseline goes alongside, in process {child.pid}: {p['path']} (what it prints: {p['path'] / 'console.txt'})")
     try:
         if resume:
