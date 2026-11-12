@@ -1,0 +1,10 @@
+# A first contact with the baseline pilot of rnn-c's shape, kept small on purpose: one round with a short session, to see that
+# everything works together on this machine before the pilot proper (config/pilot/rnn-f.yaml).
+extends: rnn-f.yaml
+run_id: pilot-rnn-f-smoke
+rounds_max: 1
+session:
+  python_calls: 8
+  submissions: 2
+  max_turns: 40
+  seconds: 1200

@@ -1,0 +1,41 @@
+# The model rnn-d: a recurrent network of rnn-a's design and sizes (one layer of 2 units, a ReLU, no biases),
+# reading two real numbers.
+# Sizes, the data set and the networks; change values here, never in code.
+# What its networks are is not in this folder. It is in withheld/rnn-d/, which no tool of the agent
+# reaches, and nothing here may say it (the hygiene check reads this folder's agent-facing files).
+name: rnn-d
+sizes:
+  n_ctx: 2       # numbers per input
+  d_hidden: 2    # units of the recurrent layer
+input_space: [real, real]   # per position: a real number
+n_outputs: 2
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: normal          # every number drawn on its own from the standard normal distribution
+  says: >
+    An input is two real numbers, x_0 and x_1, each drawn on its own from the standard normal
+    distribution (mean 0, standard deviation 1). The data set is every input that can be drawn this
+    way, each weighted by how likely it is to be drawn. There are infinitely many, so the verifier
+    scores a sample.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  input: [2, 1]
+  recurrent: [2, 2]
+  readout: [2, 2]
+# Five networks of the same sizes, with different seeds. A run works on the first and checks its locked entry
+# on the second; the other three are for checking an entry again later.
+networks:
+  - id: rnn-d-s2
+    weights: zoo/rnn-d-s2.npz
+    sha256: bcad7da6649e6803ef5d0b7a381c06ded56f8724267b2f16959489d4292e9081
+  - id: rnn-d-s1
+    weights: zoo/rnn-d-s1.npz
+    sha256: f88ec88bce6779ddf671bc21d3fe2de1bb821f50199d6f3b2dc061a6a13fe3a6
+  - id: rnn-d-s0
+    weights: zoo/rnn-d-s0.npz
+    sha256: 31119970ca4092f3883021599dc6eb947a0a82da80b6377e3fd350d8f68beac2
+  - id: rnn-d-s3
+    weights: zoo/rnn-d-s3.npz
+    sha256: b6c8ff15335802a557997f1bac899f900a8a13f6e8b5e4cd9aa17e08a94d8ce4
+  - id: rnn-d-s4
+    weights: zoo/rnn-d-s4.npz
+    sha256: 9f9367834c1ab6b4adac273cd5bd2624157f2f62f374eeae3ab7d94a4bb58329

@@ -1,0 +1,41 @@
+# The model rnn-a: a recurrent network with one layer of 2 units, a ReLU and no biases, reading two
+# real numbers. Its networks are a published set's, converted by withheld/rnn/convert.py.
+# Sizes, the data set and the networks; change values here, never in code.
+# What the networks were trained to do is not in this folder. It is in withheld/rnn-a/, which no tool
+# of the agent reaches, and nothing here may say it (the hygiene check reads this folder's agent-facing files).
+name: rnn-a
+sizes:
+  n_ctx: 2       # numbers per input
+  d_hidden: 2    # units of the recurrent layer
+input_space: [real, real]   # per position: a real number
+n_outputs: 2
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: normal          # every number drawn on its own from the standard normal distribution
+  says: >
+    An input is two real numbers, x_0 and x_1, each drawn on its own from the standard normal
+    distribution (mean 0, standard deviation 1). The data set is every input that can be drawn this
+    way, each weighted by how likely it is to be drawn. There are infinitely many, so the verifier
+    scores a sample.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  input: [2, 1]
+  recurrent: [2, 2]
+  readout: [2, 2]
+# Five networks of the same sizes and training, with different seeds. A run works on one and checks its
+# locked entry on another; the others are for checking an entry again later.
+networks:
+  - id: rnn-a-s0
+    weights: zoo/rnn-a-s0.npz
+    sha256: b3a8646ba7024d0d7868a1933097042f61ad3da8865054ee50b9992eecd15d15
+  - id: rnn-a-s1
+    weights: zoo/rnn-a-s1.npz
+    sha256: 069631a74e43ed5cc03f520249bdfcc04325f28d90a9e046c54b02a50901989c
+  - id: rnn-a-s2
+    weights: zoo/rnn-a-s2.npz
+    sha256: 31ce7c103ac14e5d05fe71c8e7243424686597b569dbe3cd441ff2c839a405ad
+  - id: rnn-a-s3
+    weights: zoo/rnn-a-s3.npz
+    sha256: dbe34a792e869e2bb812e271573f71a7e80791deca5188be6ea1c7c06e7aee4f
+  - id: rnn-a-s4
+    weights: zoo/rnn-a-s4.npz
+    sha256: a29961c4820ce89224325e6004c1f711a7582f8a0c590ad3f06f7c82e81d2dea

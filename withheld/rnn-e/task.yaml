@@ -1,0 +1,81 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  Untrained. The networks were never trained: each is the state AlgZoo's trainer starts from for one seed of
+  rnn-b's networks (2nd argmax, hidden size 4, three numbers), saved by AlgZoo before its first step (0 training
+  sequences) and converted as published. A model for the baseline of the shape it shares with rnn-b: a run on
+  it is a usual run in everything the agent is given (the same prompt, sizes, data set, rounds, budgets and
+  reward), with nothing learned to find, so what the agent achieves here is generic. Its networks behave like
+  none of the trained ones, and their outputs are lopsided (how_often_each_output); whatever regularity a run
+  finds in one of them is an accident of that network, which its other networks show up.
+baseline_of: [rnn-b]
+initialization:
+  how: PyTorch's default, set by AlgZoo's trainer (alg_zoo/training.py, train) under torch.manual_seed(seed) and saved
+    before the first step as 2nd_argmax_4_3_0_<seed>.pth; every matrix uniform in +-1/sqrt(4) = +-0.5 (nn.RNN's reset_parameters,
+    and nn.Linear's kaiming_uniform with a = sqrt(5), whose bound is the same here); float32
+  converted_by: withheld/rnn/convert.py, from withheld/rnn/pth
+  networks:   # in the order of config.yaml
+    rnn-e-s0: {seed: 0, start_of: rnn-b-s0, file: 2nd_argmax_4_3_0_0.pth, sha256: 7750cf941019bd61bc40de07f188376ad0312e342c0d8f751fa8e5859ffa80dd}
+    rnn-e-s4: {seed: 4, start_of: rnn-b-s4, file: 2nd_argmax_4_3_0_4.pth, sha256: 3264d6fcdd0e0031432574451df041969a73d2d5a352a1273a67c7ad56078636}
+    rnn-e-s1: {seed: 1, start_of: rnn-b-s1, file: 2nd_argmax_4_3_0_1.pth, sha256: d6953a3558667664faed184105f4c34ad404b227edfab486d8715fe31f443152}
+    rnn-e-s2: {seed: 2, start_of: rnn-b-s2, file: 2nd_argmax_4_3_0_2.pth, sha256: c8f4aa07362b2eb98dfe79eaaea307163bd250249f5ce7719fbc86ce55aa36de}
+    rnn-e-s3: {seed: 3, start_of: rnn-b-s3, file: 2nd_argmax_4_3_0_3.pth, sha256: 478e6abc82e7a9072e0f7ce33bd803fa27a9491c1fd0c6dbeebca36718d2d1e6}
+  roles: config.yaml lists first the starting points of the networks rnn-b's pilot uses, in the order the baseline
+    uses them, rnn-e-s0 for the rounds (where rnn-b-s0 started) and rnn-e-s4 for the seed check (where
+    rnn-b-s4 started); the other three are for freezing. Training moved every network far from its start (the
+    distance is several times the start's own size, matrix by matrix), so a trained network and its start share little.
+how_often_each_output:   # on 2^20 inputs, numpy.random.default_rng(0).standard_normal, in float64; one share per output
+  rnn-e-s0: [0.892, 0.048, 0.061]
+  rnn-e-s4: [0.0, 0.306, 0.694]
+  rnn-e-s1: [0.0, 0.41, 0.59]
+  rnn-e-s2: [0.016, 0.984, 0.0]
+  rnn-e-s3: [0.605, 0.015, 0.38]
+how_often_the_output_is_the_second_largest:   # the same inputs: what rnn-b's networks were trained to give
+  rnn-e-s0: 0.3811
+  rnn-e-s4: 0.3793
+  rnn-e-s1: 0.3927
+  rnn-e-s2: 0.3244
+  rnn-e-s3: 0.4172
+hygiene:
+  - untrained
+  - not trained
+  - never trained
+  - before training
+  - random weights
+  - randomly initialized
+  - randomly initialised
+  - random init
+  - initialization
+  - initialisation
+  - baseline
+  - 2nd argmax
+  - second argmax
+  - 2nd_argmax
+  - 2nd-argmax
+  - second-largest
+  - second largest
+  - second biggest
+  - second highest
+  - second-highest
+  - runner-up
+  - runner up
+  - next largest
+  - largest
+  - larger
+  - biggest
+  - bigger
+  - smaller
+  - smallest
+  - lowest
+  - lesser
+  - median
+  - middle
+  - AlgZoo
+  - alg-zoo
+  - alg_zoo
+  - Alignment Research
+  - alignment.org
+  - arc-ml
+  - Gross
+  - compact proof
+  - trained on

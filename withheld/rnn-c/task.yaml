@@ -1,0 +1,65 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The network was trained to output the position of the second-largest of its ten numbers (2nd argmax,
+  x.argsort()[-2]).
+  It was trained on inputs drawn exactly as the data set says, fresh at every step, so the data set is what it
+  was trained on. It is one of the networks of ARC's AlgZoo, which trains networks this small on algorithmic
+  tasks and publishes them uninterpreted, as a challenge to explain them; AlgZoo's own chart puts this size at
+  94.8% (its best of five seeds, seed 2).
+provenance:
+  source: ARC's AlgZoo, github.com/alignment-research-center/alg-zoo (commit 4433f50, licence MIT-0); the weights
+    from its public folder gs://arc-ml-public/alg/zoo, fetched on 12 November 2026
+  files: withheld/rnn/pth/2nd_argmax_16_10_1073741824_<seed>.pth, one per network
+  converted_by: withheld/rnn/convert.py (input = rnn.weight_ih_l0, recurrent = rnn.weight_hh_l0, readout = linear.weight;
+    float32 as published; read without torch, by an unpickler that runs nothing)
+  recipe: alg_zoo/training.py, train("2nd_argmax", hidden_size=16, seq_len=10, seed=seed); every step 1,024 inputs of
+    th.randn, labelled x.argsort(-1)[..., -2]; cross-entropy; AdamW, lr 0.04 / sqrt(16), weight decay 0.001, the rate
+    warmed up over 2^14 steps and then decayed exponentially to 0.01 of it; 2^30 inputs in all (2^20 steps);
+    PyTorch's default initialization (every matrix uniform in +-1/sqrt(16) = +-0.25), which models/rnn-f holds; float32
+  sha256:
+    rnn-c-s0: 7f702518619c372754959af4bfaf6162eb5d9ebfdebe9001b657f45567058348
+    rnn-c-s1: a723fd1caefe22edcc85aa07ae03d41d5811ac38a5d4773fd92f750a290d9bd9
+    rnn-c-s2: 2da5093777d7943ed27e3df62c321eedb498e9d69a67a200b20a77361d0f997f
+    rnn-c-s3: 91c58e9d1b451cabc70a80d64e7ba45c06995a84a4ef0d964f54e61858075f67
+    rnn-c-s4: 81ea2bf59f2f421cb63125e9f23889cacc10b0c4cf9ded18a392e864dd1f8b23
+how_often_the_output_is_the_second_largest:   # on 2^20 inputs, numpy.random.default_rng(0).standard_normal, in float64
+  rnn-c-s0: 0.91003
+  rnn-c-s1: 0.88019
+  rnn-c-s2: 0.94882
+  rnn-c-s3: 0.93231
+  rnn-c-s4: 0.88962
+roles: s2 (AlgZoo's own pick, the best of five) for the rounds, s3 (the next best) for the seed check; s0, s4 and s1 for
+  checking an entry again later
+hygiene:
+  - 2nd argmax
+  - second argmax
+  - 2nd_argmax
+  - 2nd-argmax
+  - second-largest
+  - second largest
+  - second biggest
+  - second highest
+  - second-highest
+  - runner-up
+  - runner up
+  - next largest
+  - largest
+  - larger
+  - biggest
+  - bigger
+  - smaller
+  - smallest
+  - lowest
+  - lesser
+  - median
+  - middle
+  - AlgZoo
+  - alg-zoo
+  - alg_zoo
+  - Alignment Research
+  - alignment.org
+  - arc-ml
+  - Gross
+  - compact proof
+  - trained on

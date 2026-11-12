@@ -1,0 +1,8 @@
+{
+ "calls": [
+  {"tool": "run_python", "args": {"code": {"$file": "explore.py"}}},
+  {"tool": "submit_entry", "args": {"name": "top", "claimed_fidelity": 0.5, "expected_fidelity_other": 0.5}},
+  {"tool": "submit_entry", "args": {"name": "half", "claimed_fidelity": 0.5, "expected_fidelity_other": 0.5}}
+ ],
+ "response": "## What the network does\nNot yet known: two guesses tried, the position of the highest number and, where the first number is positive, of the lowest.\n\n## How you found it\nFrom its outputs on a sample.\n\n## The best entry\ntop\n\n## Claims\nAs submitted.\n\n## Next\nLook at the weights."
+}

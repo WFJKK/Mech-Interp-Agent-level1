@@ -1,0 +1,17 @@
+# The pilot on rnn-b: a recurrent network with one layer of 4 units, a ReLU and no biases, reading three real
+# numbers (models/rnn-b), 78 operations per forward pass. The agent is told what an input is and how the data
+# set is drawn. It is not told what the network was trained to do; finding where its behaviour can be described
+# is the work.
+# Its inputs are real numbers, infinitely many, so the verifier scores a fresh sample for every submission.
+#   rounds on      rnn-b-s0
+#   seed check on  rnn-b-s4   the same sizes and training, another seed (the networks are numbered by their seeds;
+#                             the other three are for checking an entry again later)
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-rnn-b
+model: models/rnn-b
+network: rnn-b-s0
+seed_check: {network: rnn-b-s4}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

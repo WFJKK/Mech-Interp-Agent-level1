@@ -13,6 +13,12 @@
 #   config/pilot/lin-e.yaml         the baseline of lin-c's shape (and lin-a-1to4's)
 #   config/pilot/lin-f.yaml         the baseline of lin-d's shape (and lin-b's)
 #   config/pilot/att-e.yaml         the baseline of att-c's shape (and att-d's)
+#   config/pilot/rnn-a.yaml         a recurrent network, one layer of 2 units, on two real numbers
+#   config/pilot/rnn-b.yaml         one of the same design, 4 units, on three real numbers
+#   config/pilot/rnn-c.yaml         one of the same design, 16 units, on ten real numbers
+#   config/pilot/rnn-d.yaml         the baseline of rnn-a's shape
+#   config/pilot/rnn-e.yaml         the baseline of rnn-b's shape
+#   config/pilot/rnn-f.yaml         the baseline of rnn-c's shape
 #
 # A run has two parts (docs/DESIGN.md):
 #   1. the rounds: the agent explores one network and submits entries; the score is the reward;

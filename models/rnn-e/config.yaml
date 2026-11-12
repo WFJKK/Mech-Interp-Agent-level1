@@ -1,0 +1,41 @@
+# The model rnn-e: a recurrent network of rnn-b's design and sizes (one layer of 4 units, a ReLU, no biases),
+# reading three real numbers.
+# Sizes, the data set and the networks; change values here, never in code.
+# What its networks are is not in this folder. It is in withheld/rnn-e/, which no tool of the agent
+# reaches, and nothing here may say it (the hygiene check reads this folder's agent-facing files).
+name: rnn-e
+sizes:
+  n_ctx: 3       # numbers per input
+  d_hidden: 4    # units of the recurrent layer
+input_space: [real, real, real]   # per position: a real number
+n_outputs: 3
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: normal          # every number drawn on its own from the standard normal distribution
+  says: >
+    An input is three real numbers, x_0, x_1 and x_2, each drawn on its own from the standard normal
+    distribution (mean 0, standard deviation 1). The data set is every input that can be drawn this
+    way, each weighted by how likely it is to be drawn. There are infinitely many, so the verifier
+    scores a sample.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  input: [4, 1]
+  recurrent: [4, 4]
+  readout: [3, 4]
+# Five networks of the same sizes, with different seeds. A run works on the first and checks its locked entry
+# on the second; the other three are for checking an entry again later.
+networks:
+  - id: rnn-e-s0
+    weights: zoo/rnn-e-s0.npz
+    sha256: 70485b3f6d7b8432ccf5635cc6b7d366b38e284b3a7eecd644006c68bd797fb7
+  - id: rnn-e-s4
+    weights: zoo/rnn-e-s4.npz
+    sha256: 5f58870ede5baa321563fca99f35b75de1ca267b77d834d269d286fa7c579a41
+  - id: rnn-e-s1
+    weights: zoo/rnn-e-s1.npz
+    sha256: d46ae612014dc9ac9544808c5dc4f21daa5ae0b14273ad97661b1c4f4e3f249b
+  - id: rnn-e-s2
+    weights: zoo/rnn-e-s2.npz
+    sha256: 7b38c360fd20549ad35d416f756ceb3bf0285a6f06a8f004b37f0228d17484a9
+  - id: rnn-e-s3
+    weights: zoo/rnn-e-s3.npz
+    sha256: 728c1f8f9ae70a9c7b91860c56077a33aece5a1a4b711cab073c94f72a644b39

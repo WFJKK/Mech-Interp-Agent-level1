@@ -82,12 +82,16 @@ and is then paid for there.
 
 ## 3. The data set and the verifier
 
-**The data set** is part of the model: `data_set` in `models/<name>/config.yaml`. Two kinds exist.
+**The data set** is part of the model: `data_set` in `models/<name>/config.yaml`. Three kinds exist.
 
 - `all`, the default: every input of the input space, each counted once.
 - `lengths`: an input has a number of tokens drawn from a list, each equally likely; the tokens
   are uniform and fill the first slots, and the remaining slots hold a number that stands for
   "empty". This is a data set by its distribution: it cannot be listed, only drawn from.
+- `normal`: an input is real numbers, one per position, each drawn on its own from the standard
+  normal distribution. The input space says `real` for every position. There are infinitely many
+  inputs, so they are always sampled; in an entry, `token(i)` and `tokens()` give them as floats,
+  and the interpretation is still a whole number.
 
 The config's `data_set.says` is the sentence the agent's prompt gives about the data set. What the
 agent is told is the data set, in full. What it is not told is anything about the training.
@@ -258,6 +262,10 @@ with the language's softmax. An input with empty slots is read at its last token
 slots are masked out of the softmax rather than cut off, so the cost is the same on every input.
 Three of them were taken from the proof pipeline's zoo (`withheld/<name>/task.yaml` gives the source
 file and its checksum) and one was trained here.
+`models/rnn-a` to `rnn-c` show inputs of real numbers (a `normal` data set): one-layer ReLU recurrent
+networks, written as a loop over the positions that the builder unrolls. Their networks are a published
+set's; `withheld/rnn/` keeps the original files and the converter, which reads them without running
+anything in them.
 
 Names are part of what the agent can reach: a model folder, a network id or a weight's name must
 not say what the network does. The hygiene check reads them. If the network needs an operation the
@@ -290,8 +298,10 @@ design. The baseline separates that from the rest (`level1/baseline.py`).
 **A baseline model** has the design, sizes and data set of the models whose shape it shares, its twins,
 and networks with nothing in them for an agent to find; what they are is in `withheld/<name>/`, like
 a task (`task.yaml`, and `draw.py`, which makes them). `lin-e`, `lin-f` and `att-e` are the baseline
-models of the shapes of lin-c, lin-d and att-c. The first network is for the rounds, the second for
-the seed check, the others for freezing.
+models of the shapes of lin-c, lin-d and att-c, and `rnn-d`, `rnn-e` and `rnn-f` those of rnn-a, rnn-b
+and rnn-c. The first network is for the rounds, the second for the seed check, the others for freezing.
+A recurrent baseline model lists first the two networks that pair with its twin's pilot (its
+`task.yaml` says how).
 
 **A baseline run** is a usual run on a baseline model, under the same conditions as the runs it serves:
 the same prompt, rounds, budgets, entry limits, verifier and reward (`baseline.CONDITIONS`) and the same

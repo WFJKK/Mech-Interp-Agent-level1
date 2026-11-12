@@ -1,0 +1,16 @@
+# The baseline pilot for the shape of rnn-c (models/rnn-f: one layer of 16 units, ten real numbers), 2,937 operations
+# per forward pass. Everything the agent is given is what a pilot on rnn-c gives it: the same prompt, data set,
+# rounds, budgets and reward. Only the networks differ; what they are is in withheld/rnn-f/. What the agent
+# achieves here is the baseline that runs of this shape are read against.
+# Its inputs are real numbers, infinitely many, so the verifier scores a fresh sample for every submission.
+#   rounds on      rnn-f-s2   the first network of models/rnn-f/config.yaml
+#   seed check on  rnn-f-s3   the second (the other three are for freezing the baseline's entry)
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-rnn-f
+model: models/rnn-f
+network: rnn-f-s2
+seed_check: {network: rnn-f-s3}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

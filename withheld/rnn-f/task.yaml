@@ -1,0 +1,81 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  Untrained. The networks were never trained: each is the state AlgZoo's trainer starts from for one seed of
+  rnn-c's networks (2nd argmax, hidden size 16, ten numbers), saved by AlgZoo before its first step (0 training
+  sequences) and converted as published. A model for the baseline of the shape it shares with rnn-c: a run on
+  it is a usual run in everything the agent is given (the same prompt, sizes, data set, rounds, budgets and
+  reward), with nothing learned to find, so what the agent achieves here is generic. Its networks behave like
+  none of the trained ones, and their outputs are lopsided (how_often_each_output); whatever regularity a run
+  finds in one of them is an accident of that network, which its other networks show up.
+baseline_of: [rnn-c]
+initialization:
+  how: PyTorch's default, set by AlgZoo's trainer (alg_zoo/training.py, train) under torch.manual_seed(seed) and saved
+    before the first step as 2nd_argmax_16_10_0_<seed>.pth; every matrix uniform in +-1/sqrt(16) = +-0.25 (nn.RNN's reset_parameters,
+    and nn.Linear's kaiming_uniform with a = sqrt(5), whose bound is the same here); float32
+  converted_by: withheld/rnn/convert.py, from withheld/rnn/pth
+  networks:   # in the order of config.yaml
+    rnn-f-s2: {seed: 2, start_of: rnn-c-s2, file: 2nd_argmax_16_10_0_2.pth, sha256: 5ca02c3ce8cbf5d9c357179f2e24a03337c6569817213842f3e1b94d1873221d}
+    rnn-f-s3: {seed: 3, start_of: rnn-c-s3, file: 2nd_argmax_16_10_0_3.pth, sha256: 70c69f3c8769077e9d116881e00f2b2359672f3f71a4347fb7947969adbb2d3f}
+    rnn-f-s0: {seed: 0, start_of: rnn-c-s0, file: 2nd_argmax_16_10_0_0.pth, sha256: 9f7292071b988c7ce3ae753511c1d997310373d69a30c26c78064aa807c8958e}
+    rnn-f-s1: {seed: 1, start_of: rnn-c-s1, file: 2nd_argmax_16_10_0_1.pth, sha256: 8352bd1ae1d26666a4059428025fbabcbfb56f25219519ddbb010d3ce075bef9}
+    rnn-f-s4: {seed: 4, start_of: rnn-c-s4, file: 2nd_argmax_16_10_0_4.pth, sha256: d3025b9ae377b870394660c8ea8f3fcb9371bc8aeec696caa21247dbbc89594b}
+  roles: config.yaml lists first the starting points of the networks rnn-c's pilot uses, in the order the baseline
+    uses them, rnn-f-s2 for the rounds (where rnn-c-s2 started) and rnn-f-s3 for the seed check (where
+    rnn-c-s3 started); the other three are for freezing. Training moved every network far from its start (the
+    distance is several times the start's own size, matrix by matrix), so a trained network and its start share little.
+how_often_each_output:   # on 2^20 inputs, numpy.random.default_rng(0).standard_normal, in float64; one share per output
+  rnn-f-s2: [0.0, 0.036, 0.142, 0.072, 0.214, 0.001, 0.0, 0.272, 0.0, 0.263]
+  rnn-f-s3: [0.0, 0.497, 0.002, 0.0, 0.002, 0.104, 0.0, 0.0, 0.392, 0.002]
+  rnn-f-s0: [0.0, 0.0, 0.001, 0.0, 0.542, 0.283, 0.005, 0.036, 0.117, 0.015]
+  rnn-f-s1: [0.013, 0.002, 0.062, 0.0, 0.0, 0.239, 0.002, 0.586, 0.0, 0.096]
+  rnn-f-s4: [0.066, 0.531, 0.0, 0.001, 0.0, 0.0, 0.401, 0.002, 0.0, 0.0]
+how_often_the_output_is_the_second_largest:   # the same inputs: what rnn-c's networks were trained to give
+  rnn-f-s2: 0.1339
+  rnn-f-s3: 0.1208
+  rnn-f-s0: 0.0901
+  rnn-f-s1: 0.122
+  rnn-f-s4: 0.1011
+hygiene:
+  - untrained
+  - not trained
+  - never trained
+  - before training
+  - random weights
+  - randomly initialized
+  - randomly initialised
+  - random init
+  - initialization
+  - initialisation
+  - baseline
+  - 2nd argmax
+  - second argmax
+  - 2nd_argmax
+  - 2nd-argmax
+  - second-largest
+  - second largest
+  - second biggest
+  - second highest
+  - second-highest
+  - runner-up
+  - runner up
+  - next largest
+  - largest
+  - larger
+  - biggest
+  - bigger
+  - smaller
+  - smallest
+  - lowest
+  - lesser
+  - median
+  - middle
+  - AlgZoo
+  - alg-zoo
+  - alg_zoo
+  - Alignment Research
+  - alignment.org
+  - arc-ml
+  - Gross
+  - compact proof
+  - trained on

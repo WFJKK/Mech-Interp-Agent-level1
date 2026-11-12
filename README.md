@@ -56,7 +56,9 @@ known ways to game a reward.
 ## The data set, and how the verifier checks
 
 A model's `config.yaml` says what its data set is (`data_set`), and the agent is told the same in
-its prompt. The run config says how the verifier checks an entry (`verifier.check`):
+its prompt. An input is tokens (whole numbers) for most models; for the recurrent models it is real
+numbers (`kind: normal`), which are drawn and never listed. The run config says how the verifier
+checks an entry (`verifier.check`):
 
 - `all`: on every input of the data set;
 - `sample`: on a fresh sample for every scoring (`verifier.sample_size` inputs). The reward then
@@ -79,6 +81,12 @@ its prompt. The run config says how the verifier checks an entry (`verifier.chec
 | `config/pilot/lin-e.yaml` | `models/lin-e` | as lin-c (baseline of lin-c's shape) | 16,384 sampled per scoring |
 | `config/pilot/lin-f.yaml` | `models/lin-f` | as lin-d (baseline of lin-d's shape) | 16,384 sampled per scoring |
 | `config/pilot/att-e.yaml` | `models/att-e` | as att-c (baseline of att-c's shape) | 16,384 sampled per scoring |
+| `config/pilot/rnn-a.yaml` | `models/rnn-a` | two real numbers, each standard normal | 16,384 sampled per scoring |
+| `config/pilot/rnn-b.yaml` | `models/rnn-b` | three real numbers, each standard normal | 16,384 sampled per scoring |
+| `config/pilot/rnn-c.yaml` | `models/rnn-c` | ten real numbers, each standard normal | 16,384 sampled per scoring |
+| `config/pilot/rnn-d.yaml` | `models/rnn-d` | as rnn-a (baseline of rnn-a's shape) | 16,384 sampled per scoring |
+| `config/pilot/rnn-e.yaml` | `models/rnn-e` | as rnn-b (baseline of rnn-b's shape) | 16,384 sampled per scoring |
+| `config/pilot/rnn-f.yaml` | `models/rnn-f` | as rnn-c (baseline of rnn-c's shape) | 16,384 sampled per scoring |
 
 Every model up to att-d has two trained networks (two seeds): the rounds work on s0, the seed check runs the
 locked entry on s1. The first two pilots use the same two networks. `lin-b` is a network of the
@@ -109,6 +117,17 @@ prompt, rounds, budgets and reward, so what it achieves there is generic: the ba
 that shape are read against. The rounds use s0 and the seed check s1; s2 to s5 are for checking an
 entry again later. A hand-written reference, `tables` on att-e, scores 0.955 on every network of
 att-c's shape, trained or not.
+
+`rnn-a`, `rnn-b` and `rnn-c` are recurrent networks: one layer of 2, 4 and 16 units with a ReLU and
+no biases, reading 2, 3 and 10 real numbers, at 19, 78 and 2,937 operations per forward pass. Their
+networks are a published set's, five seeds each, converted by `withheld/rnn/convert.py` from the
+original files kept in `withheld/rnn/pth/` (read without torch, by an unpickler that runs nothing).
+The networks are numbered by their seeds, and each pilot works on the two best: rnn-a on s2 with its
+seed check on s1, rnn-b on s0 and s4, rnn-c on s2 and s3. `rnn-d`, `rnn-e` and `rnn-f` are their
+baseline models, five networks each with nothing in them for an agent to find; what they are, and
+why each lists first the two networks that pair with its twin's pilot, is in `withheld/<name>/`.
+Some of them give one output on most inputs; the freezing step (`docs/DESIGN.md`, section 10) is
+what keeps an accident of one network out of the baseline.
 
 ## Quick start
 
@@ -242,7 +261,10 @@ The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it
     models/lin-c/, lin-d/ the designs of lin-a and lin-b trained afresh on another task
     models/att-a/ .. att-d/   one-layer, one-head transformers: two with 2 slots, two with 4
     models/lin-e/, lin-f/, att-e/   baseline models of the shapes of lin-c, lin-d and att-c
+    models/rnn-a/ .. rnn-c/   one-layer ReLU recurrent networks on 2, 3 and 10 real numbers, five seeds each
+    models/rnn-d/ .. rnn-f/   their baseline models
     withheld/<model>/     what it was trained to do, and reference entries (never shown to the agent)
+    withheld/rnn/         where the recurrent networks come from: the original files and the converter
     agent_docs/      the entry guide the agent reads
     prompts/         the round's prompt template
     config/          defaults, the pilots' run configs and their small smoke runs

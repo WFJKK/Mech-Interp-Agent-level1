@@ -157,6 +157,36 @@ def test_data_sets_that_are_listed_and_data_sets_that_are_drawn():
     assert lang.wilson_lower(0, 0) == 0.0 and 0.99 < lang.wilson_lower(1000, 1000) < 1.0
 
 
+def test_a_data_set_of_numbers():
+    """kind normal: an input is real numbers, each drawn from the standard normal distribution; they are drawn,
+    never listed. An entry reads them as floats, at the prices of any other value, and still answers with a whole
+    number."""
+    rng = np.random.default_rng(5)
+    ds = {"kind": "normal"}
+    assert lang.real_inputs(ds) and not lang.real_inputs({"kind": "lengths"}) and not lang.real_inputs(None)
+    assert lang.count_inputs(ds, ["real"] * 3) is None
+    x = lang.draw_inputs(ds, ["real"] * 3, 20000, rng)
+    assert x.shape == (20000, 3) and x.dtype == np.float64 and abs(x.mean()) < 0.02 and abs(x.std() - 1) < 0.02
+    assert abs(np.corrcoef(x[:, 0], x[:, 1])[0, 1]) < 0.03  # each number on its own
+    w = {"v": np.array([1.0, -2.0, 0.5])}
+    g = Graph(w, 3, real=True)
+    assert g.example.dtype == np.float64 and g.tokens().value.tolist() == [0.0, 0.0, 0.0]
+    entry = g.entry(interpretation=(g.tokens() * g.weight("v")).argmax(), region=g.token(0) > 0.25)
+    assert run(entry, w, [0.5, 0.3, -1.25], n_ctx=3) == (True, 0, 1, 3 + 2, 0)     # [0.5, -0.6, -0.625]
+    assert run(entry, w, [0.5, -0.3, 1.25], n_ctx=3)[:2] == (True, 2)              # [0.5, 0.6, 0.625]: no rounding to tokens
+    assert run(entry, w, [0.2, 9.0, 9.0], n_ctx=3)[:2] == (False, None)
+    tenths = g.entry(interpretation=lang.cast(g.token(1) * 10.0, "int"))
+    assert run(tenths, w, [0.0, 0.31, 0.0], n_ctx=3)[1] == 3
+    with pytest.raises(EntryError, match="whole number"):
+        run(g.entry(interpretation=g.token(0)), w, [0.5, 0.3, -1.25], n_ctx=3)
+    with pytest.raises(EntryError, match="whole number"):  # a number is not a position to read at
+        run(g.entry(interpretation=lang.take(g.arange(3), g.tokens()).sum()), w, [0.0, 1.0, 2.0], n_ctx=3)
+    on = Graph(w, 3, example=[0.5, -1.5, 2.25], real=True)
+    assert on.token(2).value == 2.25 and Graph(w, 3, example=[1, 2, 0]).token(0).value.dtype == np.int64
+    with pytest.raises(ValueError, match="one number per position"):
+        Graph(w, 3, example=[0.5, 1.0], real=True)
+
+
 def test_a_cast_is_a_computation(toy):
     A = toy["A"]
     val, _, build = value_and_cost(lambda g: lang.cast(g.weight("A"), "int"), toy)

@@ -42,13 +42,23 @@ class Model:
         self.name = self.config["name"]
         self.sizes = dict(self.config["sizes"])
         self.n_ctx = int(self.sizes["n_ctx"])
-        self.input_space = [int(n) for n in self.config["input_space"]]
-        if len(self.input_space) != self.n_ctx:
-            raise ModelError("input_space needs one entry per token position")
         # The data set: every input of the input space unless config.yaml says otherwise (lang.py: data sets).
         self.data_set = dict(self.config.get("data_set") or {"kind": "all"})
         try:
-            self.n_total = lang.count_inputs(self.data_set, self.input_space)
+            self.real = lang.real_inputs(self.data_set)
+        except ValueError as exc:
+            raise ModelError(f"the data set of {self.name} is not well described: {exc}") from None
+        space = list(self.config["input_space"])
+        if self.real != all(n == "real" for n in space) or (not self.real and not all(isinstance(n, int) for n in space)):
+            raise ModelError("input_space says `real` for every position of a data set of numbers (kind normal), "
+                             "and a whole number of tokens for every position otherwise")
+        self.input_space = space if self.real else [int(n) for n in space]
+        if len(self.input_space) != self.n_ctx:
+            raise ModelError("input_space needs one entry per token position")
+        if self.real and not self.data_set.get("says"):
+            raise ModelError("a data set of numbers needs the sentence the agent is told about it (data_set.says)")
+        try:
+            self.n_total = lang.count_inputs(self.data_set, self.input_space)  # None: infinitely many
         except (ValueError, KeyError) as exc:
             raise ModelError(f"the data set of {self.name} is not well described: {exc}") from None
         self._module = None
@@ -96,7 +106,7 @@ class Model:
         return self._module
 
     def reference_entry(self, weights: dict) -> dict:
-        g = lang.Graph(weights, self.n_ctx)
+        g = lang.Graph(weights, self.n_ctx, real=self.real)
         return g.entry(predict=self.module().reference(g, lang))
 
     # what the agent is given about the network besides its weights and model.py
@@ -124,10 +134,10 @@ class Model:
         mod = _load_py(p, f"level1_withheld_{self.name.replace('-', '_')}")
         out = {}
         for name, fn in getattr(mod, "ENTRIES", {}).items():
-            g = lang.Graph(weights, self.n_ctx)
+            g = lang.Graph(weights, self.n_ctx, real=self.real)
             out[name] = g.entry(**fn(g, lang))
         for name, fn in getattr(mod, "ENTRIES_WITH_REFERENCE", {}).items():
-            g = lang.Graph(weights, self.n_ctx)
+            g = lang.Graph(weights, self.n_ctx, real=self.real)
             out[name] = g.entry(**fn(g, lang, self.module().reference))
         return out
 

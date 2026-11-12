@@ -147,6 +147,16 @@ def _svd(x: np.ndarray):
     return (u, s, vt), SVD_FACTOR * m * n * min(m, n)
 
 
+def _input_dtype(tokens) -> type:
+    """An input's values are whole numbers (tokens), or real numbers for a data set of numbers (kind normal)."""
+    return np.float64 if np.issubdtype(np.asarray(tokens).dtype, np.floating) else np.int64
+
+
+def _as_input(x) -> np.ndarray:
+    x = np.asarray(x)
+    return x.astype(np.float64) if np.issubdtype(x.dtype, np.floating) else x.astype(np.int64)
+
+
 def apply(node: dict, args: list, tokens: np.ndarray | None, weights: dict, svd_cache: dict | None = None):
     """The value and the cost of one node, given its arguments' values. cond is not handled here."""
     op = node["op"]
@@ -156,11 +166,11 @@ def apply(node: dict, args: list, tokens: np.ndarray | None, weights: dict, svd_
         i = node.get("i")
         if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < len(tokens):
             raise EntryError(f"token: no position {i!r} in an input of {len(tokens)} tokens")
-        return np.asarray(tokens[i], dtype=np.int64), 0
+        return np.asarray(tokens[i], dtype=_input_dtype(tokens)), 0
     if op == "tokens":
         if tokens is None:
             raise EntryError("tokens used where no input is given")
-        return np.asarray(tokens, dtype=np.int64), 0
+        return np.asarray(tokens, dtype=_input_dtype(tokens)), 0
     if op == "weight":
         name = node.get("name")
         if name not in weights:
@@ -488,7 +498,7 @@ class Evaluator:
 
     def run(self, x) -> tuple:
         """(in the region?, the predicted output or None, operations of the rule, operations of the prediction)"""
-        tokens = np.asarray(x, dtype=np.int64).reshape(-1)
+        tokens = _as_input(x).reshape(-1)
         if len(tokens) != self.n_ctx:
             raise EntryError(f"an input has {self.n_ctx} tokens")
         memo: dict = {}
@@ -516,21 +526,35 @@ def all_inputs(input_space) -> np.ndarray:
 
 
 # data sets -----------------------------------------------------------------------------------
-# A model says what its data set is (config.yaml: data_set). Two kinds:
+# A model says what its data set is (config.yaml: data_set). Three kinds:
 #   all       every input of the input space, each as likely as any other (the default)
 #   lengths   an input has a varying number of tokens: a number is drawn from `lengths` (each as likely as
 #             any other), then that many tokens below `vocab`; they fill the first slots, and the rest hold
 #             the value `empty`
+#   normal    an input is real numbers, one per position (the input space says `real` for each), each drawn
+#             from the standard normal distribution on its own. There are infinitely many, so they are drawn,
+#             never listed, and token(i) and tokens() give them as floats.
+KINDS = ("all", "lengths", "normal")
+
+
 def data_set_kind(data_set) -> str:
     kind = (data_set or {}).get("kind", "all")
-    if kind not in ("all", "lengths"):
-        raise ValueError(f"a data set is of kind all or lengths, not {kind!r}")
+    if kind not in KINDS:
+        raise ValueError(f"a data set is of kind {', '.join(KINDS[:-1])} or {KINDS[-1]}, not {kind!r}")
     return kind
 
 
-def count_inputs(data_set, input_space) -> int:
-    """How many different inputs the data set holds."""
-    if data_set_kind(data_set) == "all":
+def real_inputs(data_set) -> bool:
+    """Whether the data set's inputs are real numbers rather than tokens."""
+    return data_set_kind(data_set) == "normal"
+
+
+def count_inputs(data_set, input_space) -> int | None:
+    """How many different inputs the data set holds; None when there are infinitely many."""
+    kind = data_set_kind(data_set)
+    if kind == "normal":
+        return None
+    if kind == "all":
         return int(np.prod([int(n) for n in input_space], dtype=object))
     return int(sum(int(data_set["vocab"]) ** int(k) for k in data_set["lengths"]))
 
@@ -539,6 +563,8 @@ def draw_inputs(data_set, input_space, n: int, rng) -> np.ndarray:
     """n inputs drawn from the data set, one row each. The verifier and the agent's sandbox both draw with
     this, from different seeds."""
     slots = len(input_space)
+    if data_set_kind(data_set) == "normal":
+        return rng.standard_normal((n, slots))
     if data_set_kind(data_set) == "all":
         return np.stack([rng.integers(0, int(k), size=n) for k in input_space], axis=1).astype(np.int64)
     lengths = np.array([int(k) for k in data_set["lengths"]])
@@ -751,14 +777,18 @@ class Expr:
 
 class Graph:
     """Builds an entry. Give it the network's weights and the number of tokens per input; every expression
-    is also computed on an example input (all zeros unless given), which is how shapes are known."""
+    is also computed on an example input (all zeros unless given), which is how shapes are known. real: the
+    inputs are real numbers (a data set of kind normal), so the example is too."""
 
-    def __init__(self, weights: dict, n_ctx: int, example=None):
+    def __init__(self, weights: dict, n_ctx: int, example=None, real: bool = False):
         self.weights = {k: _norm(v) for k, v in weights.items()}
         self.n_ctx = int(n_ctx)
-        self.example = np.zeros(self.n_ctx, dtype=np.int64) if example is None else np.asarray(example, dtype=np.int64)
+        self.real = bool(real)
+        dtype = np.float64 if self.real else np.int64
+        self.example = np.zeros(self.n_ctx, dtype=dtype) if example is None else np.asarray(example, dtype=dtype)
         if self.example.shape != (self.n_ctx,):
-            raise ValueError(f"an example input has one whole number per position of the input: {self.n_ctx} here")
+            raise ValueError(f"an example input has one {'number' if self.real else 'whole number'} per position of the input: "
+                             f"{self.n_ctx} here")
         self.nodes: list[dict] = []
         self.values: list[np.ndarray] = []
         self._seen: dict[str, int] = {}
@@ -854,10 +884,10 @@ class Graph:
         return entry
 
     @classmethod
-    def load(cls, entry: dict, weights: dict, n_ctx: int, example=None) -> tuple:
+    def load(cls, entry: dict, weights: dict, n_ctx: int, example=None, real: bool = False) -> tuple:
         """An entry opened for more building: (graph, predict, rule or None)."""
         check_structure(entry)
-        g = cls(weights, n_ctx, example)
+        g = cls(weights, n_ctx, example, real)
         exprs = []
         for node in entry["nodes"]:
             node = dict(node)

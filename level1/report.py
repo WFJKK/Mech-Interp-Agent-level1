@@ -366,7 +366,8 @@ def markdown(rep: dict) -> str:
     out = [f"# Run {rep['run_id']}", ""]
     out += [f"- Model {rep['model']}, rounds on {first}" + (f", seed check on {second}" if second else "") + ".",
             f"- Agent: {rep['agent_model']} at effort {rep['effort']}, through the {rep['backend']} backend.",
-            f"- Data set: {rep['n_total']:,} inputs, {checked}. One forward pass: {rep['model_ops']:,} operations ({rep['prices']}).",
+            f"- Data set: {'real-valued inputs' if rep['n_total'] is None else format(rep['n_total'], ',') + ' inputs'}, {checked}. "
+            f"One forward pass: {rep['model_ops']:,} operations ({rep['prices']}).",
             "- Reward: " + rep["reward"].get("name", "r_alpha") + "".join(f", {k} = {v}" for k, v in rep["reward"].items() if k != "name") + ".",
             f"- Sandbox: {rep['sandbox']['mode']}" + _sandbox_note(rep) + ".",
             f"- The rounds ended: {rep['ended'] or 'not yet'}.", ""]

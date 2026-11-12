@@ -1,0 +1,41 @@
+# The model rnn-f: a recurrent network of rnn-c's design and sizes (one layer of 16 units, a ReLU, no biases),
+# reading ten real numbers.
+# Sizes, the data set and the networks; change values here, never in code.
+# What its networks are is not in this folder. It is in withheld/rnn-f/, which no tool of the agent
+# reaches, and nothing here may say it (the hygiene check reads this folder's agent-facing files).
+name: rnn-f
+sizes:
+  n_ctx: 10      # numbers per input
+  d_hidden: 16   # units of the recurrent layer
+input_space: [real, real, real, real, real, real, real, real, real, real]   # per position: a real number
+n_outputs: 10
+# The data set: inputs are drawn, not listed (level1/lang.py, data sets). The verifier samples it.
+data_set:
+  kind: normal          # every number drawn on its own from the standard normal distribution
+  says: >
+    An input is ten real numbers, x_0 to x_9, each drawn on its own from the standard normal
+    distribution (mean 0, standard deviation 1). The data set is every input that can be drawn this
+    way, each weighted by how likely it is to be drawn. There are infinitely many, so the verifier
+    scores a sample.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  input: [16, 1]
+  recurrent: [16, 16]
+  readout: [10, 16]
+# Five networks of the same sizes, with different seeds. A run works on the first and checks its locked entry
+# on the second; the other three are for checking an entry again later.
+networks:
+  - id: rnn-f-s2
+    weights: zoo/rnn-f-s2.npz
+    sha256: acc321ac8af33c69766a22cd87849b8105e7bcbe25203b9601cfc6ac88677e8c
+  - id: rnn-f-s3
+    weights: zoo/rnn-f-s3.npz
+    sha256: 17d86ab0d8f782cf4ec6b709c7aa2b2120af6810bfdbe1cb37c5304d0de6a1e1
+  - id: rnn-f-s0
+    weights: zoo/rnn-f-s0.npz
+    sha256: 437480aeef75a1e3ac274b79128d8d5b57296482fc957f5eea0b3c1c856b06c7
+  - id: rnn-f-s1
+    weights: zoo/rnn-f-s1.npz
+    sha256: d7012717a391c7897b725be3eacefd62b5c6969d908acd46ed962ff40adfd908
+  - id: rnn-f-s4
+    weights: zoo/rnn-f-s4.npz
+    sha256: 83fe76f84d5bfb675fefb417a035e0d68b3b8563cbfe483a9444e9a1997a25bd

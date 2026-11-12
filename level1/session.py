@@ -68,7 +68,7 @@ def make_result(weights, info, extra):
     cache = {}
 
     def graph(example=None):
-        return lv1.Graph(weights, n_ctx, example)
+        return lv1.Graph(weights, n_ctx, example, real=lv1.real_inputs(info["data_set"]))
 
     def reference_entry():
         g = graph()
