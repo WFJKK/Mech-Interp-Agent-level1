@@ -1,135 +1,20 @@
 # Mech-Interp-Agent-level1
 
-An agent is given a neural network, its definition and its weights, and is not told what the
-network was trained to do. It writes an **interpretation**: a program that predicts the network's
-output from the input without running the network. It hands it in as an **entry**: the
-interpretation together with the **region** of inputs it applies to. A **verifier** then measures
-the entry: how much of the data set it covers, how often it gives the network's output there, and
-what it costs.
+## Big picture
 
-This is level 1 of the three levels for loosening compact proofs: the claim is checked by
-measuring it on inputs the verifier picks, and nothing is proved. Levels 2 (an adversary with a
-budget) and 3 (an argument that convinces) are not in this repository.
+## More formally
 
-Status, 12 November 2026: nine pilots are set up (see "The pilots"). The pilot on 1 to 4 tokens
-has been run once, with a smoke run before it; lin-b has had its smoke run, and its pilot is under
-way. Rounds run under a Claude Code login or billed to an API key ("On an API key").
+## Reward function
 
-## How a run goes
+## Agentic setup / Auto-research
 
-1. **The network.** `models/<name>/` holds the weights, `model.py`, which writes the network in the
-   entry language, and the data set the network is asked about. That fixes what one forward pass
-   costs (655, 671 and 703 operations for the three pilots).
-2. **The rounds.** The agent explores the network with `run_python` (a sandbox with the weights and
-   the entry language) and hands entries to the verifier with `submit_entry`. Each round is a fresh
-   session; its closing notes and its scored entries go to the next round.
-3. **The lock.** When the rounds end, the submission with the highest reward is locked as it was
-   submitted. If the verifier samples, the locked entry is scored once more on a fresh sample.
-4. **The seed check.** The locked entry is run, unchanged, on a second network of the same sizes
-   and training with another seed. No agent takes part. Every other submission is also scored
-   there after its round, for the record only: the agent never sees those scores and they choose
-   nothing (`seed_scores.jsonl`, and a column of the report).
-5. **The report.** `report.md` and `report.json`: the locked entry on both networks, every
-   submission, the withheld reference entries for comparison, what the agent ran, and its notes.
+## More implementation details
 
-## What is measured, and the reward
+## Results
 
-| Word | What it is |
-| --- | --- |
-| coverage | the share of the data set in the entry's region |
-| fidelity | the share of the region on which the interpretation gives the network's output |
-| cost | everything the entry computes, per input of its region, in forward passes |
+## Getting started
 
-The cost has three parts, kept apart in every receipt: the interpretation on the region (`r`), the
-region test on every input (`r_rule`) and whatever is computed once ahead (the build, `b`).
-
-The default reward, with alpha = 10:
-
-    reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ]
-
-Read it for one input of the region: the entry saves (1 - cost) of a forward pass, and a wrong
-answer is priced at alpha forward passes. The network itself scores 0, and nothing scores above 1.
-Rewards are functions in `level1/rewards.py`, picked by the run config; the parts are kept, so a
-finished run can be scored again under another reward. `docs/REWARD.md` has the details and the
-known ways to game a reward.
-
-## The data set, and how the verifier checks
-
-A model's `config.yaml` says what its data set is (`data_set`), and the agent is told the same in
-its prompt. An input is tokens (whole numbers) for most models; for the recurrent models it is real
-numbers (`kind: normal`), which are drawn and never listed. The run config says how the verifier
-checks an entry (`verifier.check`):
-
-- `all`: on every input of the data set;
-- `sample`: on a fresh sample for every scoring (`verifier.sample_size` inputs). The reward then
-  uses the lower end of the fidelity's 95% confidence interval;
-- `auto`, the default: `all` when the data set can be listed and is small enough, else `sample`.
-
-## The pilots
-
-| Run config | Network | Data set | Checked on |
-| --- | --- | --- | --- |
-| `config/pilot/lin-a.yaml` | `models/lin-a` | every pair of tokens: 4,096 inputs | every input |
-| `config/pilot/lin-a-1to4.yaml` | `models/lin-a-1to4` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
-| `config/pilot/lin-b.yaml` | `models/lin-b` | inputs of 1 to 8 tokens, each length an eighth: about 2.8 x 10^14 inputs | 16,384 sampled per scoring |
-| `config/pilot/lin-c.yaml` | `models/lin-c` | as lin-a-1to4 | 16,384 sampled per scoring |
-| `config/pilot/lin-d.yaml` | `models/lin-d` | as lin-b | 16,384 sampled per scoring |
-| `config/pilot/att-a.yaml` | `models/att-a` | inputs of 1 or 2 tokens, each half: 4,160 inputs | 16,384 sampled per scoring |
-| `config/pilot/att-b.yaml` | `models/att-b` | as att-a | 16,384 sampled per scoring |
-| `config/pilot/att-c.yaml` | `models/att-c` | inputs of 1 to 4 tokens, each length a quarter: about 17 million inputs | 16,384 sampled per scoring |
-| `config/pilot/att-d.yaml` | `models/att-d` | as att-c | 16,384 sampled per scoring |
-| `config/pilot/lin-e.yaml` | `models/lin-e` | as lin-c (baseline of lin-c's shape) | 16,384 sampled per scoring |
-| `config/pilot/lin-f.yaml` | `models/lin-f` | as lin-d (baseline of lin-d's shape) | 16,384 sampled per scoring |
-| `config/pilot/att-e.yaml` | `models/att-e` | as att-c (baseline of att-c's shape) | 16,384 sampled per scoring |
-| `config/pilot/rnn-a.yaml` | `models/rnn-a` | two real numbers, each standard normal | 16,384 sampled per scoring |
-| `config/pilot/rnn-b.yaml` | `models/rnn-b` | three real numbers, each standard normal | 16,384 sampled per scoring |
-| `config/pilot/rnn-c.yaml` | `models/rnn-c` | ten real numbers, each standard normal | 16,384 sampled per scoring |
-| `config/pilot/rnn-d.yaml` | `models/rnn-d` | as rnn-a (baseline of rnn-a's shape) | 16,384 sampled per scoring |
-| `config/pilot/rnn-e.yaml` | `models/rnn-e` | as rnn-b (baseline of rnn-b's shape) | 16,384 sampled per scoring |
-| `config/pilot/rnn-f.yaml` | `models/rnn-f` | as rnn-c (baseline of rnn-c's shape) | 16,384 sampled per scoring |
-
-Every model up to att-d has two trained networks (two seeds): the rounds work on s0, the seed check runs the
-locked entry on s1. The first two pilots use the same two networks. `lin-b` is a network of the
-same design trained afresh (`withheld/lin-b/train.py`, resumable, a minute or two per 10,000 steps
-on a laptop's CPU), and `lin-c` and `lin-d` are the designs of lin-a and lin-b trained afresh on
-another task (`withheld/lin-c/train.py`, `withheld/lin-d/train.py`).
-
-`att-a` to `att-d` are transformers with one layer, one attention head and nothing else (no MLP, no
-layer norm, no biases), 64 tokens, width 32. The network is read at the slot of the last token
-given, attending over the tokens given, so it has an output for inputs that leave slots empty.
-Three come from the proof pipeline's zoo; `att-d` was trained here by the same recipe
-(`withheld/att-d/train.py`, numpy, half a minute per network). A forward pass costs 8,621
-operations at 2 slots and 12,987 at 4, against about 700 for the linear networks.
-
-In all but the pilot on pairs the networks are asked about more inputs than they were trained on,
-and the agent is not told which ones those were: finding where the network's behaviour can be
-described cheaply is part of the work. On lin-b and lin-d there are too many inputs for the agent,
-or anyone, to check them all. On att-a and att-b a short rule gives the network's output on every
-input, so their pilots check that a run finds it rather than pose a problem (a reference entry
-scores 0.997). Each pilot has a small smoke config next to it (`<name>-smoke.yaml`), and
-`lin-b-api.yaml` is the lin-b pilot billed to an API key; `--auth api_key` bills any of them.
-
-`lin-e`, `lin-f` and `att-e` are baseline models (`docs/DESIGN.md`, section 10). Each has the design, sizes and data set of the
-models whose shape it shares (lin-e: lin-c and lin-a-1to4; lin-f: lin-d and lin-b; att-e: att-c
-and att-d), and six networks with nothing in them for an agent to find; what they are is in
-`withheld/<name>/`. A run on one gives the agent exactly what a run on its twin gives it, the same
-prompt, rounds, budgets and reward, except that its prompt also asks for an entry exact for any weights
-of the design; what it achieves there is generic: the baseline that runs of that shape are read
-against. The rounds use s0 and the seed check s1; s2 to s5 are for freezing its entry. A hand-written reference, `tables` on att-e, scores 0.955 on every network of
-att-c's shape, trained or not.
-
-`rnn-a`, `rnn-b` and `rnn-c` are recurrent networks: one layer of 2, 4 and 16 units with a ReLU and
-no biases, reading 2, 3 and 10 real numbers, at 19, 78 and 2,937 operations per forward pass. Their
-networks are a published set's, five seeds each, converted by `withheld/rnn/convert.py` from the
-original files kept in `withheld/rnn/pth/` (read without torch, by an unpickler that runs nothing).
-The networks are numbered by their seeds, and each pilot works on the two best: rnn-a on s2 with its
-seed check on s1, rnn-b on s0 and s4, rnn-c on s2 and s3. `rnn-d`, `rnn-e` and `rnn-f` are their
-baseline models, five networks each with nothing in them for an agent to find; what they are, and
-why each lists first the two networks that pair with its twin's pilot, is in `withheld/<name>/`.
-Some of them give one output on most inputs; the freezing step (`docs/DESIGN.md`, section 10) is
-what keeps an accident of one network out of the baseline.
-
-## Quick start
+### Install
 
     python -m venv .venv && source .venv/bin/activate
     pip install -r requirements.txt
@@ -140,13 +25,19 @@ Use a virtual environment of this repository's own. Outside a container, the hyg
 reads the path of the Python that runs the agent's code, because a traceback shows that path to the
 agent: an environment that lives in a folder named after the proof pipeline is refused.
 
-A dry run with scripted rounds in place of a model:
+Rounds run under your own Claude Code login, so the CLI (`claude`) has to be installed and signed
+in. To bill an API key instead, see "On an API key" below.
 
-    python -m level1.loop run --config config/pilot/lin-a-1to4.yaml --fake tests/fake_run_1to4 --run-id dry-run   # two minutes
+### Run a pilot
 
-A first contact with a real model, kept small: one short round, to see that the login, the tools,
-the sandbox and the verifier work together on this machine. It needs the Claude Code CLI (`claude`)
-installed and signed in; rounds run under your own login, and no API key is used.
+Each model has a run config, `config/pilot/<name>.yaml`, and a small smoke config next to it,
+`config/pilot/<name>-smoke.yaml`. First a dry run, with scripted rounds in place of a model (two
+minutes):
+
+    python -m level1.loop run --config config/pilot/lin-a-1to4.yaml --fake tests/fake_run_1to4 --run-id dry-run
+
+Then the smoke run, one short round, to see that the login, the tools, the sandbox and the verifier
+work together on this machine:
 
     python -m level1.loop run --config config/pilot/lin-a-1to4-smoke.yaml
 
@@ -154,38 +45,37 @@ Then the pilot proper, at most 5 rounds of up to 90 minutes each:
 
     python -m level1.loop run --config config/pilot/lin-a-1to4.yaml
 
-If it stops (a usage limit, a dropped connection, a closed laptop), continue with
+If it stops (a usage limit, a dropped connection, a closed laptop), continue where it stopped:
 
     python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-a-1to4
 
-The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`. A
-dry run of any pilot can use `tests/fake_run_any`, one scripted round that fits every model.
+The pilot on pairs runs the same way with `lin-a-smoke.yaml`, `lin-a.yaml` and `tests/fake_run`, and
+`tests/fake_run_any` is one scripted round that fits every model. Run folders live outside the
+repository, in `~/mech-interp-level1-runs/<run_id>/` by default. On a Mac, run a long pilot under
+`caffeinate -is`, with the lid open and on power: a session whose machine sleeps loses its prompt
+cache and pays to write it again.
 
 ### With its baseline
 
-A run is read against the baseline of its shape when one is frozen: what an agent achieves under the
-same conditions on networks with nothing to find (`docs/DESIGN.md`, section 10). Three ways to start:
+A run is read against the baseline of its shape when one is frozen (`docs/DESIGN.md`, section 10).
+Three ways to start:
 
-    python -m level1.loop run --config config/pilot/att-c.yaml                   the run only, as above
-    python -m level1.loop baseline --config config/pilot/att-c.yaml              its baseline only
-    python -m level1.loop run --config config/pilot/att-c.yaml --with-baseline   both, side by side
+    python -m level1.loop run --config config/pilot/att-c.yaml                   # the run only
+    python -m level1.loop baseline --config config/pilot/att-c.yaml              # its baseline only
+    python -m level1.loop run --config config/pilot/att-c.yaml --with-baseline   # both, side by side
 
-The baseline is made once for a shape and its conditions and serves every run that matches; a
-finished run gets one with `python -m level1.loop baseline --run <run folder>`. Each takes the same
-`--sandbox`, `--auth` and `--budget-usd` as `run`.
-
-A baseline run's prompt asks for an entry exact for any weights of the design, and only an entry that
-also gives the baseline model's other networks their outputs exactly is frozen. Without that, the first
-baseline runs fitted their entries to their own networks and said nothing about a trained one. When no
-entry passes, the baseline is not established and the reports say there is no usable baseline. Baseline
-runs made before the prompt asked for exactness (pilot-att-e, pilot-lin-e) serve no run; the pilot
-configs of the baseline models now make runs named `pilot-<name>-exact`.
+A baseline is made once for a shape and its conditions and serves every run that matches; a
+finished run gets one with `python -m level1.loop baseline --run <run folder>`. Each command takes
+the same `--sandbox`, `--auth` and `--budget-usd` as `run`. The baseline models' own pilot configs
+make runs named `pilot-<name>-exact`; baseline runs made before their prompt asked for an exact
+entry serve no run.
 
 ### On an API key
 
-A run can be billed to an API key instead of your login (`auth: api_key`). Put the key in
-`CPL_ANTHROPIC_KEY`, never in `ANTHROPIC_API_KEY`, for example by loading the file you keep it in;
-`CPL_ANTHROPIC_WORKSPACE` takes a workspace ID if the key is not scoped to one workspace. Then
+A run can be billed to an API key instead of your login (`auth: api_key` in the run config, or
+`--auth api_key` with any config). Put the key in `CPL_ANTHROPIC_KEY`, never in `ANTHROPIC_API_KEY`,
+for example by loading the file you keep it in; `CPL_ANTHROPIC_WORKSPACE` takes a workspace ID if
+the key is not scoped to one workspace. Then
 
     python -m level1.loop run --config config/pilot/lin-b-api.yaml --sandbox seatbelt
 
@@ -194,22 +84,27 @@ The run has a budget, by Claude Code's own count: `budget.run_usd` for the run (
 `budget.round_usd` for one round (20). Every session starts with what is left as its cap. A round
 that reaches its cap ends with what it submitted; the rounds end when the run's budget is spent.
 Claude Code checks its spending after every answer, so a session can go over its cap by one answer.
-The run folder's `spend.jsonl` has every session's cap and cost; a session that reported no cost
-(stopped at its time limit, or the loop was killed) counts at its cap. To go on with more:
+The run folder's `spend.jsonl` has every session's cap and cost. A session that reported no cost
+counts at its cap; one the loop never saw end (the loop was killed) counts in the run's total only,
+so its round gets its whole budget again when resumed. To go on with more:
 
     python -m level1.loop resume --run ~/mech-interp-level1-runs/pilot-lin-b-api --budget-usd 90
 
-`--auth api_key` and `--budget-usd` work on `run` with any config. The CLI's `--bare` mode, which
-this uses, reads no login, so an API run cannot draw on a subscription, and a login run cannot bill
-a key: the CLI's first event says what it billed, and a session that does not fit stops the run.
+The CLI's `--bare` mode, which this uses, reads no login, so an API run cannot draw on a
+subscription, and a login run cannot bill a key: the CLI's first event says what it billed, and a
+session that does not fit stops the run.
+
+### The sandbox
 
 In every mode a guard inside Python refuses the agent's code files outside its folder, the network
 and other programs, and records every attempt; the report lists them. The guard shares a process
 with the code it watches, so for a run that is meant to count add `--sandbox hardened` (Docker or
-Linux) or, on a Mac, `--sandbox seatbelt`, which still needs its first test on a Mac:
-`python -m level1.sandbox probe --model models/lin-a --mode seatbelt` (`docs/SANDBOX.md`).
+Linux) or, on a Mac, `--sandbox seatbelt`. Try a mode first with the probe, which tries to escape
+it and reports (`docs/SANDBOX.md`):
 
-Other commands:
+    python -m level1.sandbox probe --model models/lin-a --mode seatbelt
+
+### Other commands
 
     python -m level1.loop finish --run <run folder>              # lock, seed check and report again; scores
                                                                  # any submission not yet on the second network
@@ -221,9 +116,7 @@ Other commands:
     python -m level1.sandbox build                               # the container image, if Docker runs
     python -m level1.sandbox probe --model models/lin-a          # try to escape the sandbox, and report
 
-Run folders live outside the repository, in `~/mech-interp-level1-runs/<run_id>/` by default.
-
-## What a run keeps
+### What a run writes
 
 Everything is written as it happens, so a run can stop and resume, and can be read afterwards:
 
@@ -234,48 +127,44 @@ Everything is written as it happens, so a run can stop and resume, and can be re
 - everything the CLI emitted, the agent's text between its tool calls included
   (`round_k/stream_NN.jsonl`);
 - every submission's receipt, with the parts measured;
+- every scored submission on the second network (`seed_scores.jsonl`);
 - billed to an API key, every session's cap and cost (`spend.jsonl`);
-- every scored submission on the second network (`seed_scores.jsonl`).
+- the report: `report.md` and `report.json`.
 
-The report counts the programs and the sandbox time per round, lists every attempt the guard
-refused, and lists the programs whose text reaches for files or the system.
+### Repository layout
 
-## The rule the pipeline is built around
-
-The agent is never told what the model does. Nothing it can reach says so: the prompt, the tools'
-descriptions, the files in its sandbox, names, the entry guide. What a network was trained to do
-is in `withheld/<model>/`, which only the verifier's side reads. A check searches everything the
-agent can reach for the forbidden strings before any model is asked, and stops the run on a hit.
-The sandbox enforces the rest; see `docs/SANDBOX.md` for when it can and when it cannot.
-
-## Layout
-
-    level1/          the pipeline
-      lang.py        the entry language: operations, prices, the interpreter, the builder, data sets
-      verifier.py    measures an entry; the only judge
-      rewards.py     reward functions
-      session.py     one agent session: the two tools, budgets, log
-      loop.py        rounds, lock, seed check; the command line
-      baseline.py    the baseline of a run's shape: found, run, frozen, and a run read against it
-      report.py      the report; the reference entries under any reward
-      hygiene.py     the check that the agent is not told what the model does
-      backends/      who answers a round: claude_code, fake
-      budget.py      what a run billed to an API key may spend, and what it has spent
+    level1/            the pipeline
+      lang.py          the entry language: operations, prices, the interpreter, the builder, data sets
+      verifier.py      measures an entry; the only judge
+      rewards.py       reward functions
+      networks.py      model folders: the networks, the network written as an entry, what the agent is given
+      prompt.py        a round's prompt
+      session.py       one agent session: the two tools, budgets, log
+      mcp_server.py    the session's tools as an MCP server, for the Claude Code CLI
+      loop.py          rounds, lock, seed check; the command line
+      baseline.py      the baseline of a run's shape: found, run, frozen, and a run read against it
+      report.py        the report; the reference entries under any reward
+      hygiene.py       the check that the agent is not told what the model does
+      backends/        who answers a round: claude_code, fake
+      budget.py        what a run billed to an API key may spend, and what it has spent
+      run_config.py    run configs: defaults, then what a config extends, then the config
       sandbox.py, runner.py, harness.py    where the agent's code runs
-    models/lin-a/         a linear network on pairs of tokens, two seeds
-    models/lin-a-1to4/    the same two networks, asked about inputs of 1 to 4 tokens
-    models/lin-b/         a network of the same design trained afresh, asked about inputs of 1 to 8 tokens
-    models/lin-c/, lin-d/ the designs of lin-a and lin-b trained afresh on another task
+      util.py          small helpers
+    models/lin-a/           a linear network on pairs of tokens, two seeds
+    models/lin-a-1to4/      the same two networks, asked about inputs of 1 to 4 tokens
+    models/lin-b/           a network of the same design trained afresh, asked about inputs of 1 to 8 tokens
+    models/lin-c/, lin-d/   the designs of lin-a and lin-b trained afresh on another task
     models/att-a/ .. att-d/   one-layer, one-head transformers: two with 2 slots, two with 4
     models/lin-e/, lin-f/, att-e/   baseline models of the shapes of lin-c, lin-d and att-c
     models/rnn-a/ .. rnn-c/   one-layer ReLU recurrent networks on 2, 3 and 10 real numbers, five seeds each
     models/rnn-d/ .. rnn-f/   their baseline models
-    withheld/<model>/     what it was trained to do, and reference entries (never shown to the agent)
-    withheld/rnn/         where the recurrent networks come from: the original files and the converter
-    agent_docs/      the entry guide the agent reads
-    prompts/         the round's prompt template
-    config/          defaults, the pilots' run configs and their small smoke runs
-    tests/           the tests, with each known way to game the score as a test
-    docs/            DESIGN.md, REWARD.md, SANDBOX.md
+    withheld/<model>/       what it was trained to do, and reference entries (never shown to the agent)
+    withheld/rnn/           where the recurrent networks come from: the original files and the converter
+    agent_docs/        the entry guide the agent reads
+    prompts/           the round's prompt template
+    config/            defaults, the pilots' run configs and their small smoke runs
+    sandbox/           the container image (Dockerfile)
+    tests/             the tests, with each known way to game the score as a test
+    docs/              DESIGN.md, REWARD.md, SANDBOX.md
 
 `CLAUDE.md` has the working rules for changing this repository.
