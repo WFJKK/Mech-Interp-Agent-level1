@@ -305,28 +305,32 @@ A recurrent baseline model lists first the two networks that pair with its twin'
 
 **A baseline run** is a usual run on a baseline model, under the same conditions as the runs it serves:
 the same prompt, rounds, budgets, entry limits, verifier and reward (`baseline.CONDITIONS`) and the same
-price list. The agent is given exactly what a run on a twin gives it and is not told the difference: a
-test checks that the two first prompts are the same, byte for byte. What it achieves there is generic.
+price list, with one difference. Its prompt has one more paragraph (`prompt.EXACT_NOTE`, run config
+`exact_on_any_weights`): the entry will also be run on other networks of the design, and counts only if
+it is exact on all of them. Otherwise the agent is given exactly what a run on a twin gives it, and is not
+told what the networks are; a test checks that the two first prompts are the same, byte for byte, but for
+that paragraph.
 
-**Freezing.** When a baseline run finishes, its scored submissions are taken in the order of their
-reward on its second network (every submission is scored there on one fixed sample), one per different
-entry, and each is scored again on every one of the model's other networks, all on one fresh sample.
-The first that passes is frozen; if none of the first `baseline.candidates` (3) does, the first is
-frozen with its verdict and the reports say the baseline is not established. The verdict, with the
-tolerance in `baseline.tolerance`:
+Why the paragraph. Without it, the first baseline runs (pilot-att-e and pilot-lin-e, 12 and 13 November)
+found nothing generic. pilot-lin-e's agent fitted its entries to its own network: on the model's other
+networks they were right on 74% to 81% of the inputs. pilot-att-e's agent fitted what the baseline
+model's networks have in common, and its entry was right on a third of a trained network's inputs. Read against such an entry, a run's score
+says nothing. An entry exact for any weights is still exact on a run's network, where it differs from the
+run's entry only in cost: that is what generic tricks are worth there.
 
-- *passes*: its rewards there agree within the tolerance, counting each reward's sampling interval
-  (the reward with the fidelity's 95% interval at either end);
-- *fails*: two of them are further apart than that even with their intervals;
-- *inconclusive*: neither.
-
-On the pilots' 16,384 inputs, an entry right on every input of every network passes; on a sample of a
-few thousand, the intervals alone are wider than the tolerance, and the verdict is inconclusive, as it
-should be.
+**Freezing.** When a baseline run finishes, its scored submissions that gave the second network's output
+on every input of their region (every submission is scored there on one fixed sample) are taken in the
+order of their reward there, one per different entry, and each is scored again on every one of the
+model's other networks, all on one fresh sample. It *passes* when it gives each of them the network's
+output on every input of its region, and *fails* otherwise. The first that passes is frozen and the
+baseline is established. If none of the first `baseline.candidates` (3) passes, or no submission was
+exact on the second network, what was tried is recorded, the baseline is not established, and no run is
+read against it: the reports say there is no usable baseline.
 
 The choice, every score with its parts and seed, and the verdict are written once (`baseline.json`, and
 the entry in `baseline_entry.json`). One baseline run gives a known achievable generic score, not the
-best possible one.
+best possible one. Of several baseline runs that match a run, an established one is used; one that is
+not established comes last; and a baseline run whose prompt did not ask for exactness serves no run.
 
 **Reading a run against it.** When a run finishes and a matching baseline is frozen, the frozen entry is
 scored on the run's network and on its seed check's network, on the very inputs of the run's own
@@ -340,9 +344,11 @@ and B1 the baseline's, the report gives three parts that add up to R0:
 | The excess kept on the held-out network | R1 - B1 |
 | The gap between the run's network and the held-out one | (R0 - B0) - (R1 - B1) |
 
-Negative values are kept. This is accounting, not a causal split: the excess can hold generic tricks
-the baseline run did not find as well as what the networks learned, and the gap can be sampling noise
-or a difference between the networks as well as fitting the run's own network.
+Negative values are kept. Should the frozen entry not be exact on the run's networks after all (it held
+on the baseline model's networks only), the report says so and gives no split. This is accounting, not a
+causal split: the excess can hold generic tricks the baseline run did not find as well as what the
+networks learned, and the gap can be sampling noise or a difference between the networks as well as
+fitting the run's own network.
 
 **Three ways to start.**
 

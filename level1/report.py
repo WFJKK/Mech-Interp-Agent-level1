@@ -285,31 +285,38 @@ def baseline_lines(rep: dict) -> list:
     b = rep.get("baseline") or {}
     if b.get("kind") == "baseline run":
         out = ["## The baseline", "",
-               f"This is a baseline run: its networks are those of a baseline model, for the shape of {', '.join(b['twins'])}, and its "
-               "agent was given what a run on those is given. What it achieved is generic; runs of that shape are read against it.", ""]
+               f"This is a baseline run: its networks are those of a baseline model, for the shape of {', '.join(b['twins'])}. Its "
+               "agent was given what a run on those is given, and asked for an entry exact for any weights of the design. What it "
+               "achieved is generic; runs of that shape are read against it.", ""]
+        if b.get("asked_for_exactness") is False:
+            out += ["Its agent was not asked for exactness (a run made before that was asked), so it serves no run.", ""]
         f = b.get("frozen")
         if not f:
             return out + ["Nothing is frozen yet: that happens when the run finishes.", ""]
         if not f.get("entry_sha256"):
-            return out + [f"Nothing was frozen: {f.get('why')}.", ""]
+            return out + [f"Nothing was frozen: {f.get('why')}. This baseline is not established, and no run is read against it.", ""]
         out += [f"Frozen: {f['chosen']} (`{f['name']}`), sha256 `{f['entry_sha256'][:16]}`, chosen as {f['chosen_by']} "
                 f"({f['on_second']['reward']:.4f} on {f['on_second']['network']}). Scored again on the model's other networks, all on one "
                 f"fresh sample (seed {f['confirmation']['inputs_seed']}):", "",
-                "| Network | Reward | With its sampling interval | Coverage | Fidelity | Cost | Build part | Per input |",
-                "| --- | --- | --- | --- | --- | --- | --- | --- |"]
+                "| Network | Reward | With its sampling interval | Coverage | Fidelity | Wrong | Cost | Build part | Per input |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
         for nid, r in f["confirmation"]["networks"].items():
             if r.get("status") != "scored":
-                out.append(f"| {nid} | refused: {str(r.get('reason'))[:80]} | | | | | | |")
+                out.append(f"| {nid} | refused: {str(r.get('reason'))[:80]} | | | | | | | |")
                 continue
             q = r["parts"]
+            wrong = int(q.get("n_in_region", 0)) - int(q.get("n_agree", 0)) if q.get("n_in_region") is not None else ""
             out.append(f"| {nid} | {r['reward']:.4f} | {_range(r['reward_range'])} | {q['coverage']:.4f} | {q['fidelity']:.5f} | "
-                       f"{rewards.cost_of(q):.4f} | {q['b']:.4f} | {q['r']:.4f} |")
-        out += ["", f"Verdict, with a tolerance of {f['tolerance']:g}: **{f['label']}**: {f['why']}."]
+                       f"{wrong} | {rewards.cost_of(q):.4f} | {q['b']:.4f} | {q['r']:.4f} |")
+        rule = "the network's output on every input of its region on every other network" if f.get("rule") else (
+            f"rewards within {f.get('tolerance')} of each other (the rule before exactness was asked for)")
+        out += ["", f"Verdict ({rule}): **{f['label']}**: {f['why']}."]
         if len(f.get("tried") or []) > 1 or not f.get("established", f.get("label") == "passes"):
             out += ["", "Tried, in the order of their reward on the second network:", ""]
-            out += [f"- {x['chosen']} (`{x['name']}`), {x['on_second_reward']:.4f} on the second network: {x['label']}" for x in f.get("tried") or []]
+            out += [f"- {x['chosen']} (`{x['name']}`), {x['on_second_reward']:.4f} on the second network: {x['label']}"
+                    + (f" ({x['why']})" if x.get("why") else "") for x in f.get("tried") or []]
         if not f.get("established", f.get("label") == "passes"):
-            out += ["", "No entry tried passed, so this baseline is not established: read runs against it with that in mind."]
+            out += ["", "No entry tried passed, so this baseline is not established, and no run is read against it."]
         return out + [""]
     if b.get("kind") != "run" or b.get("state") == "no baseline model":
         return [] if b.get("kind") != "error" else ["## Against the baseline", "", f"The baseline could not be read: {b.get('why')}", ""]
@@ -320,13 +327,26 @@ def baseline_lines(rep: dict) -> list:
     if state in ("unfinished", "finished"):
         return out + [f"The baseline run {b['baseline_run']} has not been frozen yet; run `finish` on this run again once it has.", ""]
     if state == "empty":
-        return out + [f"The baseline run {b['baseline_run']} froze nothing: {b.get('why')}.", ""]
+        return out + [f"The baseline run {b['baseline_run']} froze nothing ({b.get('why')}), so there is no usable baseline for this "
+                      "run.", ""]
+    if state == "not established":
+        out += [f"The baseline run {b['baseline_run']} is not established: no entry it tried gave the outputs of its model's other "
+                f"networks exactly ({b.get('why')}). So there is no usable baseline for this run, and nothing is read against it.", ""]
+        tried = b.get("tried") or []
+        if tried:
+            out += ["Tried, in the order of their reward on the second network:", ""]
+            out += [f"- {x['chosen']} (`{x['name']}`): {x['label']}" + (f" ({x['why']})" if x.get("why") else "") for x in tried]
+            out += [""]
+        return out
     same = {True: "yes", False: "no", None: "not known"}[b.get("same_first_prompt")]
     out += [f"The baseline run {b['baseline_run']} froze {b.get('chosen')}, which **{b.get('label')}** the check on its model's other "
-            f"networks ({b.get('why')}). Its agent was given the same first prompt as this run's, byte for byte: {same}.", ""]
-    if b.get("label") != "passes":
-        out += ["**The baseline is not established**: the frozen entry did not pass the check on its own model's other networks, "
-                "so its scores below may owe something to the networks it was made on.", ""]
+            f"networks ({b.get('why')}). Its agent was given the same first prompt as this run's, byte for byte, but for the paragraph "
+            f"that asks for an entry exact for any weights: {same}.", ""]
+    if state == "not exact here":
+        bad = "; ".join(f"on {v['network']} ({role}), the network's output on {v.get('n_agree') or 0:,} of the {v.get('n_in_region') or 0:,} "
+                        "inputs of its region" for role, v in (b.get("not_exact") or {}).items())
+        return out + [f"On this run's networks the frozen entry is not exact: {bad}. What it computes holds on its own model's networks "
+                      "but not on these, so it is no generic floor here, and nothing is split.", ""]
     if state != "read":
         return out + [f"It is not read against this run yet ({state}); run `finish` on this run again.", ""]
     n0, n1 = b["networks"]["first"], b["networks"]["held out"]
@@ -342,10 +362,11 @@ def baseline_lines(rep: dict) -> list:
             f"| The gap between this run's network and the held-out one | {_signed(s['gap'][0])} | {s['gap'][1][0]:+.4f} to {s['gap'][1][1]:+.4f} |",
             f"| Together: the locked entry on this run's network | {R0[0]:.4f} | |", "",
             "Each number is measured on the same inputs as the locked entry's own: its second scoring, on a fresh sample, and the "
-            "seed check. This is accounting, not a causal split. The baseline is a generic score an agent reached, not the best "
-            "possible one, so the excess can hold generic tricks the baseline run did not find as well as what the networks "
-            "learned; and the gap can be sampling noise or a difference between the two networks as well as fitting this run's "
-            "own network.", ""]
+            "seed check. The baseline's entry is exact on both, so it differs from the locked entry there only in what it costs and in "
+            "what the locked entry gets wrong. This is accounting, not a causal split. The baseline is a generic score an agent "
+            "reached, not the best possible one, so the excess can hold generic tricks the baseline run did not find as well as what "
+            "the networks learned; and the gap can be sampling noise or a difference between the two networks as well as fitting "
+            "this run's own network.", ""]
     return out
 
 

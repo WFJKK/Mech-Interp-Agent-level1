@@ -1,9 +1,15 @@
 """The baseline: what a run of the same shape achieves where there is nothing learned to find.
 
 A baseline model (withheld/<name>/task.yaml, `baseline_of`) has the design, sizes and data set of the models
-it is the baseline of, its twins, and networks with nothing in them for an agent to find. A baseline run is
-a usual run on it under the same conditions: the agent is given exactly what a run on a twin gives it, and is
-not told the difference. What it achieves there is generic, and a run on a twin is read against it.
+it is the baseline of, its twins, and networks with nothing in them for an agent to find. A baseline run is a
+usual run on it under the same conditions, with one difference: its prompt asks for an entry that is exact
+whatever the weights (prompt.EXACT_NOTE, run config `exact_on_any_weights`). Otherwise its agent is given
+exactly what a run on a twin gives it, and is not told what the networks are.
+
+Why that difference: asked only for the highest reward, a baseline run's agent fitted its entry to its own
+network, or to what the baseline model's networks have in common, and such an entry was wrong on most inputs
+of a trained network; read against it, a run's score said nothing. An entry exact for any weights is still
+exact on a run's network, so there the two differ only in cost: the baseline is what generic tricks are worth.
 
     python -m level1.loop baseline --config config/pilot/att-c.yaml    the baseline for that config's conditions
     python -m level1.loop baseline --run <run folder>                   the baseline for a run's own conditions
@@ -12,14 +18,14 @@ not told the difference. What it achieves there is generic, and a run on a twin 
 Three steps, each written once and read from the records afterwards:
 
 1. The baseline run. Its rounds use the baseline model's first network, its seed check the second.
-2. Freezing, in the baseline run's folder (baseline.json, baseline_entry.json). The scored submissions are
-   taken in the order of their reward on the second network (seed_scores.jsonl: every submission on one
-   fixed sample), one per different entry, and each is scored again on every one of the model's other
-   networks, all on one fresh sample. It passes when its rewards there agree within the tolerance (config:
-   baseline.tolerance), counting each reward's sampling interval; it fails when two of them are further
-   apart than that even with their intervals; otherwise it is inconclusive. That says what was established
-   and no more. The first that passes is frozen; when none of the first baseline.candidates does, the first
-   of them is frozen with its verdict, and the report says it is not established.
+2. Freezing, in the baseline run's folder (baseline.json, baseline_entry.json). The scored submissions that
+   gave the second network's output on every input of their region (seed_scores.jsonl: every submission on
+   one fixed sample) are taken in the order of their reward there, one per different entry, and each is
+   scored again on every one of the model's other networks, all on one fresh sample. It passes when it
+   gives each of them the network's output on every input of its region. The first that passes is frozen
+   and the baseline is established. When none of the first baseline.candidates passes, or no submission
+   was exact on the second network, what was tried is recorded, the baseline is not established, and no
+   run is read against it.
 3. Reading a run against it, in that run's folder (baseline_scores.jsonl, and the report). The frozen entry is
    scored on the run's network and on its seed check's network, on the inputs of the run's own measurements
    of its locked entry: the second scoring on a fresh sample, and the seed check. With R0 and R1 the locked
@@ -29,14 +35,16 @@ Three steps, each written once and read from the records afterwards:
        the excess kept on the held-out network            R1 - B1
        the gap between the run's network and the other    (R0 - B0) - (R1 - B1)
 
-   which add up to R0. Negative values are kept. This is accounting, not a causal split: the baseline is a
-   known achievable generic score, not the best possible one, so the excess can hold generic tricks the
-   baseline run did not find; and the gap can be sampling noise or a difference between the networks as
-   well as fitting the run's own network.
+   which add up to R0. Negative values are kept. Should the frozen entry not be exact on the run's networks
+   after all, the report says so and gives no split. This is accounting, not a causal split: the baseline is
+   a known achievable generic score, not the best possible one, so the excess can hold generic tricks the
+   baseline run did not find; and the gap can be sampling noise or a difference between the networks as well
+   as fitting the run's own network.
 
 A run and a baseline run match when the run's model is one of the baseline model's twins and the conditions
-that shape what the agent can achieve (CONDITIONS, and the price list) are the same. The report also says
-whether the two first prompts were the same, byte for byte.
+that shape what the agent can achieve (CONDITIONS, and the price list) are the same. Only baseline runs asked
+for exactness count; of those, an established one first. The report also says whether the two first prompts
+were the same, byte for byte, but for the paragraph that asks for exactness.
 
 A baseline run that goes alongside a run (--with-baseline) is a second process; a lock file in its folder
 keeps a second one from starting on the same baseline, and whoever needs it waits for it.
@@ -56,6 +64,7 @@ from .networks import load_model
 from .util import REPO_ROOT, append_jsonl, now, read_json, read_jsonl, read_yaml, write_json
 from .verifier import Verifier, describe
 
+EXACT = "exact_on_any_weights"    # the run-config key of a baseline run: its prompt asks for an entry exact for any weights
 FILE = "baseline.json"            # in a baseline run's folder: what was frozen, and how it fared on the other networks
 ENTRY = "baseline_entry.json"     # in a baseline run's folder: the frozen entry, byte for byte as submitted
 SCORES = "baseline_scores.jsonl"  # in a run's folder: the frozen entry on the run's own inputs, appended
@@ -66,7 +75,7 @@ REQUEST = "baseline_request.json"  # in a baseline run's folder: the config a ru
 # are the same, and the price list too. Who pays, the sandbox, the budget and the names are not among them.
 CONDITIONS = ("backend", "agent_model", "effort", "prompt_template", "rounds_max", "patience", "max_consecutive_refusals",
               "session", "python", "entry", "verifier", "reward")
-STATES = ("frozen", "finished", "unfinished")  # a baseline run's states, the most useful first
+STATES = ("frozen", "finished", "unfinished")  # a baseline run's states
 
 
 # which models -------------------------------------------------------------------------------------
@@ -110,7 +119,7 @@ def config_for(cfg: dict) -> dict:
         raise RuntimeError(f"the baseline model {name} needs at least four networks: the rounds', the seed check's and two to freeze on")
     key = hashlib.sha256(json.dumps(conditions(cfg, lang.PRICES), sort_keys=True).encode()).hexdigest()[:8]
     # Named like any pilot: nothing of the run's folder reaches the agent, and nothing in its name would say more.
-    return {**cfg, "run_id": f"pilot-{name}-{key}", "model": f"models/{name}", "network": nets[0],
+    return {**cfg, EXACT: True, "run_id": f"pilot-{name}-exact-{key}", "model": f"models/{name}", "network": nets[0],
             "seed_check": {"network": nets[1]}}
 
 
@@ -125,9 +134,15 @@ def state_of(path: Path) -> str:
     return "finished" if (path / "lock.json").is_file() else "unfinished"
 
 
+def established(path: Path) -> bool:
+    f = Path(path) / FILE
+    return f.is_file() and bool(read_json(f).get("established"))
+
+
 def find(cfg: dict, prices: str | None = None, where: Path | None = None) -> dict | None:
-    """The baseline run that matches a run's config, in its runs folder: frozen first, then finished, then the
-    earliest unfinished one. {"path", "state", "config"}, or None."""
+    """The baseline run that matches a run's config, in its runs folder: one frozen and established first, then
+    one finished, then one under way, and a frozen one that is not established last; the earliest of a kind.
+    Only baseline runs asked for exactness count. {"path", "state", "config"}, or None."""
     model = load_model(cfg["model"])
     names = set(baseline_models(model))
     want = conditions(cfg, prices or lang.PRICES)
@@ -139,10 +154,13 @@ def find(cfg: dict, prices: str | None = None, where: Path | None = None) -> dic
         except (OSError, ValueError):
             continue
         rc = run.get("config") or {}
-        if Path(str(rc.get("model", ""))).name not in names or differences(conditions(rc, run.get("prices")), want):
+        if rc.get(EXACT) is not True or Path(str(rc.get("model", ""))).name not in names:
+            continue
+        if differences(conditions(rc, run.get("prices")), want):
             continue
         state = state_of(run_json.parent)
-        found.append((STATES.index(state), run.get("created", ""), str(run_json.parent), state, rc))
+        rank = (0 if established(run_json.parent) else 3) if state == "frozen" else STATES.index(state)  # finished 1, under way 2
+        found.append((rank, run.get("created", ""), str(run_json.parent), state, rc))
     if not found:
         return None
     _, _, path, state, rc = min(found)
@@ -229,31 +247,29 @@ def reward_range(receipt: dict | None, reward_cfg: dict) -> tuple:
     return (low, max(low, high))
 
 
-def judge(scores: dict, tolerance: float) -> tuple:
-    """passes, fails or inconclusive, and why, for one entry's rewards on several networks: {network: (low, high)
-    or None when it was refused there}."""
-    refused = [n for n, r in scores.items() if r is None or r[0] is None]
+def exact(receipt: dict | None) -> bool:
+    """Scored, with a region that holds inputs, and the network's output on every one of them."""
+    if not receipt or receipt.get("status") != "scored":
+        return False
+    p = receipt.get("parts") or {}
+    return bool(p.get("n_in_region")) and p.get("n_agree") == p.get("n_in_region")
+
+
+def verdict(receipts: dict) -> tuple:
+    """passes or fails, and why, for one entry scored on several networks ({network: receipt}): it passes when it
+    gives each of them the network's output on every input of its region."""
+    if not receipts:
+        return "fails", "it was scored on no other network"
+    refused = [n for n, r in receipts.items() if not r or r.get("status") != "scored"]
     if refused:
         return "fails", f"it was refused on {', '.join(refused)}"
-    if len(scores) < 2:
-        return "inconclusive", "it was scored on fewer than two networks"
-    inside, apart = True, []
-    for (a, (alo, ahi)), (b, (blo, bhi)) in itertools.combinations(scores.items(), 2):
-        dlo, dhi = alo - bhi, ahi - blo  # the difference of the two rewards, with both intervals
-        if dlo > tolerance or dhi < -tolerance:
-            apart.append((a, b))
-        if dlo < -tolerance or dhi > tolerance:
-            inside = False
-    lows = [r[0] for r in scores.values()]
-    span = f"{min(lows):.4f} to {max(lows):.4f}"
-    if apart:
-        a, b = apart[0]
-        return "fails", (f"on {a} and {b} its rewards are more than {tolerance:g} apart even with their sampling intervals "
-                         f"({scores[a][0]:.4f} and {scores[b][0]:.4f}); on all {len(scores)}: {span}")
-    if inside:
-        return "passes", f"its rewards on all {len(scores)} networks agree within {tolerance:g}, with their sampling intervals: {span}"
-    return "inconclusive", (f"its rewards ({span}) neither agree within {tolerance:g} nor differ by more, once their sampling "
-                            "intervals are counted")
+    wrong = [n for n, r in receipts.items() if not exact(r)]
+    if wrong:
+        p = receipts[wrong[0]]["parts"]
+        more = f", and it was not exact on {len(wrong) - 1} more of the {len(receipts)} networks" if len(wrong) > 1 else ""
+        return "fails", (f"on {wrong[0]} it gave the network's output on {p.get('n_agree', 0):,} of the {p.get('n_in_region', 0):,} "
+                         f"inputs of its region{more}")
+    return "passes", f"it gave the network's output on every input of its region on all {len(receipts)} networks"
 
 
 def _check_prices(run: dict, path: Path) -> None:
@@ -286,19 +302,24 @@ def freeze(path: Path, log=print) -> dict:
     seed_scores(path, cfg, model, rounds, log)  # any submission not yet scored on the second network
     second = cfg["seed_check"]["network"]
     on_second = {(e.get("carried_as"), e.get("entry_sha256")): e for e in read_jsonl(path / "seed_scores.jsonl")}
-    candidates = []
+    candidates, inexact = [], 0
     for s in scored(rounds):
         e = on_second.get((s["carried_as"], s["entry_sha256"]))
         if e and e.get("status") == "scored":
-            candidates.append((-e["reward"], s["round"], s["submission"], s, e))
-    settings = cfg.get("baseline") or {}
-    tolerance, tries = float(settings.get("tolerance", 0.01)), int(settings.get("candidates", 3))
+            if exact(e):
+                candidates.append((-e["reward"], s["round"], s["submission"], s, e))
+            else:
+                inexact += 1
+    tries = int((cfg.get("baseline") or {}).get("candidates", 3))
     record = {"baseline_run": path.name, "model": model.name, "twins": twins(model), "conditions": conditions(cfg, run.get("prices")),
-              "tolerance": tolerance, "frozen_at": now()}
+              "asked_for_exactness": cfg.get(EXACT) is True, "rule": "the network's output on every input of its region, on every "
+              "one of the model's other networks", "frozen_at": now()}
     if not candidates:
-        record.update(entry_sha256=None, label="none", why="no submission was scored on the second network")
+        why = ("no submission gave the second network's output on every input of its region" + (f" ({inexact} were scored there)" if inexact else "")
+               if inexact else "no submission was scored on the second network")
+        record.update(entry_sha256=None, label="none", established=False, why=why)
         write_json(path / FILE, record)
-        log(f"the baseline: nothing to freeze ({record['why']})")
+        log(f"the baseline: nothing to freeze ({why}), so it is not established")
         return record
     others = [n["id"] for n in model.config["networks"] if n["id"] not in (cfg["network"], second)]
     seed = int.from_bytes(os.urandom(8), "big")  # one fresh sample for every candidate and every network
@@ -310,13 +331,12 @@ def freeze(path: Path, log=print) -> dict:
         entry = entry_of(path, sub)
         if lang.entry_hash(entry) != sub["entry_sha256"]:
             raise RuntimeError(f"{sub['carried_as']}'s entry on disk is not the one the verifier scored")
-        confirm, ranges = {}, {}
+        confirm = {}
         for nid in others:
             r = Verifier(model, nid, cfg).score(entry, seed=seed)
             confirm[nid] = {**_receipt(r), "reward_range": list(reward_range(r, cfg["reward"]))}
-            ranges[nid] = None if r["status"] != "scored" else reward_range(r, cfg["reward"])
             log(f"  the baseline candidate {sub['carried_as']} on {nid}: {describe(r)}")
-        label, why = judge(ranges, tolerance)
+        label, why = verdict(confirm)
         tried.append({"sub": sub, "on_second": e, "entry": entry, "confirmation": confirm, "label": label, "why": why})
         log(f"  {sub['carried_as']} ({sub['entry_sha256'][:12]}), {e['reward']:.4f} on the second network: {label} ({why})")
         if label == "passes" or len(tried) >= tries:
@@ -324,8 +344,8 @@ def freeze(path: Path, log=print) -> dict:
     pick = next((x for x in tried if x["label"] == "passes"), tried[0])
     sub, e = pick["sub"], pick["on_second"]
     record.update(entry_sha256=sub["entry_sha256"], chosen=sub["carried_as"], name=sub["name"],
-                  chosen_by=(f"the highest reward on the second network that passes the check, trying up to {tries} different "
-                             "entries in that order (every submission is scored on the second network on one fixed sample)"),
+                  chosen_by=(f"the highest reward on the second network, of the entries exact there, that passes the check, trying up to "
+                             f"{tries} different entries in that order (every submission is scored on the second network on one fixed sample)"),
                   on_first={k: sub.get(k) for k in ("reward", "parts", "inputs")},
                   on_second={k: e.get(k) for k in ("network", "reward", "parts", "inputs")},
                   confirmation={"inputs_seed": seed, "networks": pick["confirmation"]}, label=pick["label"], why=pick["why"],
@@ -381,6 +401,8 @@ def compare(path: Path, log=print) -> dict:
     frozen = freeze(hit["path"], log)
     if not frozen.get("entry_sha256"):
         return {"state": "empty", "baseline_run": hit["path"].name, "why": frozen.get("why")}
+    if not frozen.get("established"):
+        return {"state": "not established", "baseline_run": hit["path"].name, "why": frozen.get("why")}
     entry = read_json(hit["path"] / ENTRY)
     if lang.entry_hash(entry) != frozen["entry_sha256"]:
         raise RuntimeError(f"{hit['path'].name}'s frozen entry on disk is not the one it records")
@@ -400,10 +422,15 @@ def compare(path: Path, log=print) -> dict:
 
 
 def same_first_prompt(a: Path, b: Path) -> bool | None:
+    """Whether two runs' first prompts are the same, byte for byte, but for the paragraph that asks a baseline run's
+    agent for an entry exact for any weights."""
+    from .prompt import EXACT_NOTE
+
     pa, pb = Path(a) / "round_001" / "prompt.md", Path(b) / "round_001" / "prompt.md"
     if not (pa.is_file() and pb.is_file()):
         return None
-    return pa.read_bytes() == pb.read_bytes()
+    ta, tb = (p.read_bytes().replace(EXACT_NOTE.encode(), b"", 1) for p in (pa, pb))
+    return ta == tb
 
 
 def reading(path: Path) -> dict:
@@ -414,7 +441,7 @@ def reading(path: Path) -> dict:
     model = load_model(cfg["model"])
     if is_baseline(model):
         frozen = read_json(path / FILE) if (path / FILE).is_file() else None
-        return {"kind": "baseline run", "twins": twins(model), "frozen": frozen}
+        return {"kind": "baseline run", "twins": twins(model), "frozen": frozen, "asked_for_exactness": cfg.get(EXACT) is True}
     if not baseline_models(model):
         return {"kind": "run", "state": "no baseline model"}
     hit = find(cfg, run.get("prices"), path.parent)
@@ -426,9 +453,12 @@ def reading(path: Path) -> dict:
         return out
     frozen = read_json(hit["path"] / FILE)
     out.update(label=frozen.get("label"), why=frozen.get("why"), chosen=frozen.get("chosen"), entry_sha256=frozen.get("entry_sha256"),
-               tolerance=frozen.get("tolerance"))
+               tried=frozen.get("tried") or [])
     if not frozen.get("entry_sha256"):
         out["state"] = "empty"
+        return out
+    if not frozen.get("established"):
+        out["state"] = "not established"
         return out
     mine = {role: (nid, r) for role, nid, r in _measurements(path, cfg)}
     theirs = {}
@@ -437,6 +467,12 @@ def reading(path: Path) -> dict:
             theirs[e["role"]] = e
     if set(mine) != {"first", "held out"} or set(theirs) < {"first", "held out"}:
         out["state"] = "frozen, not yet read against this run"
+        return out
+    off = {role: {"network": e.get("network"), "n_agree": (e.get("parts") or {}).get("n_agree"),
+                  "n_in_region": (e.get("parts") or {}).get("n_in_region"), "status": e.get("status")}
+           for role, e in theirs.items() if role in ("first", "held out") and not exact(e)}
+    if off:
+        out.update(state="not exact here", not_exact=off)
         return out
     rc = cfg["reward"]
     R0, R1 = reward_range(mine["first"][1], rc), reward_range(mine["held out"][1], rc)
@@ -459,6 +495,8 @@ def runs_it_serves(bpath: Path) -> list:
     bpath = Path(bpath)
     brun = read_json(bpath / "run.json")
     bmodel = load_model(brun["config"]["model"])
+    if brun["config"].get(EXACT) is not True:
+        return []  # a baseline run not asked for exactness serves no run
     out = []
     for run_json in sorted(bpath.parent.glob("*/run.json")):
         if run_json.parent == bpath:

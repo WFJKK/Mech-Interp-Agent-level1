@@ -97,6 +97,18 @@ the same entry submitted twice gets two slightly different rewards.
 """
 
 
+# A baseline run (level1/baseline.py) asks for an entry that is exact whatever the weights; a usual run's prompt
+# has nothing in this place. It goes to the agent, so it says nothing of what the networks are.
+EXACT_NOTE = """
+
+This run asks one more thing of an entry: that it be exact whatever the weights. When the rounds are
+over, the entries are also run, unchanged, on several other networks of the same definition and sizes,
+with other weights, and an entry counts only if it gives each network's output on every input of its
+region that is checked there. So whatever depends on the weights has to be computed from the weights
+inside the entry, and every shortcut has to hold for any weights: a rule that holds only for this
+network makes the entry fail on the others."""
+
+
 def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumerated: bool) -> str:
     template = (TEMPLATES / f"{cfg['prompt_template']}.md").read_text()
     sizes = ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}"
@@ -110,7 +122,7 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
         "PYTHON_CALLS": cfg["session"]["python_calls"], "PYTHON_SECONDS": cfg["python"]["time_limit_s"],
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
         "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
-        "HISTORY": history(rounds),
+        "HISTORY": history(rounds), "EXACT_NOTE": EXACT_NOTE if cfg.get("exact_on_any_weights") else "",
     }
     text = template
     for k, v in fields.items():

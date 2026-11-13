@@ -1,13 +1,15 @@
-# The baseline pilot for the shape of rnn-a (models/rnn-d: one layer of 2 units, two real numbers), 19 operations
-# per forward pass. Everything the agent is given is what a pilot on rnn-a gives it: the same prompt, data set,
-# rounds, budgets and reward. Only the networks differ; what they are is in withheld/rnn-d/. What the agent
-# achieves here is the baseline that runs of this shape are read against.
+# The baseline pilot for the shape of rnn-a (models/rnn-d: one layer of 2 units, two real numbers), 19
+# operations per forward pass. Everything the agent is given is what a pilot on rnn-a gives it: the same prompt
+# but for one paragraph that asks for an entry exact for any weights, data set, rounds, budgets and reward. Only
+# the networks differ; what they are is in withheld/rnn-d/. What the agent achieves here is the baseline that
+# runs of this shape are read against.
 # Its inputs are real numbers, infinitely many, so the verifier scores a fresh sample for every submission.
 #   rounds on      rnn-d-s2   the first network of models/rnn-d/config.yaml
 #   seed check on  rnn-d-s1   the second (the other three are for freezing the baseline's entry)
 # Everything else is config/pilot/base.yaml and config/defaults.yaml.
 extends: base.yaml
-run_id: pilot-rnn-d
+run_id: pilot-rnn-d-exact
+exact_on_any_weights: true   # its prompt asks for an entry exact for any weights of the design
 model: models/rnn-d
 network: rnn-d-s2
 seed_check: {network: rnn-d-s1}

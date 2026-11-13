@@ -93,16 +93,20 @@ def test_a_baseline_model_is_its_twins_design_sizes_and_data_set(name):
 
 @pytest.mark.parametrize("name", list(BASELINES))
 def test_the_agent_is_given_what_a_run_on_the_twin_gives_it(name):
-    """The same prompt, the same tools, files and information: only the weights differ."""
+    """The same prompt but for the paragraph that asks for an entry exact for any weights, the same tools, files and
+    information: only the weights differ."""
     twin = BASELINES[name][0]
     cfg, cfg_twin = run_config.load(f"config/pilot/{name}.yaml"), run_config.load(f"config/pilot/{twin}.yaml")
-    assert {k for k in set(cfg) | set(cfg_twin) if cfg.get(k) != cfg_twin.get(k)} == {"run_id", "model", "network", "seed_check"}
+    assert {k for k in set(cfg) | set(cfg_twin) if cfg.get(k) != cfg_twin.get(k)} == {"run_id", "model", "network", "seed_check",
+                                                                                     "exact_on_any_weights"}
+    assert cfg["exact_on_any_weights"] is True and cfg_twin["exact_on_any_weights"] is False
     m, t = load_model(cfg["model"]), load_model(cfg_twin["model"])
     w, wt = m.load_weights(cfg["network"]), t.load_weights(cfg_twin["network"])
     x = lang.draw_inputs(m.data_set, m.input_space, 20, np.random.default_rng(0))
     ops, ops_twin = lang.run_reference(m.reference_entry(w), w, m.n_ctx, x)[1], lang.run_reference(t.reference_entry(wt), wt, t.n_ctx, x)[1]
     assert ops == ops_twin
-    assert prompt.build(cfg, m, 1, [], ops, False) == prompt.build(cfg_twin, t, 1, [], ops_twin, False)
+    mine, theirs = prompt.build(cfg, m, 1, [], ops, False), prompt.build(cfg_twin, t, 1, [], ops_twin, False)
+    assert prompt.EXACT_NOTE in mine and prompt.EXACT_NOTE not in theirs and mine.replace(prompt.EXACT_NOTE, "", 1) == theirs
     assert loop.agent_surface(cfg, m) == loop.agent_surface(cfg_twin, t)
 
 
@@ -179,7 +183,8 @@ def test_the_smoke_config_is_the_baseline_pilot_made_small(name):
     assert all(smoke[k] == pilot[k] for k in set(pilot) - {"run_id", "rounds_max", "session"}) and smoke["run_id"] != pilot["run_id"]
     assert (pilot["model"], pilot["network"], pilot["seed_check"]["network"]) == (f"models/{name}", f"{name}-s0", f"{name}-s1")
     twin_smoke = run_config.load(f"config/pilot/{BASELINES[name][0]}-smoke.yaml")
-    assert {k for k in set(smoke) | set(twin_smoke) if smoke.get(k) != twin_smoke.get(k)} == {"run_id", "model", "network", "seed_check"}
+    assert {k for k in set(smoke) | set(twin_smoke) if smoke.get(k) != twin_smoke.get(k)} == {"run_id", "model", "network", "seed_check",
+                                                                                           "exact_on_any_weights"}
 
 
 def test_a_scripted_run_on_a_baseline_model(tmp_path):

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from level1 import baseline, lang, loop, report, run_config
+from level1 import baseline, lang, loop, prompt, report, run_config
 from level1.networks import load_model
 from level1.util import read_json, read_jsonl, write_json
 
@@ -18,12 +18,13 @@ pytestmark = pytest.mark.filterwarnings("ignore:(divide by zero|overflow|invalid
 
 REPO = Path(__file__).resolve().parent.parent
 FAKE_1TO4 = REPO / "tests" / "fake_run_1to4"
-FAKE_ANY = REPO / "tests" / "fake_run_any"
+FAKE_ANY = REPO / "tests" / "fake_run_any"  # a rule of the inputs alone: exact on no network
+FAKE_BASELINE = REPO / "tests" / "fake_baseline"  # one round on a linear model: two entries exact for any weights, and a rule
 
 
 def config(runs, path="config/pilot/lin-a-1to4.yaml", **over):
     base = {"runs_dir": str(runs), "backend": "fake", "sandbox": "process", "rounds_max": 2,
-            "verifier": {"sample_size": 1500, "reference_samples": 2}, "session": {"python_calls": 3, "submissions": 2}}
+            "verifier": {"sample_size": 1500, "reference_samples": 2}, "session": {"python_calls": 3, "submissions": 3}}
     return run_config.load(path, run_config.merge(base, over))
 
 
@@ -37,7 +38,7 @@ def pair(tmp_path_factory):
     run = loop.start(cfg, fake_scripts=FAKE_1TO4, out=lines.append)
     before = {"lines": list(lines), "report": (run / "report.md").read_text(), "reading": baseline.reading(run)}
     blines = []
-    bpath = loop.run_baseline(cfg, fake_scripts=FAKE_ANY, out=blines.append)
+    bpath = loop.run_baseline(cfg, fake_scripts=FAKE_BASELINE, out=blines.append)
     return {"cfg": cfg, "run": run, "baseline": bpath, "before": before, "lines": blines}
 
 
@@ -48,10 +49,11 @@ def test_which_models_have_a_baseline_and_where_it_would_be(tmp_path):
     assert baseline.twins(load_model("models/att-e")) == ["att-c", "att-d"] and not baseline.is_baseline(load_model("models/att-c"))
     cfg = config(tmp_path)
     p = baseline.plan(cfg)
-    assert p["state"] == "new" and p["path"].parent == tmp_path and p["path"].name.startswith("pilot-lin-e-")
+    assert p["state"] == "new" and p["path"].parent == tmp_path and p["path"].name.startswith("pilot-lin-e-exact-")
     b = p["config"]
     assert (b["model"], b["network"], b["seed_check"]) == ("models/lin-e", "lin-e-s0", {"network": "lin-e-s1"})
-    assert {k for k in set(b) | set(cfg) if b.get(k) != cfg.get(k)} == {"run_id", "model", "network", "seed_check"}
+    assert {k for k in set(b) | set(cfg) if b.get(k) != cfg.get(k)} == {"run_id", "model", "network", "seed_check", baseline.EXACT}
+    assert b[baseline.EXACT] is True and cfg[baseline.EXACT] is False
     assert "baseline" not in p["path"].name  # a run's folder name says nothing of what it is for
     with pytest.raises(RuntimeError, match="no baseline model has the shape of lin-a"):
         baseline.config_for(config(tmp_path, path="config/pilot/lin-a.yaml"))
@@ -68,14 +70,19 @@ def test_the_baseline_run_is_a_usual_run_on_the_baseline_model(pair):
     run = read_json(pair["baseline"] / "run.json")
     assert (run["config"]["model"], run["config"]["network"], run["config"]["seed_check"]["network"]) == ("models/lin-e", "lin-e-s0", "lin-e-s1")
     assert not baseline.differences(baseline.conditions(run["config"], run["prices"]), baseline.conditions(pair["cfg"], lang.PRICES))
-    assert baseline.same_first_prompt(pair["run"], pair["baseline"]) is True  # the agent was given the very same prompt
+    # the agent was given the very same prompt, but for the paragraph that asks for an entry exact for any weights
+    assert baseline.same_first_prompt(pair["run"], pair["baseline"]) is True
+    mine, theirs = ((p / "round_001" / "prompt.md").read_text() for p in (pair["baseline"], pair["run"]))
+    assert prompt.EXACT_NOTE in mine and prompt.EXACT_NOTE not in theirs and mine.replace(prompt.EXACT_NOTE, "") == theirs
     assert not (pair["baseline"] / baseline.LOCK).exists()  # the lock is let go
 
 
-def test_freezing_picks_the_best_on_the_second_network_and_checks_it_on_the_others(pair):
+def test_freezing_picks_the_best_exact_entry_on_the_second_network_and_checks_it_on_the_others(pair):
     f = read_json(pair["baseline"] / baseline.FILE)
     on_second = [e for e in read_jsonl(pair["baseline"] / "seed_scores.jsonl") if e["status"] == "scored"]
-    best = max(on_second, key=lambda e: e["reward"])
+    assert sorted(e["name"] for e in on_second) == ["exact", "high", "itself"]
+    best = max((e for e in on_second if baseline.exact(e)), key=lambda e: e["reward"])
+    assert best["name"] == "exact" and not baseline.exact(next(e for e in on_second if e["name"] == "high"))
     assert (f["chosen"], f["entry_sha256"]) == (best["carried_as"], best["entry_sha256"])
     assert lang.entry_hash(read_json(pair["baseline"] / baseline.ENTRY)) == f["entry_sha256"]
     nets = f["confirmation"]["networks"]
@@ -84,10 +91,9 @@ def test_freezing_picks_the_best_on_the_second_network_and_checks_it_on_the_othe
     for r in nets.values():
         lo, hi = r["reward_range"]
         assert lo == r["reward"] and hi >= lo and set(r["parts"]) >= {"coverage", "fidelity", "b", "r", "build_ops", "predict_ops"}
-    # the verdict is the one the recorded rewards and their intervals give; the scripted entry is a rule of the inputs
-    # alone, nothing of these networks, so it cannot pass (on 1,500 inputs the intervals are wide: fails or inconclusive)
-    assert f["tolerance"] == 0.01 and f["label"] == baseline.judge({n: tuple(r["reward_range"]) for n, r in nets.items()}, 0.01)[0]
-    assert f["label"] in ("fails", "inconclusive")
+        assert baseline.exact(r)  # the network's output on every input of its region
+    assert f["label"] == "passes" and f["established"] is True and f["asked_for_exactness"] is True and len(f["tried"]) == 1
+    assert f["label"] == baseline.verdict(nets)[0]
     assert "## The baseline" in (pair["baseline"] / "report.md").read_text()
 
 
@@ -113,8 +119,10 @@ def test_the_run_is_read_against_it_on_its_own_inputs(pair):
     assert sum(v[0] for v in s.values()) == pytest.approx(lock["measured_again"]["reward"])  # the three parts add up to R0
     for value, (lo, hi) in s.values():
         assert lo <= value + 1e-12 and value <= hi + 1e-12
+    assert baseline.exact(lines[0]) and baseline.exact(lines[1])  # exact for any weights: exact on the run's networks too
     text = (run / "report.md").read_text()
-    assert "## Against the baseline" in text and "byte for byte: yes" in text and "accounting, not a causal split" in text
+    assert "## Against the baseline" in text and "accounting, not a causal split" in text
+    assert "byte for byte, but for the paragraph that asks for an entry exact for any weights: yes" in text
     assert any(f"{run.name} is read against this baseline" in line for line in pair["lines"])
 
 
@@ -165,15 +173,21 @@ def test_a_baseline_that_has_not_finished_is_pending(tmp_path, pair):
     assert "has not been frozen yet" in "\n".join(report.baseline_lines({"baseline": baseline.reading(target)}))
 
 
-@pytest.mark.parametrize("scores, label", [
-    ({"a": (0.95, 0.952), "b": (0.95, 0.952), "c": (0.951, 0.953)}, "passes"),
-    ({"a": (0.95, 0.952), "b": (0.80, 0.81)}, "fails"),
-    ({"a": (0.95, 0.952), "b": (0.94, 0.96)}, "inconclusive"),
-    ({"a": (0.95, 0.952), "b": None}, "fails"),
-    ({"a": (0.95, 0.952)}, "inconclusive"),
+def _scored(agree, region):
+    return {"status": "scored", "reward": 0.9, "parts": {"n_agree": agree, "n_in_region": region}}
+
+
+@pytest.mark.parametrize("receipts, label, why", [
+    ({"a": _scored(100, 100), "b": _scored(40, 40)}, "passes", "every input of its region on all 2 networks"),
+    ({"a": _scored(100, 100), "b": _scored(99, 100)}, "fails", "on b it gave the network's output on 99 of the 100 inputs"),
+    ({"a": _scored(98, 100), "b": _scored(99, 100)}, "fails", "and it was not exact on 1 more of the 2 networks"),
+    ({"a": _scored(100, 100), "b": {"status": "refused", "reason": "x"}}, "fails", "it was refused on b"),
+    ({"a": _scored(0, 0)}, "fails", "0 of the 0 inputs"),  # an empty region is exact about nothing
+    ({}, "fails", "on no other network"),
 ])
-def test_the_verdict(scores, label):
-    assert baseline.judge(scores, 0.01)[0] == label
+def test_the_verdict_is_exactness_on_every_other_network(receipts, label, why):
+    got = baseline.verdict(receipts)
+    assert got[0] == label and why in got[1]
 
 
 def test_the_reward_range_is_the_fidelity_interval_carried_through():
@@ -207,10 +221,10 @@ def test_a_run_with_its_baseline_alongside(tmp_path):
     baseline at the end. Both on scripted rounds."""
     cfg = config(tmp_path, path="config/pilot/lin-c.yaml", rounds_max=1)
     lines = []
-    assert loop.run_with_baseline(cfg, fake_scripts=FAKE_ANY, out=lines.append) == "finished"
+    assert loop.run_with_baseline(cfg, fake_scripts=FAKE_BASELINE, out=lines.append) == "finished"
     run = tmp_path / "pilot-lin-c"
     b = baseline.find(cfg, where=tmp_path)
-    assert b["state"] == "frozen" and b["path"].name.startswith("pilot-lin-e-")
+    assert b["state"] == "frozen" and b["path"].name.startswith("pilot-lin-e-exact-") and baseline.established(b["path"])
     assert (b["path"] / "console.txt").is_file() and (b["path"] / baseline.REQUEST).is_file()
     assert read_json(b["path"] / baseline.REQUEST)["config"]["model"] == "models/lin-c"
     assert any("its baseline goes alongside, in process" in line for line in lines)
@@ -219,21 +233,17 @@ def test_a_run_with_its_baseline_alongside(tmp_path):
     # a second run of the same shape and conditions finds it on record and starts nothing alongside
     lines2 = []
     cfg2 = {**cfg, "run_id": "pilot-lin-c-again"}
-    assert loop.run_with_baseline(cfg2, fake_scripts=FAKE_ANY, out=lines2.append) == "finished"
+    assert loop.run_with_baseline(cfg2, fake_scripts=FAKE_BASELINE, out=lines2.append) == "finished"
     assert any("its baseline is on record" in line for line in lines2)
     assert baseline.reading(tmp_path / "pilot-lin-c-again")["state"] == "read"
 
 
-FAKE_BASELINE = REPO / "tests" / "fake_baseline"  # one round on a linear model: an exact entry, and a rule of the inputs
-
-
 @pytest.fixture(scope="module")
 def two_entries(tmp_path_factory):
-    """A baseline run on lin-e whose round submits two different entries, on the pilots' 16,384 inputs per scoring:
-    on far fewer, an entry right on every input has sampling intervals wider than the tolerance, and its verdict
-    is inconclusive, as it should be."""
+    """A baseline run on lin-e whose round submits three different entries: two exact for any weights (the three
+    matrices multiplied once, and the network itself) and a rule of the inputs, which is exact on none."""
     runs = tmp_path_factory.mktemp("runs2")
-    cfg = baseline.config_for(config(runs, rounds_max=1, verifier={"sample_size": 16384}))
+    cfg = baseline.config_for(config(runs, rounds_max=1))
     path = loop.start(cfg, fake_scripts=FAKE_BASELINE, out=lambda *a: None)
     return path
 
@@ -256,20 +266,22 @@ def test_an_exact_entry_passes_and_is_frozen(two_entries):
 
 def test_when_the_best_on_the_second_network_does_not_pass_the_next_is_tried(two_entries, tmp_path, monkeypatch):
     verdicts = iter([("fails", "made up for the test"), ("passes", "made up for the test")])
-    monkeypatch.setattr(baseline, "judge", lambda scores, tol: next(verdicts))
+    monkeypatch.setattr(baseline, "verdict", lambda receipts: next(verdicts))
     f = baseline.freeze(_unfrozen_copy(two_entries, tmp_path), lambda *a: None)
-    assert [t["name"] for t in f["tried"]] == ["exact", "high"] and [t["label"] for t in f["tried"]] == ["fails", "passes"]
-    assert f["name"] == "high" and f["established"] is True
+    # the rule of the inputs was not exact on the second network, so it is never tried
+    assert [t["name"] for t in f["tried"]] == ["exact", "itself"] and [t["label"] for t in f["tried"]] == ["fails", "passes"]
+    assert f["name"] == "itself" and f["established"] is True
     assert f["tried"][0]["on_second_reward"] > f["tried"][1]["on_second_reward"]  # tried in that order
 
 
 def test_when_none_passes_the_first_is_frozen_and_not_established(two_entries, tmp_path, monkeypatch):
-    monkeypatch.setattr(baseline, "judge", lambda scores, tol: ("fails", "made up for the test"))
+    monkeypatch.setattr(baseline, "verdict", lambda receipts: ("fails", "made up for the test"))
     copy = _unfrozen_copy(two_entries, tmp_path)
     f = baseline.freeze(copy, lambda *a: None)
     assert f["name"] == "exact" and f["label"] == "fails" and f["established"] is False and len(f["tried"]) == 2
     text = "\n".join(report.baseline_lines({"baseline": baseline.reading(copy)}))
     assert "not established" in text and "Tried, in the order of their reward on the second network" in text
+    assert "no run is read against it" in text
 
 
 def test_a_report_written_again_scores_the_references_once(pair, monkeypatch):
@@ -284,3 +296,76 @@ def test_a_report_written_again_scores_the_references_once(pair, monkeypatch):
     write_json(pair["run"] / report.REFERENCES_CACHE, {**cached, "key": {**cached["key"], "prices": "prices-v0"}})
     report.build(pair["run"])  # anything it depends on changed: scored again
     assert len(calls) == 2
+
+
+def _copy_runs(pair, where, baseline_config=None):
+    """The pair's run and its baseline run, copied into another runs folder; the baseline's config changed if asked."""
+    import shutil
+    run, base = where / pair["run"].name, where / pair["baseline"].name
+    shutil.copytree(pair["run"], run)
+    shutil.copytree(pair["baseline"], base)
+    if baseline_config is not None:
+        r = read_json(base / "run.json")
+        write_json(base / "run.json", {**r, "config": baseline_config(r["config"])})
+    (run / baseline.SCORES).unlink(missing_ok=True)
+    return run, base
+
+
+def test_a_baseline_run_not_asked_for_exactness_serves_no_run(pair, tmp_path):
+    """One made before the prompt asked for exactness (pilot-att-e, pilot-lin-e): its agent fitted its own networks."""
+    run, base = _copy_runs(pair, tmp_path, lambda c: {k: v for k, v in c.items() if k != baseline.EXACT})
+    assert baseline.find(read_json(run / "run.json")["config"], where=tmp_path) is None
+    assert baseline.compare(run, lambda *a: None)["state"] == "none" and not (run / baseline.SCORES).exists()
+    assert baseline.runs_it_serves(base) == []
+    assert "Its agent was not asked for exactness" in "\n".join(report.baseline_lines({"baseline": baseline.reading(base)}))
+
+
+def test_a_baseline_that_is_not_established_reads_no_run(pair, tmp_path):
+    run, base = _copy_runs(pair, tmp_path)
+    write_json(base / baseline.FILE, {**read_json(base / baseline.FILE), "label": "fails", "established": False,
+                                      "why": "on lin-e-s3 it gave the network's output on 12 of the 16 inputs of its region"})
+    assert baseline.compare(run, lambda *a: None) == {"state": "not established", "baseline_run": base.name,
+                                                       "why": "on lin-e-s3 it gave the network's output on 12 of the 16 inputs of its region"}
+    assert not (run / baseline.SCORES).exists()  # nothing is scored against it
+    r = baseline.reading(run)
+    assert r["state"] == "not established"
+    text = "\n".join(report.baseline_lines({"baseline": r}))
+    assert "no usable baseline for this run" in text and "| The baseline on this run's network |" not in text
+
+
+def test_an_established_baseline_is_preferred_and_one_that_is_not_comes_last(pair, tmp_path):
+    import shutil
+    run, base = _copy_runs(pair, tmp_path)
+    cfg = read_json(run / "run.json")["config"]
+    failed = tmp_path / "pilot-lin-e-exact-older"
+    shutil.copytree(base, failed)
+    r = read_json(failed / "run.json")
+    write_json(failed / "run.json", {**r, "run_id": failed.name, "created": "2000-01-01T00:00:00+0000"})  # the earlier of the two
+    write_json(failed / baseline.FILE, {**read_json(failed / baseline.FILE), "label": "fails", "established": False})
+    assert baseline.find(cfg, where=tmp_path)["path"] == base
+    (base / baseline.FILE).unlink()  # the established one not frozen yet: it is finished, which comes before one not established
+    assert baseline.find(cfg, where=tmp_path) == {"path": base, "state": "finished", "config": read_json(base / "run.json")["config"]}
+    shutil.rmtree(base)
+    assert baseline.find(cfg, where=tmp_path)["path"] == failed  # the last resort
+
+
+def test_a_frozen_entry_that_is_not_exact_on_the_runs_networks_gives_no_split(pair, tmp_path):
+    run, base = _copy_runs(pair, tmp_path)
+    baseline.compare(run, lambda *a: None)
+    lines = read_jsonl(run / baseline.SCORES)
+    first = lines[0]
+    lines[0] = {**first, "parts": {**first["parts"], "n_agree": first["parts"]["n_in_region"] - 3}}
+    (run / baseline.SCORES).write_text("".join(__import__("json").dumps(x) + "\n" for x in lines))
+    r = baseline.reading(run)
+    assert r["state"] == "not exact here" and r["not_exact"]["first"]["n_in_region"] - r["not_exact"]["first"]["n_agree"] == 3
+    text = "\n".join(report.baseline_lines({"baseline": r}))
+    assert "the frozen entry is not exact" in text and "nothing is split" in text and "| The baseline on this run's network |" not in text
+
+
+def test_a_baseline_run_with_no_exact_submission_freezes_nothing(tmp_path):
+    cfg = baseline.config_for(config(tmp_path, rounds_max=1))
+    path = loop.start(cfg, fake_scripts=FAKE_ANY, out=lambda *a: None)
+    f = read_json(path / baseline.FILE)
+    assert f["entry_sha256"] is None and f["established"] is False and f["label"] == "none"
+    assert "no submission gave the second network's output on every input of its region" in f["why"]
+    assert "This baseline is not established, and no run is read against it" in (path / "report.md").read_text()

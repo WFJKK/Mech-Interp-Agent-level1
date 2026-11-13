@@ -113,9 +113,9 @@ scores 0.997). Each pilot has a small smoke config next to it (`<name>-smoke.yam
 models whose shape it shares (lin-e: lin-c and lin-a-1to4; lin-f: lin-d and lin-b; att-e: att-c
 and att-d), and six networks with nothing in them for an agent to find; what they are is in
 `withheld/<name>/`. A run on one gives the agent exactly what a run on its twin gives it, the same
-prompt, rounds, budgets and reward, so what it achieves there is generic: the baseline that runs of
-that shape are read against. The rounds use s0 and the seed check s1; s2 to s5 are for checking an
-entry again later. A hand-written reference, `tables` on att-e, scores 0.955 on every network of
+prompt, rounds, budgets and reward, except that its prompt also asks for an entry exact for any weights
+of the design; what it achieves there is generic: the baseline that runs of that shape are read
+against. The rounds use s0 and the seed check s1; s2 to s5 are for freezing its entry. A hand-written reference, `tables` on att-e, scores 0.955 on every network of
 att-c's shape, trained or not.
 
 `rnn-a`, `rnn-b` and `rnn-c` are recurrent networks: one layer of 2, 4 and 16 units with a ReLU and
@@ -173,6 +173,13 @@ same conditions on networks with nothing to find (`docs/DESIGN.md`, section 10).
 The baseline is made once for a shape and its conditions and serves every run that matches; a
 finished run gets one with `python -m level1.loop baseline --run <run folder>`. Each takes the same
 `--sandbox`, `--auth` and `--budget-usd` as `run`.
+
+A baseline run's prompt asks for an entry exact for any weights of the design, and only an entry that
+also gives the baseline model's other networks their outputs exactly is frozen. Without that, the first
+baseline runs fitted their entries to their own networks and said nothing about a trained one. When no
+entry passes, the baseline is not established and the reports say there is no usable baseline. Baseline
+runs made before the prompt asked for exactness (pilot-att-e, pilot-lin-e) serve no run; the pilot
+configs of the baseline models now make runs named `pilot-<name>-exact`.
 
 ### On an API key
 

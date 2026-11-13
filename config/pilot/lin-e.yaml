@@ -1,13 +1,15 @@
-# The baseline pilot for the shape of lin-c and lin-a-1to4 (models/lin-e: 4 slots, 64 tokens, width 8), 671 operations per
-# forward pass. Everything the agent is given is what a pilot on lin-c gives it: the same prompt, data set,
-# rounds, budgets and reward. Only the networks differ; what they are is in withheld/lin-e/. What the agent
-# achieves here is the baseline that runs of this shape are read against.
+# The baseline pilot for the shape of lin-c and lin-a-1to4 (models/lin-e: 4 slots, 64 tokens, width 8), 671
+# operations per forward pass. Everything the agent is given is what a pilot on lin-c gives it: the same prompt
+# but for one paragraph that asks for an entry exact for any weights, data set, rounds, budgets and reward. Only
+# the networks differ; what they are is in withheld/lin-e/. What the agent achieves here is the baseline that
+# runs of this shape are read against.
 # About 17 million inputs, so the verifier scores a fresh sample for every submission.
 #   rounds on      lin-e-s0
-#   seed check on  lin-e-s1   the same sizes, another seed (lin-e-s2 to s5 are for checking an entry again later)
+#   seed check on  lin-e-s1   the same sizes, another seed (lin-e-s2 to s5 are for freezing the entry)
 # Everything else is config/pilot/base.yaml and config/defaults.yaml.
 extends: base.yaml
-run_id: pilot-lin-e
+run_id: pilot-lin-e-exact
+exact_on_any_weights: true   # its prompt asks for an entry exact for any weights of the design
 model: models/lin-e
 network: lin-e-s0
 seed_check: {network: lin-e-s1}

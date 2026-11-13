@@ -61,7 +61,7 @@ second network: the same definition, sizes and training, with another random see
 that network. What an entry computes from the weights is computed afresh there; a number you read
 off this network and wrote into the entry as a constant stays what it was. With every submission you
 state the fidelity you claim on this network and the fidelity you expect on the second one; both are
-compared with what is measured.
+compared with what is measured.{{EXACT_NOTE}}
 
 ## Tools, budgets and limits
 

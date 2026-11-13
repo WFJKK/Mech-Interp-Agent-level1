@@ -421,6 +421,8 @@ def _baseline_step(path: Path, model, log) -> None:
             log(f"the baseline run {r['baseline_run']} has not finished; finish this run again once it has")
         elif r["state"] == "none":
             log(f"no baseline run for this shape and these conditions yet; to make one: {r['command']}")
+        elif r["state"] in ("not established", "empty"):
+            log(f"the baseline run {r['baseline_run']} is not established ({r.get('why')}), so this run is not read against it")
     except Exception as exc:
         log(f"the baseline could not be read ({type(exc).__name__}: {exc})")
 
