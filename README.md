@@ -41,7 +41,143 @@ Nothing is proved: a claim is checked by measuring it.
 
 ![The agentic flow of level 1](docs/figures/level1-flow.png)
 
+## Results
+
+The six pilots run so far (11 and 12 November 2026), all on trained networks, and the three
+baseline runs they are read against (13 November). Every run used `claude-fable-5-1` at effort
+high, at most 5 rounds of at most 4 submissions, 16,384 inputs per scoring, and the reward r_alpha
+with alpha = 10.
+
+**The reward scale.** 0 is the network itself, and 1 an entry that is always right and costs
+nothing; on a sample of 16,384 inputs the most an entry can score is about 0.998, because the reward
+uses the lower end of the fidelity's interval. Below 0, an entry's wrong answers cost more than it
+saves. With the network run wherever an entry does not apply, and each wrong answer counted as ten
+forward passes, an entry of reward R costs 1 - R of running the network on everything: 0.83 is about
+a sixfold saving, 0.99 about a hundredfold.
+
+### The runs
+
+| Run | Network | Inputs | F | Locked | Fresh sample | Second seed | Generic reference |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| lin-a-1to4 | linear, width 8 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 | 0.519 |
+| lin-c | linear, width 8 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 | 0.519 |
+| lin-b | linear, width 8 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 | 0.176 |
+| lin-d | linear, width 8 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 | 0.176 |
+| att-c | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 | 0.955 |
+| att-d | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 | 0.955 |
+
+- **F**: the operations of one forward pass, by the price list.
+- **Locked**: the reward of the run's best submission on its own network, as scored when it was
+  submitted. It is the best of several scorings, so it leans high.
+- **Fresh sample**: the locked entry scored again on the same network, on a fresh sample.
+- **Second seed**: the locked entry, unchanged, on a network of the same design and training with
+  another seed, which the agent never sees.
+- **Generic reference**: an entry written by hand from the algebra of the design alone, exact for any
+  weights (`contraction` in `withheld/lin-e/` and `withheld/lin-f/`, `tables` in `withheld/att-e/`),
+  scored on the run's networks on 4 fixed samples of 16,384 inputs and averaged. It scores the same
+  on both seeds. The baseline runs below found more than these on every design.
+
+### Against their baselines
+
+How a baseline is made, frozen and read is under "The baseline" in More implementation details.
+Each baseline run froze an entry that gave the network's output on every checked input of all four
+of its model's other networks, so all three baselines are established:
+
+| Baseline run | Serves | Frozen entry | On its second network | On its other four networks |
+| --- | --- | --- | ---: | --- |
+| pilot-lin-e-exact | lin-a-1to4, lin-c | r5s3 (ts4) | 0.8388 | 0.838 to 0.842, exact on each |
+| pilot-lin-f-exact | lin-b, lin-d | r3s1 (tri_v3) | 0.6888 | 0.687, exact on each |
+| pilot-att-e-exact | att-c, att-d | r3s2 (v3g) | 0.9735 | 0.977 to 0.990, exact on each |
+
+Each run read against its baseline, every number on the run's own inputs: R0 is the locked entry on
+its fresh sample, R1 in the seed check, and B0 and B1 the frozen entry on the same inputs. The three
+parts add up to R0. In brackets, the range when each fidelity moves across its 95% interval, as the
+report gives it.
+
+| Run | R0 | Baseline B0 | Kept on the held-out network, R1 - B1 | Gap, (R0 - B0) - (R1 - B1) |
+| --- | ---: | ---: | --- | --- |
+| lin-a-1to4 | 0.8310 | 0.8565 | -0.026 (-0.028 to -0.023) | +0.001 (-0.005 to +0.005) |
+| lin-c | 0.8900 | 0.8601 | +0.029 (+0.027 to +0.031) | +0.001 (-0.004 to +0.006) |
+| lin-b | 0.9129 | 0.6894 | +0.113 (+0.110 to +0.144) | +0.111 (+0.077 to +0.122) |
+| lin-d | 0.9128 | 0.6861 | +0.139 (+0.136 to +0.168) | +0.088 (+0.056 to +0.103) |
+| att-c | 0.9887 | 0.9573 | +0.033 (+0.031 to +0.036) | -0.002 (-0.006 to +0.003) |
+| att-d | 0.9884 | 0.9575 | +0.030 (+0.028 to +0.032) | +0.001 (-0.004 to +0.006) |
+
+The kept part is the run's lead over the baseline on a network its agent never saw. The gap is the
+part of the lead that holds on the run's own network and not on the held-out one: whatever was
+fitted to the first network, or sampling noise.
+
+### The Pareto frontier
+
+Every submission covered the whole data set, so its right share is one less its wrong share, and
+the frontier of three numbers is a frontier of two: cost against wrong answers. Each panel is one
+run on its own network: every scored submission, the ones on the frontier (joined), the locked
+entry, and the frozen baseline entry scored on the same network. The grey line is equal reward
+through the locked entry: with alpha = 10, one wrong answer in 10,000 inputs weighs as much as 0.001
+of cost, so the line stands nearly upright wherever wrong answers are rare. Every submission is
+scored on its own sample, so one entry submitted twice can show twice. Each run's report lists its
+frontier with the numbers, and `docs/figures/frontier.py` draws this from the run folders.
+
+![The Pareto frontier of each pilot: cost against wrong answers](docs/figures/frontier.png)
+
+- On att-c, att-d and lin-c one exact entry is the whole frontier: it is also the cheapest, so
+  alpha decides nothing there.
+- On lin-a-1to4 the baseline's entry lies left of the whole frontier: exact, and cheaper than
+  anything the run submitted.
+- On lin-b and lin-d the frontier trades cost for a few wrong answers, and alpha = 10 picks the
+  locked entry on it; the baseline's entry is exact but more than four times as costly. There, two
+  scorings of one entry differ about as much as different entries do.
+
+### What they show so far
+
+- Every locked entry beats the network by a wide margin, and the runs on 4 slots keep it on the
+  second seed: there they are within 0.002 of the fresh sample.
+- On the 4-slot linear design almost all of the score is generic. An agent that never saw a trained
+  network found an exact entry worth 0.857 on lin-a-1to4's own network, more than that run's 0.831:
+  a search that bounds blocks of outputs and computes exact logits only where one can still win,
+  where the run used tables of pair sums. lin-c's run keeps +0.03 over it.
+- On the transformers the generic part is 0.957, close to the hand-written tables (0.955), and the
+  runs keep +0.03 over it on networks their agents never saw, with no gap.
+- On the 8-slot linear design the runs keep +0.11 and +0.14 over a weaker baseline (0.69; its agent
+  found much less than the 4-slot one did), and lose 0.11 and 0.09 between their two networks.
+  Their entries compute exact logits only for the outputs that can still win on long
+  inputs, and which outputs those are was read off the first network.
+- A frozen entry can score more on a trained network than on its own model's (lin-e's: 0.857 on
+  lin-a-1to4, 0.839 on its second network): it is exact for any weights, but what it costs depends
+  on them.
+- The agents resubmit the same entry to draw a luckier sample, so the fresh sample is the number to
+  compare.
+
+Not run yet: the pilots on pairs (lin-a, att-a, att-b) and on the recurrent networks.
+
 ## More implementation details
+
+### The prompt
+
+Every round is a fresh Claude Code session with one prompt, filled in from the template
+`prompts/round_v1.md` by `level1/prompt.py`. The template names no model: everything about one comes
+from its folder and the run config. The session has two tools and no others: the CLI's own tools are
+turned off, and the two come from `level1/mcp_server.py`. In order, the prompt gives the agent:
+
+1. **The task.** It is given a network's definition and weights, and is not told what the network
+   was trained to do. An interpretation is a program that predicts the network's output from the
+   input without running the network, handed in as an entry with the region it applies to. The aim
+   is the highest reward.
+2. **The network**: the source of `models/<name>/model.py`, which writes the network in the entry
+   language, its sizes, and the operations of one forward pass.
+3. **The data set**, in the words of the model's `data_set.says`.
+4. **Entries**: the entry guide, `agent_docs/ENTRY.md`: the language, its prices and the builder.
+5. **How an entry is scored**: coverage, fidelity and cost in words, the reward and how to read it,
+   what the network itself scores, the sample and its lower bound, and the seed check. The locked
+   entry will be run unchanged on a second network the agent never sees, and with every submission
+   the agent states the fidelity it claims on this network and the one it expects on the second. A
+   baseline run's prompt has one more paragraph here, asking for an entry exact for any weights.
+6. **Tools, budgets and limits**: `run_python`, 40 calls a round of up to 300 seconds each;
+   `submit_entry`, 4 submissions a round; an entry's limits, 400 nodes and 256 numbers in constants.
+   (A round also stops after 90 minutes or 150 turns; the prompt does not say so.)
+7. **Earlier rounds**: every earlier submission's receipt, and the notes each round left.
+8. **What to send back**: the notes that end the round, under five headings: what the network does,
+   how you found it, the best entry, claims, and next.
 
 ### Coverage, fidelity and cost, as the verifier computes them
 
@@ -177,126 +313,6 @@ be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
   paragraph, fitted their entries to their own networks: pilot-lin-e's were right on 74% to 81% of
   the other networks' inputs, and pilot-att-e's on about a third of a trained network's. A run's
   score read against them said nothing, so they serve no run.
-
-## Results
-
-The six pilots run so far (11 and 12 November 2026), all on trained networks, and the three
-baseline runs they are read against (13 November). Every run used `claude-fable-5-1` at effort
-high, at most 5 rounds of at most 4 submissions, 16,384 inputs per scoring, and the reward r_alpha
-with alpha = 10.
-
-**The reward scale.** 0 is the network itself, and 1 an entry that is always right and costs
-nothing; on a sample of 16,384 inputs the most an entry can score is about 0.998, because the reward
-uses the lower end of the fidelity's interval. Below 0, an entry's wrong answers cost more than it
-saves. With the network run wherever an entry does not apply, and each wrong answer counted as ten
-forward passes, an entry of reward R costs 1 - R of running the network on everything: 0.83 is about
-a sixfold saving, 0.99 about a hundredfold.
-
-### The runs
-
-| Run | Network | Inputs | F | Locked | Fresh sample | Second seed | Generic reference |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| lin-a-1to4 | linear, width 8 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 | 0.519 |
-| lin-c | linear, width 8 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 | 0.519 |
-| lin-b | linear, width 8 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 | 0.176 |
-| lin-d | linear, width 8 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 | 0.176 |
-| att-c | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 | 0.955 |
-| att-d | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 | 0.955 |
-
-- **F**: the operations of one forward pass, by the price list.
-- **Locked**: the reward of the run's best submission on its own network, as scored when it was
-  submitted. It is the best of several scorings, so it leans high.
-- **Fresh sample**: the locked entry scored again on the same network, on a fresh sample.
-- **Second seed**: the locked entry, unchanged, on a network of the same design and training with
-  another seed, which the agent never sees.
-- **Generic reference**: an entry written by hand from the algebra of the design alone, exact for any
-  weights (`contraction` in `withheld/lin-e/` and `withheld/lin-f/`, `tables` in `withheld/att-e/`),
-  scored on the run's networks on 4 fixed samples of 16,384 inputs and averaged. It scores the same
-  on both seeds. The baseline runs below found more than these on every design.
-
-### Against their baselines
-
-Each baseline run froze an entry that gave the network's output on every checked input of all four
-of its model's other networks, so all three baselines are established:
-
-| Baseline run | Serves | Frozen entry | On its second network | On its other four networks |
-| --- | --- | --- | ---: | --- |
-| pilot-lin-e-exact | lin-a-1to4, lin-c | r5s3 (ts4) | 0.8388 | 0.838 to 0.842, exact on each |
-| pilot-lin-f-exact | lin-b, lin-d | r3s1 (tri_v3) | 0.6888 | 0.687, exact on each |
-| pilot-att-e-exact | att-c, att-d | r3s2 (v3g) | 0.9735 | 0.977 to 0.990, exact on each |
-
-Each run read against its baseline, every number on the run's own inputs: R0 is the locked entry on
-its fresh sample, R1 in the seed check, and B0 and B1 the frozen entry on the same inputs. The three
-parts add up to R0. In brackets, the range when each fidelity moves across its 95% interval, as the
-report gives it.
-
-| Run | R0 | Baseline B0 | Kept on the held-out network, R1 - B1 | Gap, (R0 - B0) - (R1 - B1) |
-| --- | ---: | ---: | --- | --- |
-| lin-a-1to4 | 0.8310 | 0.8565 | -0.026 (-0.028 to -0.023) | +0.001 (-0.005 to +0.005) |
-| lin-c | 0.8900 | 0.8601 | +0.029 (+0.027 to +0.031) | +0.001 (-0.004 to +0.006) |
-| lin-b | 0.9129 | 0.6894 | +0.113 (+0.110 to +0.144) | +0.111 (+0.077 to +0.122) |
-| lin-d | 0.9128 | 0.6861 | +0.139 (+0.136 to +0.168) | +0.088 (+0.056 to +0.103) |
-| att-c | 0.9887 | 0.9573 | +0.033 (+0.031 to +0.036) | -0.002 (-0.006 to +0.003) |
-| att-d | 0.9884 | 0.9575 | +0.030 (+0.028 to +0.032) | +0.001 (-0.004 to +0.006) |
-
-The kept part is the run's lead over the baseline on a network its agent never saw. The gap is the
-part of the lead that holds on the run's own network and not on the held-out one: whatever was
-fitted to the first network, or sampling noise.
-
-### The Pareto frontier
-
-The report also marks each run's Pareto frontier: the submissions that no other submission of the
-run dominates, that is, none is at least as good on all three of right share (up), wrong share
-(down) and cost (down) and better on one. It needs no alpha. Every submission is scored on its own
-sample, so an entry submitted twice can be on it twice. The last column is each submission on the
-second network, all of a run's on one fixed sample; the seed check above uses a sample of its own,
-so for the locked entry the two differ a little.
-
-| Run | Submission (entry) | Right share | Wrong share | Cost | Reward | On the second network |
-| --- | --- | ---: | ---: | ---: | ---: | ---: |
-| lin-a-1to4 | r4s2 (tri_v2) | 0.99994 | 0.00006 | 0.1660 | 0.8305 | 0.8310 |
-| lin-a-1to4 | r5s3 (tri_v3), locked | 1.00000 | 0.00000 | 0.1663 | 0.8314 | 0.8314 |
-| lin-c | r5s4 (r5_hedge60), locked | 1.00000 | 0.00000 | 0.1079 | 0.8898 | 0.8861 |
-| lin-b | r4s4 (r4d), locked | 0.99951 | 0.00049 | 0.0723 | 0.9180 | 0.8118 |
-| lin-b | r5s1 (r5b) | 0.99915 | 0.00085 | 0.0714 | 0.9143 | 0.8126 |
-| lin-b | r5s3 (r5b) | 0.99939 | 0.00061 | 0.0722 | 0.9166 | 0.8126 |
-| lin-b | r5s4 (r5c) | 0.99866 | 0.00134 | 0.0693 | 0.9103 | 0.8113 |
-| lin-d | r3s1 (v3b) | 0.99866 | 0.00134 | 0.0624 | 0.9173 | 0.8404 |
-| lin-d | r4s3 (v4a) | 0.99927 | 0.00073 | 0.0641 | 0.9231 | 0.8434 |
-| lin-d | r4s4 (v4a), locked | 0.99951 | 0.00049 | 0.0646 | 0.9257 | 0.8434 |
-| lin-d | r5s1 (best) | 0.99933 | 0.00067 | 0.0642 | 0.9238 | 0.8434 |
-| lin-d | r5s2 (best) | 0.99908 | 0.00092 | 0.0635 | 0.9214 | 0.8434 |
-| att-c | r5s1 (v14), locked | 1.00000 | 0.00000 | 0.0088 | 0.9889 | 0.9906 |
-| att-d | r3s3 (v4_perm), locked | 1.00000 | 0.00000 | 0.0092 | 0.9884 | 0.9870 |
-
-On att-c, att-d and lin-c one exact entry is also the cheapest of the run, so it alone is the
-frontier and alpha decides nothing; on lin-a-1to4 one more entry is a hair cheaper with one wrong
-answer in 16,384. On lin-b and lin-d the frontier is a trade between cost and wrong answers:
-cheaper entries make a few more mistakes, and alpha = 10 picks among them. There the spread between
-two scorings of one entry is as large as the differences between entries. Each baseline run's
-frontier is a single exact entry, its locked one.
-
-### What they show so far
-
-- Every locked entry beats the network by a wide margin, and the runs on 4 slots keep it on the
-  second seed: there they are within 0.002 of the fresh sample.
-- On the 4-slot linear design almost all of the score is generic. An agent that never saw a trained
-  network found an exact entry worth 0.857 on lin-a-1to4's own network, more than that run's 0.831:
-  a search that bounds blocks of outputs and computes exact logits only where one can still win,
-  where the run used tables of pair sums. lin-c's run keeps +0.03 over it.
-- On the transformers the generic part is 0.957, close to the hand-written tables (0.955), and the
-  runs keep +0.03 over it on networks their agents never saw, with no gap.
-- On the 8-slot linear design the runs keep +0.11 and +0.14 over a weaker baseline (0.69; its agent
-  found much less than the 4-slot one did), and lose 0.11 and 0.09 between their two networks.
-  Their entries compute exact logits only for the outputs that can still win on long
-  inputs, and which outputs those are was read off the first network.
-- A frozen entry can score more on a trained network than on its own model's (lin-e's: 0.857 on
-  lin-a-1to4, 0.839 on its second network): it is exact for any weights, but what it costs depends
-  on them.
-- The agents resubmit the same entry to draw a luckier sample, so the fresh sample is the number to
-  compare.
-
-Not run yet: the pilots on pairs (lin-a, att-a, att-b) and on the recurrent networks.
 
 ## Getting started
 
@@ -451,6 +467,6 @@ Everything is written as it happens, so a run can stop and resume, and can be re
     config/            defaults, the pilots' run configs and their small smoke runs
     sandbox/           the container image (Dockerfile)
     tests/             the tests, with each known way to game the score as a test
-    docs/              DESIGN.md, REWARD.md, SANDBOX.md; figures/: the flow diagram and its source
+    docs/              DESIGN.md, REWARD.md, SANDBOX.md; figures/: the flow diagram, the frontier figure and their sources
 
 `CLAUDE.md` has the working rules for changing this repository.
