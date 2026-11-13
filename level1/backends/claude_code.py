@@ -546,7 +546,9 @@ class ClaudeCodeBackend:
             st = budget.state(run_path, self.cfg["budget"])
             meta["budget"] = {"caps_usd": caps, "round_counted_usd": round(st["rounds"].get(k, 0.0), 6),
                               "run_counted_usd": round(st["spent"], 6), "round_usd": st["round_usd"], "run_usd": st["run_usd"],
-                              "unreported_tries": st["unreported"]}
+                              "unreported_tries": st["unreported"], "stopped_tries": st["stopped"]}
             self.log(f"  API: round {k} ${st['rounds'].get(k, 0.0):.2f}; the run ${st['spent']:.2f} of ${st['run_usd']:.2f}"
-                     + (f" ({st['unreported']} tries counted at their caps: the CLI reported no cost)" if st["unreported"] else ""))
+                     + (f" ({st['unreported']} tries counted at their caps: the CLI reported no cost"
+                        + (f"; {st['stopped']} of them stopped with the loop, counted in the run's total only" if st.get("stopped") else "")
+                        + ")" if st["unreported"] else ""))
         return Response(text=str(text or ""), meta=meta)

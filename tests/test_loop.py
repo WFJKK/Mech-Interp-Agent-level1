@@ -358,6 +358,54 @@ def test_an_api_budget_ends_the_rounds_and_a_resume_can_raise_it(tmp_path, monke
         loop.drive(path, out=lines.append, budget_usd=-1)
 
 
+def test_a_round_stopped_with_the_loop_goes_on_when_resumed(tmp_path, monkeypatch):
+    """The loop is stopped (Ctrl-C) while a session runs, with money left in the run: the try counts at its cap in
+    the run's total, but not in its round's own count, so the resumed round gets a whole round's budget and goes on
+    instead of ending at once (pilot-lin-e lost its round 3 that way)."""
+    import json
+    from types import SimpleNamespace
+
+    from level1 import budget
+    from level1.backends.claude_code import ClaudeCodeBackend
+    from level1.session import Session
+
+    cfg = config(tmp_path, run_id="stopped", backend="claude_code", auth="api_key", budget={"run_usd": 10, "round_usd": 2}, patience=5,
+                 rounds_max=2)
+    path = run_config.run_path(cfg)
+    seen = []
+
+    def runner(cmd, prompt_text, env, cwd, timeout_s):
+        k = max(int(p.name[-3:]) for p in path.glob("round_*"))
+        cap = float(cmd[cmd.index("--max-budget-usd") + 1])
+        seen.append((k, cap))
+        if k == 2 and len(seen) == 2:
+            raise KeyboardInterrupt  # Ctrl-C while the session runs: no cost reported
+        s = Session(path / f"round_{k:03d}" / "session")
+        s.run_python(f"g = graph()\nsave_entry('t{k}', g.entry(predict=g.token({k % 2})))")
+        s.submit_entry(f"t{k}", 0.5, 0.5)
+        lines = [{"type": "system", "subtype": "init", "apiKeySource": "apiKeyHelper"},
+                 {"type": "assistant", "message": {"content": [{"type": "text", "text": "## What the network does\nnotes"}], "stop_reason": "end_turn"}},
+                 {"type": "result", "subtype": "success", "is_error": False, "total_cost_usd": 1.5,
+                  "modelUsage": {cfg["agent_model"]: {"outputTokens": 10}}}]
+        return SimpleNamespace(stdout="\n".join(json.dumps(x) for x in lines), stderr="", returncode=0)
+
+    monkeypatch.setattr(loop, "make", lambda c, log=print, fake_scripts=None: ClaudeCodeBackend(
+        c, log=log, runner=runner, environ={"PATH": "/usr/bin", "CPL_ANTHROPIC_KEY": "sk-test"}))
+    lines = []
+    with pytest.raises(KeyboardInterrupt):
+        loop.start(cfg, out=lines.append)
+    st = budget.state(path, cfg["budget"])
+    assert seen == [(1, 2.0), (2, 2.0)] and st["spent"] == 3.5 and st["rounds"] == {1: 1.5} and st["stopped"] == 1
+
+    assert loop.drive(path, out=lines.append) == "finished"
+    assert seen[2:] == [(2, 2.0)]  # round 2 again, with its whole budget: not ended at once with nothing
+    rounds = loop.completed(path)
+    assert len(rounds) == 2 and len(rounds[1]["submissions"]) == 1 and rounds[1]["stop_reason"] != "budget"
+    st = budget.state(path, cfg["budget"])
+    assert st["spent"] == 5.0 and st["rounds"] == {1: 1.5, 2: 1.5} and st["unreported"] == 1
+    assert any("1 of them stopped with the loop, counted in the run's total only" in line for line in lines)
+
+
 def test_the_api_config_is_the_pilot_billed_to_a_key():
     pilot, api = run_config.load("config/pilot/lin-b.yaml"), run_config.load("config/pilot/lin-b-api.yaml")
     assert api["auth"] == "api_key" and pilot["auth"] == "login" and api["run_id"] != pilot["run_id"]

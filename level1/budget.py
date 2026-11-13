@@ -9,9 +9,15 @@ gives the cost the CLI reported:
     {"event": "budget", "run_usd": 80.0, "at": ...}        the run's budget changed (resume --budget-usd)
 
 A try counts at the cost the CLI reported. A try with no reported cost (the CLI was stopped at the session's
-time limit, or the loop itself was killed) counts at its cap: the CLI checks its spending after every answer
-and stops at the cap, so the cap is what it can have spent, give or take its last answer. The count therefore
-never falls short of the bill by more than that, and a resumed run goes on counting where it was.
+time limit, or the loop itself was stopped or killed) counts at its cap in the run's total: the CLI checks its
+spending after every answer and stops at the cap, so the cap is what it can have spent, give or take its last
+answer. The run's count therefore never falls short of the bill by more than that, and a resumed run goes on
+counting where it was.
+
+A round's own count holds the tries that ended while the loop ran: their reported costs, and the caps of those
+stopped at the time limit. A try the loop never saw end (it was stopped with Ctrl-C, or killed) stays out of
+it, so a round resumed after a stop starts with a whole round's budget instead of ending at once; what that try
+may have spent is still in the run's total, which bounds everything.
 """
 
 from __future__ import annotations
@@ -26,25 +32,36 @@ MIN_CAP_USD = 0.01  # the CLI takes the cap in cents; less than a cent left is n
 
 
 def state(run_path: Path, budget: dict) -> dict:
-    """The budgets and what the log counts as spent: the run's total and each round's."""
+    """The budgets and what the log counts as spent: the run's total, and each round's own count (which leaves
+    out the tries the loop never saw end; see above). "unreported" is the number of tries counted at their caps,
+    "stopped" those of them that the loop never saw end."""
     run_usd, round_usd = float(budget["run_usd"]), float(budget["round_usd"])
-    caps, costs = {}, {}
+    # In the order written. A try stopped with the loop left no stream file, so the try that resumes its round can
+    # carry the same number: each start is a try of its own, and an end closes the latest open start of its number.
+    tries, open_ = [], {}  # [round, cap, ended, cost]; (round, try) -> index of its start that has no end yet
     for e in read_jsonl(Path(run_path) / LOG):
         event = e.get("event")
         if event == "budget":
             run_usd = float(e["run_usd"])
         elif event == "start":
-            caps[(int(e["round"]), int(e["try"]))] = float(e["cap_usd"])
+            key = (int(e["round"]), int(e["try"]))
+            open_[key] = len(tries)
+            tries.append([key[0], float(e["cap_usd"]), False, None])
         elif event == "end":
-            costs[(int(e["round"]), int(e["try"]))] = e.get("cost_usd")
-    rounds, unreported = {}, 0
-    for key, cap in caps.items():
-        cost = costs.get(key)
+            i = open_.pop((int(e["round"]), int(e["try"])), None)
+            if i is not None:
+                tries[i][2], tries[i][3] = True, e.get("cost_usd")
+    rounds, spent, unreported, stopped = {}, 0.0, 0, 0
+    for k, cap, ended, cost in tries:
+        if not ended:  # stopped with the loop: in the run's total at its cap, not in its round's count
+            spent, unreported, stopped = spent + cap, unreported + 1, stopped + 1
+            continue
         if not isinstance(cost, (int, float)) or isinstance(cost, bool):
             cost, unreported = cap, unreported + 1
-        rounds[key[0]] = rounds.get(key[0], 0.0) + float(cost)
-    return {"run_usd": run_usd, "round_usd": round_usd, "spent": sum(rounds.values()), "rounds": rounds,
-            "unreported": unreported}
+        spent += float(cost)
+        rounds[k] = rounds.get(k, 0.0) + float(cost)
+    return {"run_usd": run_usd, "round_usd": round_usd, "spent": spent, "rounds": rounds, "unreported": unreported,
+            "stopped": stopped}
 
 
 def left(st: dict, k: int | None = None) -> float:
