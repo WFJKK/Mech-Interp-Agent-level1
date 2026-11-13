@@ -2,11 +2,44 @@
 
 ## Big picture
 
+In this repo we consider an automated, agentic hill-climbing approach to mechanistic understanding.
+This is a setup in which an agent proposes an interpretation $I$ of a network, a verifier scores
+it, and the agent climbs that score round after round. While this is formalised in the next
+section, we may think of an interpretation as a description of the network that predicts the
+network's outputs more cheaply than running it. This is in line with the bottom-up approach of ARC,
+where explaining a network means estimating its behaviour mechanistically, by reasoning from its
+weights rather than from samples of its outputs, and where such an estimate should compete with
+random sampling ([ARC progress update: Competing with sampling](https://www.lesswrong.com/posts/XdQd9gELHakd5pzJA/arc-progress-update-competing-with-sampling)).
+Hence the interpretation should be more accurate than any method of the same cost that only runs
+the network as a black box, such as running it on a random share of the inputs.
+
 ## More formally
+
+We have a model $M$ and a data set $D$, a distribution over the inputs of $M$. An interpretation
+$I$ is a program that maps an input $x$ to a predicted output $I(x)$ without running $M$. It is
+written in a small language of priced operations ([`agent_docs/ENTRY.md`](agent_docs/ENTRY.md)), in
+which $M$ itself is written too, so that both are priced by the same list. We may think of an
+interpretation claim as a triple $(I, S, p)$: the interpretation $I$; the region $S$, the inputs it
+is claimed for, given by a test on the input in the same language; and the claimed fidelity $p$.
+In the code the pair $(S, I)$ is called an entry, and $p$ is handed in with it. A claim is judged
+by three metrics:
+
+- **Coverage** $\mu = P(x \in S)$, for $x$ drawn from $D$: how much of the data set the claim
+  covers.
+- **Fidelity** $q = P(I(x) = M(x) \mid x \in S)$: how often, on the region, the interpretation
+  gives the network's output.
+- **Cost** $c$, the length of the computation: the operations the claim spends (the interpretation
+  on $S$, the region test on every input, and whatever it computes once from the weights), per
+  input of $S$, in forward passes of $M$. The network itself has $c = 1$.
+
+The verifier measures all three on inputs it draws from $D$, or on all of them when they are few.
+Nothing is proved: a claim is checked by measuring it.
 
 ## Reward function
 
 ## Agentic setup / Auto-research
+
+![The agentic flow of level 1](docs/figures/level1-flow.png)
 
 ## More implementation details
 
@@ -165,6 +198,6 @@ Everything is written as it happens, so a run can stop and resume, and can be re
     config/            defaults, the pilots' run configs and their small smoke runs
     sandbox/           the container image (Dockerfile)
     tests/             the tests, with each known way to game the score as a test
-    docs/              DESIGN.md, REWARD.md, SANDBOX.md
+    docs/              DESIGN.md, REWARD.md, SANDBOX.md; figures/: the flow diagram and its source
 
 `CLAUDE.md` has the working rules for changing this repository.
