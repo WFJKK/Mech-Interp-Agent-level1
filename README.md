@@ -98,6 +98,47 @@ at most 400 nodes and 256 numbers in constants, so a table of the network's outp
 written into it; a table computed from the weights in the build is allowed, and paid for there. The
 verifier gives an entry 120 seconds on its inputs.
 
+### Checking what the agent did
+
+Nothing the agent says is taken on trust: what it did is recorded, fenced in and checked.
+
+- **Before any model is asked**, the hygiene check (`level1/hygiene.py`) searches everything the
+  agent can reach (the prompt, the tools' descriptions, the files in its sandbox, names) for the
+  words in `withheld/<model>/task.yaml` that would say what the network does, and stops the run on a
+  hit.
+- **Everything is recorded as it happens**: each round's prompt and the agent's answer, every tool
+  call with its result, every program it ran with what it printed, the CLI's whole stream (the
+  agent's text between its tool calls included) and every receipt (see "What a run writes"). Each
+  round ends with notes under fixed headings: what the network does and on which inputs, how that
+  was found (the outputs, the weights, or both), the best entry and where its saving comes from,
+  the claims, and what to try next. The next round knows only these notes and the receipts.
+- **The agent's code runs in a sandbox.** A guard inside Python refuses files outside the
+  program's folder, sockets, other processes, signals and native code, and writes every refusal to
+  the program's audit record. The guard shares a process with the code it watches, so for a run that
+  counts the system's own sandbox is the wall: `seatbelt` on a Mac, a container or Landlock on
+  Linux. Every run starts with a probe that tries real escapes, with and without the guard (reading
+  the verifier, the second network's weights and the withheld task file in several ways, writing
+  outside the folder, opening connections), and judges them by evidence outside the sandbox
+  (`docs/SANDBOX.md`).
+- **The report audits every round**: how many programs ran and for how long, every attempt the
+  guard refused, every program whose text reaches for files or the system (`open(`, `os.`,
+  `subprocess`, sockets, `eval`, the word withheld and others, `report.REACHES`), and every program
+  whose audit record is incomplete.
+- **Entries are data, not code.** The verifier interprets them, so an entry can do no work that is
+  not counted and can read nothing but the input and the weights of the network it is scored on. The
+  locked entry is the submission byte for byte; its hash is checked.
+- **Claims are set against measurements.** With every entry the agent states the fidelity it
+  expects on this network and on a second network; both are kept next to what is measured. Every
+  submission is also scored on the second network after its round, on one fixed sample, and the
+  agent never sees those scores (`seed_scores.jsonl`): they show round by round whether its entries
+  drift towards the first network's quirks.
+
+In the nine runs so far the guard refused nothing, the probe got nothing out of the seatbelt
+sandbox, and no claimed fidelity was above the measured one by more than 0.0013. Two early pilots
+ran in process mode, lin-b with the guard and lin-a-1to4 before the guard existed; lin-a-1to4's 52
+programs were read by hand. The notes are the agent's own words: the measurements check the entries
+built on them, not the words.
+
 ### The baseline
 
 Much of what an entry saves can come from the algebra of the architecture alone: the forward pass
@@ -139,10 +180,19 @@ be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
 
 ## Results
 
-The six pilots run so far, on 11 and 12 November 2026, all on trained networks, without their
-baselines. Every run used `claude-fable-5-1` at effort high, at most 5 rounds of at most 4
-submissions, 16,384 inputs per scoring, and the reward r_alpha with alpha = 10, under which the
-network itself scores 0.
+The six pilots run so far (11 and 12 November 2026), all on trained networks, and the three
+baseline runs they are read against (13 November). Every run used `claude-fable-5-1` at effort
+high, at most 5 rounds of at most 4 submissions, 16,384 inputs per scoring, and the reward r_alpha
+with alpha = 10.
+
+**The reward scale.** 0 is the network itself, and 1 an entry that is always right and costs
+nothing; on a sample of 16,384 inputs the most an entry can score is about 0.998, because the reward
+uses the lower end of the fidelity's interval. Below 0, an entry's wrong answers cost more than it
+saves. With the network run wherever an entry does not apply, and each wrong answer counted as ten
+forward passes, an entry of reward R costs 1 - R of running the network on everything: 0.83 is about
+a sixfold saving, 0.99 about a hundredfold.
+
+### The runs
 
 | Run | Network | Inputs | F | Locked | Fresh sample | Second seed | Generic reference |
 | --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
@@ -162,20 +212,87 @@ network itself scores 0.
 - **Generic reference**: an entry written by hand from the algebra of the design alone, exact for any
   weights (`contraction` in `withheld/lin-e/` and `withheld/lin-f/`, `tables` in `withheld/att-e/`),
   scored on the run's networks on 4 fixed samples of 16,384 inputs and averaged. It scores the same
-  on both seeds.
+  on both seeds. The baseline runs below found more than these on every design.
 
-What they show so far:
+### Against their baselines
 
-- Every locked entry beats the network by a wide margin, and the runs with 4 slots keep it on the
+Each baseline run froze an entry that gave the network's output on every checked input of all four
+of its model's other networks, so all three baselines are established:
+
+| Baseline run | Serves | Frozen entry | On its second network | On its other four networks |
+| --- | --- | --- | ---: | --- |
+| pilot-lin-e-exact | lin-a-1to4, lin-c | r5s3 (ts4) | 0.8388 | 0.838 to 0.842, exact on each |
+| pilot-lin-f-exact | lin-b, lin-d | r3s1 (tri_v3) | 0.6888 | 0.687, exact on each |
+| pilot-att-e-exact | att-c, att-d | r3s2 (v3g) | 0.9735 | 0.977 to 0.990, exact on each |
+
+Each run read against its baseline, every number on the run's own inputs: R0 is the locked entry on
+its fresh sample, R1 in the seed check, and B0 and B1 the frozen entry on the same inputs. The three
+parts add up to R0. In brackets, the range when each fidelity moves across its 95% interval, as the
+report gives it.
+
+| Run | R0 | Baseline B0 | Kept on the held-out network, R1 - B1 | Gap, (R0 - B0) - (R1 - B1) |
+| --- | ---: | ---: | --- | --- |
+| lin-a-1to4 | 0.8310 | 0.8565 | -0.026 (-0.028 to -0.023) | +0.001 (-0.005 to +0.005) |
+| lin-c | 0.8900 | 0.8601 | +0.029 (+0.027 to +0.031) | +0.001 (-0.004 to +0.006) |
+| lin-b | 0.9129 | 0.6894 | +0.113 (+0.110 to +0.144) | +0.111 (+0.077 to +0.122) |
+| lin-d | 0.9128 | 0.6861 | +0.139 (+0.136 to +0.168) | +0.088 (+0.056 to +0.103) |
+| att-c | 0.9887 | 0.9573 | +0.033 (+0.031 to +0.036) | -0.002 (-0.006 to +0.003) |
+| att-d | 0.9884 | 0.9575 | +0.030 (+0.028 to +0.032) | +0.001 (-0.004 to +0.006) |
+
+The kept part is the run's lead over the baseline on a network its agent never saw. The gap is the
+part of the lead that holds on the run's own network and not on the held-out one: whatever was
+fitted to the first network, or sampling noise.
+
+### The Pareto frontier
+
+The report also marks each run's Pareto frontier: the submissions that no other submission of the
+run dominates, that is, none is at least as good on all three of right share (up), wrong share
+(down) and cost (down) and better on one. It needs no alpha. Every submission is scored on its own
+sample, so an entry submitted twice can be on it twice. The last column is each submission on the
+second network, all of a run's on one fixed sample; the seed check above uses a sample of its own,
+so for the locked entry the two differ a little.
+
+| Run | Submission (entry) | Right share | Wrong share | Cost | Reward | On the second network |
+| --- | --- | ---: | ---: | ---: | ---: | ---: |
+| lin-a-1to4 | r4s2 (tri_v2) | 0.99994 | 0.00006 | 0.1660 | 0.8305 | 0.8310 |
+| lin-a-1to4 | r5s3 (tri_v3), locked | 1.00000 | 0.00000 | 0.1663 | 0.8314 | 0.8314 |
+| lin-c | r5s4 (r5_hedge60), locked | 1.00000 | 0.00000 | 0.1079 | 0.8898 | 0.8861 |
+| lin-b | r4s4 (r4d), locked | 0.99951 | 0.00049 | 0.0723 | 0.9180 | 0.8118 |
+| lin-b | r5s1 (r5b) | 0.99915 | 0.00085 | 0.0714 | 0.9143 | 0.8126 |
+| lin-b | r5s3 (r5b) | 0.99939 | 0.00061 | 0.0722 | 0.9166 | 0.8126 |
+| lin-b | r5s4 (r5c) | 0.99866 | 0.00134 | 0.0693 | 0.9103 | 0.8113 |
+| lin-d | r3s1 (v3b) | 0.99866 | 0.00134 | 0.0624 | 0.9173 | 0.8404 |
+| lin-d | r4s3 (v4a) | 0.99927 | 0.00073 | 0.0641 | 0.9231 | 0.8434 |
+| lin-d | r4s4 (v4a), locked | 0.99951 | 0.00049 | 0.0646 | 0.9257 | 0.8434 |
+| lin-d | r5s1 (best) | 0.99933 | 0.00067 | 0.0642 | 0.9238 | 0.8434 |
+| lin-d | r5s2 (best) | 0.99908 | 0.00092 | 0.0635 | 0.9214 | 0.8434 |
+| att-c | r5s1 (v14), locked | 1.00000 | 0.00000 | 0.0088 | 0.9889 | 0.9906 |
+| att-d | r3s3 (v4_perm), locked | 1.00000 | 0.00000 | 0.0092 | 0.9884 | 0.9870 |
+
+On att-c, att-d and lin-c one exact entry is also the cheapest of the run, so it alone is the
+frontier and alpha decides nothing; on lin-a-1to4 one more entry is a hair cheaper with one wrong
+answer in 16,384. On lin-b and lin-d the frontier is a trade between cost and wrong answers:
+cheaper entries make a few more mistakes, and alpha = 10 picks among them. There the spread between
+two scorings of one entry is as large as the differences between entries. Each baseline run's
+frontier is a single exact entry, its locked one.
+
+### What they show so far
+
+- Every locked entry beats the network by a wide margin, and the runs on 4 slots keep it on the
   second seed: there they are within 0.002 of the fresh sample.
-- The 8-slot linear runs lose about 0.1 on the second seed. Their entries compute exact logits only
-  for the outputs that can still win on long inputs, and which outputs those are was read off the
-  first network; on the second network that set is not quite right, and each wrong answer costs ten
-  forward passes.
-- On the transformers most of the score is generic: the hand-written tables already give 0.955 of
-  the 0.989. The generic references are only lower bounds on what the algebra of a design gives (the
-  linear contraction, for one, also reads the empty slots); how much of each score is generic is what
-  the baseline runs measure.
+- On the 4-slot linear design almost all of the score is generic. An agent that never saw a trained
+  network found an exact entry worth 0.857 on lin-a-1to4's own network, more than that run's 0.831:
+  a search that bounds blocks of outputs and computes exact logits only where one can still win,
+  where the run used tables of pair sums. lin-c's run keeps +0.03 over it.
+- On the transformers the generic part is 0.957, close to the hand-written tables (0.955), and the
+  runs keep +0.03 over it on networks their agents never saw, with no gap.
+- On the 8-slot linear design the runs keep +0.11 and +0.14 over a weaker baseline (0.69; its agent
+  found much less than the 4-slot one did), and lose 0.11 and 0.09 between their two networks.
+  Their entries compute exact logits only for the outputs that can still win on long
+  inputs, and which outputs those are was read off the first network.
+- A frozen entry can score more on a trained network than on its own model's (lin-e's: 0.857 on
+  lin-a-1to4, 0.839 on its second network): it is exact for any weights, but what it costs depends
+  on them.
 - The agents resubmit the same entry to draw a luckier sample, so the fresh sample is the number to
   compare.
 
