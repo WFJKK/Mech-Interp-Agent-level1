@@ -43,7 +43,143 @@ Nothing is proved: a claim is checked by measuring it.
 
 ## More implementation details
 
+### Coverage, fidelity and cost, as the verifier computes them
+
+An entry is JSON data: a list of nodes, each one operation on earlier nodes, whose sources are the
+input's tokens, the network's weights by name, constants and ranges. Two nodes are its results:
+`rule`, the region test, one boolean per input (absent: every input is in the region), and
+`predict`, the interpretation, one whole number per input. The agent writes entries in Python with a
+builder (`lv1.Graph`), but nothing of an entry is ever run as code: the verifier interprets the JSON
+(`level1/lang.py`, `Evaluator`) and counts every operation by the price list `prices-v1`. An
+elementwise result costs 1, a matrix product 1 per multiply-add, a reduction over n entries n - 1,
+a sort n * ceil(log2 n), reading a number by index 1, and moving data (reshape, slice, concat) 0.
+`cond(c, x, y)` computes only the chosen side and costs 1 on top of it; `where(c, x, y)` computes
+both. The network itself is written in the same language (`models/<name>/model.py`), and one forward
+pass costs it F operations, the same on every input.
+
+The verifier (`level1/verifier.py`) picks n inputs: every input of the data set when it can be
+listed (lin-a's 4,096 pairs), otherwise a sample drawn from D (16,384 inputs in the pilots), afresh
+for each of the agent's submissions, from a seed nobody chose. It runs the network on them for its
+outputs M(x), then the entry, with `lang.measure`:
+
+```python
+# level1/lang.py, measure(): one pass over the n inputs
+for x, truth in zip(inputs, model_answers):     # model_answers: the network's outputs M(x)
+    inside, answer, c_rule, c_pred = ev.run(x)  # the region test, then the interpretation if inside
+    rule_ops += c_rule                          # the region test is paid for on every input
+    if inside:
+        inside_n += 1
+        predict_ops += c_pred                   # the interpretation only on the region
+        agree += int(answer == int(truth))
+coverage = inside_n / n
+fidelity = agree / inside_n
+cost = (predict_ops + rule_ops + ev.build_cost) / (inside_n * model_ops)
+```
+
+- **Coverage** is `n_in_region / n_inputs`, the share of the inputs scored on which the region test
+  is true.
+- **Fidelity** is `n_agree / n_in_region`, the share of the region on which the interpretation's
+  output equals the network's output exactly: agreement of outputs, not of distributions. On a
+  sample the verifier also records `fidelity_low`, the lower end of the 95% Wilson interval for
+  `n_agree` successes in `n_in_region` draws (`lang.wilson_lower`, z = 1.96), and the reward uses it,
+  so that a lucky sample does not pay. When every input is checked, `fidelity_low` is the fidelity.
+- **Cost** is everything the entry computed, per input of its region, in forward passes. A node that
+  does not depend on the input is computed once, the first time it is needed, and counted once, in
+  `build_ops`. The rest is counted per input: the region test on every input, the interpretation on
+  the inputs of the region, and a value the region test already computed for an input is not counted
+  again. The receipt keeps three parts, `r = predict_ops / (n_in_region * F)`,
+  `r_rule = rule_ops / (n_inputs * F)` and `b = build_ops / (n_inputs * F)`, so that
+  `cost = r + (r_rule + b) / coverage`. The build is spread over the inputs scored.
+
+Every receipt keeps these counts and parts, so a run can be scored again under another reward
+without running anything. With the entry the agent also states a claimed fidelity; the receipt
+records it and the overclaim, the claim minus the measured fidelity when positive. An entry may have
+at most 400 nodes and 256 numbers in constants, so a table of the network's outputs cannot be
+written into it; a table computed from the weights in the build is allowed, and paid for there. The
+verifier gives an entry 120 seconds on its inputs.
+
+### The baseline
+
+Much of what an entry saves can come from the algebra of the architecture alone: the forward pass
+repeats the same products for the same token in the same slot, and tables computed once from the
+weights remove that on any network of the design. The baseline measures that part, so that a run can
+be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
+
+- **Baseline models.** `lin-e`, `lin-f` and `att-e` have the design, sizes and data set of lin-c,
+  lin-d and att-c (and so also serve lin-a-1to4, lin-b and att-d), and `rnn-d`, `rnn-e` and `rnn-f`
+  those of rnn-a, rnn-b and rnn-c. Their networks have nothing in them for an agent to find; what
+  they are is in `withheld/<name>/`. The first network is for the rounds, the second for the seed
+  check, the others for freezing.
+- **A baseline run** is a usual run on a baseline model, under the same conditions as the runs it
+  serves (prompt, rounds, budgets, entry limits, verifier, reward and prices: `baseline.CONDITIONS`),
+  with one more paragraph in its prompt (`prompt.EXACT_NOTE`, run config `exact_on_any_weights`):
+  its entries will also be run on other networks of the design, and count only if they are exact on
+  all of them. A test checks that its first prompt and a twin run's are the same, byte for byte, but
+  for that paragraph.
+- **Freezing.** When the baseline run ends, its submissions that gave the second network's output on
+  every input of their region are taken in the order of their reward there, one per different entry,
+  and each is scored on every other network of the baseline model, on one fresh sample. The first
+  that gives each of them the network's output on every input of its region is frozen
+  (`baseline.json`, `baseline_entry.json`), and the baseline is established. If none of the first
+  three does, it is not established, and no run is read against it.
+- **Reading a run against it.** The frozen entry is scored on the run's network and on its second
+  network, on the very inputs of the run's own scorings of its locked entry (the fresh sample and
+  the seed check). With R0 and R1 the locked entry's rewards there and B0 and B1 the frozen
+  entry's, the report splits R0 into three parts:
+
+      R0 = B0 + (R1 - B1) + [(R0 - B0) - (R1 - B1)]
+
+  the baseline on the run's network, the excess kept on the held-out network, and the gap between
+  the two networks. Negative values are kept. It is accounting, not a causal split: the excess can
+  hold generic tricks the baseline run did not find, and the gap can be sampling noise.
+- **Why exactness.** The first baseline runs (pilot-att-e and pilot-lin-e), made without that
+  paragraph, fitted their entries to their own networks: pilot-lin-e's were right on 74% to 81% of
+  the other networks' inputs, and pilot-att-e's on about a third of a trained network's. A run's
+  score read against them said nothing, so they serve no run.
+
 ## Results
+
+The six pilots run so far, on 11 and 12 November 2026, all on trained networks, without their
+baselines. Every run used `claude-fable-5-1` at effort high, at most 5 rounds of at most 4
+submissions, 16,384 inputs per scoring, and the reward r_alpha with alpha = 10, under which the
+network itself scores 0.
+
+| Run | Network | Inputs | F | Locked | Fresh sample | Second seed | Generic reference |
+| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
+| lin-a-1to4 | linear, width 8 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 | 0.519 |
+| lin-c | linear, width 8 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 | 0.519 |
+| lin-b | linear, width 8 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 | 0.176 |
+| lin-d | linear, width 8 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 | 0.176 |
+| att-c | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 | 0.955 |
+| att-d | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 | 0.955 |
+
+- **F**: the operations of one forward pass, by the price list.
+- **Locked**: the reward of the run's best submission on its own network, as scored when it was
+  submitted. It is the best of several scorings, so it leans high.
+- **Fresh sample**: the locked entry scored again on the same network, on a fresh sample.
+- **Second seed**: the locked entry, unchanged, on a network of the same design and training with
+  another seed, which the agent never sees.
+- **Generic reference**: an entry written by hand from the algebra of the design alone, exact for any
+  weights (`contraction` in `withheld/lin-e/` and `withheld/lin-f/`, `tables` in `withheld/att-e/`),
+  scored on the run's networks on 4 fixed samples of 16,384 inputs and averaged. It scores the same
+  on both seeds.
+
+What they show so far:
+
+- Every locked entry beats the network by a wide margin, and the runs with 4 slots keep it on the
+  second seed: there they are within 0.002 of the fresh sample.
+- The 8-slot linear runs lose about 0.1 on the second seed. Their entries compute exact logits only
+  for the outputs that can still win on long inputs, and which outputs those are was read off the
+  first network; on the second network that set is not quite right, and each wrong answer costs ten
+  forward passes.
+- On the transformers most of the score is generic: the hand-written tables already give 0.955 of
+  the 0.989. The generic references are only lower bounds on what the algebra of a design gives (the
+  linear contraction, for one, also reads the empty slots); how much of each score is generic is what
+  the baseline runs measure.
+- The agents resubmit the same entry to draw a luckier sample, so the fresh sample is the number to
+  compare.
+
+Not run yet: the pilots on pairs (lin-a, att-a, att-b) and on the recurrent networks.
 
 ## Getting started
 
