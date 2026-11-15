@@ -99,19 +99,21 @@ def test_nothing_names_the_networks_or_the_pipeline_to_the_agent(model, cfg):
 
 
 def test_the_task_is_said_in_one_place(model, cfg):
-    """Outside the withheld folder and the tests, no file of the repository says what the pilot's network was
-    trained to do: not the docs, not a comment, not a config."""
+    """Outside the withheld folder, the tests and the README, no file of the repository says what the pilot's
+    network was trained to do: not the docs, not a comment, not a config. The README's table of the pilots'
+    models says it for people (CLAUDE.md); the README is never on the agent's side, which the hygiene check
+    of the agent's surface covers."""
     general = {s.lower() for s in cfg["hygiene"]}
     task_words = [s for s in model.hygiene() if s.lower() not in general]
     assert len(task_words) >= 5
     texts = {}
     for rel in _repository_files():
-        if rel.parts[0] not in ("withheld", "tests") and rel.suffix != ".npz":
+        if rel.parts[0] not in ("withheld", "tests") and rel.as_posix() != "README.md" and rel.suffix != ".npz":
             try:
                 texts[rel.as_posix()] = (REPO / rel).read_text()
             except UnicodeDecodeError:
                 pass
-    assert len(texts) > 30 and "README.md" in texts and "docs/REWARD.md" in texts
+    assert len(texts) > 30 and "docs/DESIGN.md" in texts and "docs/REWARD.md" in texts
     assert hygiene.hits(texts, task_words) == []
 
 

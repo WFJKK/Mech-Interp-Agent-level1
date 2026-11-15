@@ -94,25 +94,43 @@ measured parts, so a finished run can be scored again under another reward
 
 ### The models and what we did
 
-Each of the six pilots so far (11 and 12 November 2026) has a model of its own: two small networks,
-trained by one recipe from two seeds on one task, over 64 tokens, on inputs of a fixed number of
-tokens. lin-a-1to4, lin-c, lin-b and lin-d are linear: the embedding columns of an input's tokens are
-added up, passed through a hidden layer of width 8 and an unembedding, and the output is the argmax.
-att-c and att-d are one-layer, one-head, attention-only transformers of width 32.
+Every pilot network reads a row of slots (4, or 8 for lin-b and lin-d), each holding one of 64
+tokens or nothing, and outputs one of the 64 tokens. Each model has two networks, trained by the same
+recipe from two seeds.
 
-Each pilot asks its network about more inputs than it was trained on: every number of tokens from 1
-up to its slots (4, or 8 for lin-b and lin-d), each number equally likely; about 17 million inputs
-with 4 slots and 2.8 x 10^14 with 8. The agent is told this data set in full, but neither the task
-nor which inputs the network was trained on, so finding where its behaviour can be described cheaply
-is part of the work. It works on the first network for at most 5 rounds of at most 4 submissions
-(`claude-fable-5-1` at effort high, 16,384 inputs per scoring, the reward r_alpha with alpha = 10),
-and its best entry is then locked and run unchanged on the second network. For each design an agent
-also made one run on networks of the same shape with nothing learned in them, the baseline
-(13 November).
+| Model | Architecture | Trained to output | Trained on | Asked about |
+| --- | --- | --- | --- | --- |
+| lin-a-1to4 | linear | the largest token | exactly 2 tokens | 1 to 4 tokens |
+| lin-c | linear | the smallest token | exactly 2 tokens | 1 to 4 tokens |
+| lin-b | linear | the largest token | exactly 4 tokens | 1 to 8 tokens |
+| lin-d | linear | the smallest token | exactly 4 tokens | 1 to 8 tokens |
+| att-c | transformer | the largest token | exactly 4 tokens | 1 to 4 tokens |
+| att-d | transformer | the smallest token | exactly 4 tokens | 1 to 4 tokens |
 
-What each network was trained to do, and on which inputs, is in
-[`withheld/README.md`](withheld/README.md). Only that folder and the tests may say it, so that
-nothing the agent can reach does.
+- **Linear**: each token has an embedding column of 8 numbers (an empty slot's is zero). The columns
+  of an input's tokens are added up and multiplied by a hidden 8 x 8 matrix and an unembedding to 64
+  logits, and the output is the argmax. There is no nonlinearity and no position, so the output
+  depends only on which tokens occur. The four differ only in their task (largest or smallest) and
+  in how many tokens they were trained on (2 or 4).
+- **Transformer**: one layer with one attention head and nothing else (no MLP, no layer norm, no
+  biases), width 32, with learned position embeddings; it is read at the last token given, attending
+  over the tokens given. att-c and att-d differ only in their task.
+- **Where they come from**: lin-a-1to4's networks and att-c are the proof pipeline's (the setting of
+  Gross et al.); lin-c and att-d were trained here by the same recipes, and lin-b and lin-d by the same
+  recipe for longer, until their accuracy stopped rising. Every one follows its task on 99.7% to
+  99.99% of its training inputs.
+
+**What we did.** Each network is asked about more inputs than it was trained on: every number of
+tokens from 1 up to its slots, each number equally likely (about 17 million inputs with 4 slots,
+2.8 x 10^14 with 8). Off its training inputs a network does something other than its task, and
+differently for each seed: att-c's first network gives the largest token on 17% of 3-token inputs,
+its second on 98%. The agent is told the data set in full, but never the task or the training
+inputs, so finding where a network's behaviour can be described cheaply is the work. It works on the
+first network for at most 5 rounds of at most 4 submissions (`claude-fable-5-1` at effort high,
+16,384 inputs per scoring, r_alpha with alpha = 10), and its best entry is then locked and run
+unchanged on the second network. For each design an agent also made one run on networks of the same
+shape with nothing learned in them, the baseline (13 November). The recurrent models, not run yet,
+and the baseline models are described in [`withheld/README.md`](withheld/README.md).
 
 **The reward scale.** 0 is the network itself, and 1 an entry that is always right and costs
 nothing; on a sample of 16,384 inputs the most an entry can score is about 0.998, because the reward
