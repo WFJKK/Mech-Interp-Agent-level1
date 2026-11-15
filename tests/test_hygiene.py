@@ -100,8 +100,8 @@ def test_nothing_names_the_networks_or_the_pipeline_to_the_agent(model, cfg):
 
 def test_the_task_is_said_in_one_place(model, cfg):
     """Outside the withheld folder, the tests and the README, no file of the repository says what the pilot's
-    network was trained to do: not the docs, not a comment, not a config. The README's table of the pilots'
-    models says it for people (CLAUDE.md); the README is never on the agent's side, which the hygiene check
+    network was trained to do: not the docs, not a comment, not a config. The README names and describes the
+    pilots' models for people (CLAUDE.md); the README is never on the agent's side, which the hygiene check
     of the agent's surface covers."""
     general = {s.lower() for s in cfg["hygiene"]}
     task_words = [s for s in model.hygiene() if s.lower() not in general]

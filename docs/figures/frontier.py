@@ -34,6 +34,19 @@ SURFACE, GRID, AXIS, INK, INK2 = "#fcfcfb", "#e1e0d9", "#c3c2b7", "#0b0b0b", "#5
 OUT = Path(__file__).resolve().parent / "frontier.png"
 
 
+def names_from_readme() -> dict:
+    """{model folder: the name the README gives it}, read from the README's table of the pilots' models (the
+    README is the one place outside withheld/ that may say what a network was trained to do). A model the
+    table does not name keeps its folder's name."""
+    readme = Path(__file__).resolve().parents[2] / "README.md"
+    out = {}
+    for line in readme.read_text().splitlines() if readme.exists() else []:
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        if len(cells) > 2 and cells[1] in {name for _, name, _ in RUNS}:
+            out[cells[1]] = cells[0]
+    return out
+
+
 def load(folder: Path, run: str) -> tuple:
     """(the run's scored submissions, the locked one's name, the frozen baseline entry's receipt on the run's
     own network or None)."""
@@ -100,9 +113,10 @@ def main(argv=None) -> int:
     args = sys.argv[1:] if argv is None else argv
     folder = Path(args[0]).expanduser() if args else Path("~/mech-interp-level1-runs").expanduser()
     fig, axes = plt.subplots(3, 2, figsize=(8.2, 9.4), dpi=200, facecolor=SURFACE)
+    names = names_from_readme()
     for ax, (run, name, design) in zip(axes.flat, RUNS):
         subs, locked, base = load(folder, run)
-        panel(ax, subs, locked, base, f"{name}   {design}")
+        panel(ax, subs, locked, base, f"{names[name]}   ({name}, {design})" if name in names else f"{name}   {design}")
     handles = [Line2D([], [], marker="o", ls="", color=GREY, markeredgecolor=SURFACE, markersize=7, label="a submission"),
                Line2D([], [], marker="o", color=BLUE, markeredgecolor=SURFACE, markersize=7, lw=2, label="on the Pareto frontier"),
                Line2D([], [], marker="D", ls="", color=ORANGE, markeredgecolor=SURFACE, markersize=7,

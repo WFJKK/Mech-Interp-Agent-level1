@@ -94,18 +94,19 @@ measured parts, so a finished run can be scored again under another reward
 
 ### The models and what we did
 
-Every pilot network reads a row of slots (4, or 8 for lin-b and lin-d), each holding one of 64
+Every pilot network reads a row of slots (4, or 8 for linear max4 and min4), each holding one of 64
 tokens or nothing, and outputs one of the 64 tokens. Each model has two networks, trained by the same
-recipe from two seeds.
+recipe from two seeds. The names below are ours, for reading the results; in the repository and for
+the agent the models are folders with names that say nothing (second column).
 
-| Model | Architecture | Trained to output | Trained on | Asked about |
-| --- | --- | --- | --- | --- |
-| lin-a-1to4 | linear | the largest token | exactly 2 tokens | 1 to 4 tokens |
-| lin-c | linear | the smallest token | exactly 2 tokens | 1 to 4 tokens |
-| lin-b | linear | the largest token | exactly 4 tokens | 1 to 8 tokens |
-| lin-d | linear | the smallest token | exactly 4 tokens | 1 to 8 tokens |
-| att-c | transformer | the largest token | exactly 4 tokens | 1 to 4 tokens |
-| att-d | transformer | the smallest token | exactly 4 tokens | 1 to 4 tokens |
+| Model | In the repository | Architecture | Trained to output | Trained on | Asked about |
+| --- | --- | --- | --- | --- | --- |
+| linear max2 | lin-a-1to4 | linear | the largest token | exactly 2 tokens | 1 to 4 tokens |
+| linear min2 | lin-c | linear | the smallest token | exactly 2 tokens | 1 to 4 tokens |
+| linear max4 | lin-b | linear | the largest token | exactly 4 tokens | 1 to 8 tokens |
+| linear min4 | lin-d | linear | the smallest token | exactly 4 tokens | 1 to 8 tokens |
+| att max4 | att-c | transformer | the largest token | exactly 4 tokens | 1 to 4 tokens |
+| att min4 | att-d | transformer | the smallest token | exactly 4 tokens | 1 to 4 tokens |
 
 - **Linear**: each token has an embedding column of 8 numbers (an empty slot's is zero). The columns
   of an input's tokens are added up and multiplied by a hidden 8 x 8 matrix and an unembedding to 64
@@ -114,16 +115,16 @@ recipe from two seeds.
   in how many tokens they were trained on (2 or 4).
 - **Transformer**: one layer with one attention head and nothing else (no MLP, no layer norm, no
   biases), width 32, with learned position embeddings; it is read at the last token given, attending
-  over the tokens given. att-c and att-d differ only in their task.
-- **Where they come from**: lin-a-1to4's networks and att-c are the proof pipeline's (the setting of
-  Gross et al.); lin-c and att-d were trained here by the same recipes, and lin-b and lin-d by the same
-  recipe for longer, until their accuracy stopped rising. Every one follows its task on 99.7% to
+  over the tokens given. att max4 and att min4 differ only in their task.
+- **Where they come from**: linear max2's networks and att max4's are the proof pipeline's (the
+  setting of Gross et al.); linear min2 and att min4 were trained here by the same recipes, and linear
+  max4 and min4 by the same recipe for longer, until their accuracy stopped rising. Every one follows its task on 99.7% to
   99.99% of its training inputs.
 
 **What we did.** Each network is asked about more inputs than it was trained on: every number of
 tokens from 1 up to its slots, each number equally likely (about 17 million inputs with 4 slots,
 2.8 x 10^14 with 8). Off its training inputs a network does something other than its task, and
-differently for each seed: att-c's first network gives the largest token on 17% of 3-token inputs,
+differently for each seed: att max4's first network gives the largest token on 17% of 3-token inputs,
 its second on 98%. The agent is told the data set in full, but never the task or the training
 inputs, so finding where a network's behaviour can be described cheaply is the work. It works on the
 first network for at most 5 rounds of at most 4 submissions (`claude-fable-5-1` at effort high,
@@ -141,14 +142,14 @@ a sixfold saving, 0.99 about a hundredfold.
 
 ### The runs
 
-| Run | Network | Inputs | F | Locked | Fresh sample | Second seed |
-| --- | --- | --- | ---: | ---: | ---: | ---: |
-| lin-a-1to4 | linear, width 8 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 |
-| lin-c | linear, width 8 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 |
-| lin-b | linear, width 8 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 |
-| lin-d | linear, width 8 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 |
-| att-c | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 |
-| att-d | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 |
+| Model | Asked about | F | Locked | Fresh sample | Second seed |
+| --- | --- | ---: | ---: | ---: | ---: |
+| linear max2 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 |
+| linear min2 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 |
+| linear max4 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 |
+| linear min4 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 |
+| att max4 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 |
+| att min4 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 |
 
 - **F**: the operations of one forward pass, by the price list.
 - **Locked**: the reward of the run's best submission on its own network, as scored when it was
@@ -165,23 +166,23 @@ of its model's other networks, so all three baselines are established:
 
 | Baseline run | Serves | Frozen entry | On its second network | On its other four networks |
 | --- | --- | --- | ---: | --- |
-| pilot-lin-e-exact | lin-a-1to4, lin-c | r5s3 (ts4) | 0.8388 | 0.838 to 0.842, exact on each |
-| pilot-lin-f-exact | lin-b, lin-d | r3s1 (tri_v3) | 0.6888 | 0.687, exact on each |
-| pilot-att-e-exact | att-c, att-d | r3s2 (v3g) | 0.9735 | 0.977 to 0.990, exact on each |
+| linear, 4 slots (pilot-lin-e-exact) | linear max2, linear min2 | r5s3 (ts4) | 0.8388 | 0.838 to 0.842, exact on each |
+| linear, 8 slots (pilot-lin-f-exact) | linear max4, linear min4 | r3s1 (tri_v3) | 0.6888 | 0.687, exact on each |
+| att, 4 slots (pilot-att-e-exact) | att max4, att min4 | r3s2 (v3g) | 0.9735 | 0.977 to 0.990, exact on each |
 
 Each run read against its baseline, every number on the run's own inputs: R0 is the locked entry on
 its fresh sample, R1 in the seed check, and B0 and B1 the frozen entry on the same inputs. The three
 parts add up to R0. In brackets, the range when each fidelity moves across its 95% interval, as the
 report gives it.
 
-| Run | R0 | Baseline B0 | Kept on the held-out network, R1 - B1 | Gap, (R0 - B0) - (R1 - B1) |
+| Model | R0 | Baseline B0 | Kept on the held-out network, R1 - B1 | Gap, (R0 - B0) - (R1 - B1) |
 | --- | ---: | ---: | --- | --- |
-| lin-a-1to4 | 0.8310 | 0.8565 | -0.026 (-0.028 to -0.023) | +0.001 (-0.005 to +0.005) |
-| lin-c | 0.8900 | 0.8601 | +0.029 (+0.027 to +0.031) | +0.001 (-0.004 to +0.006) |
-| lin-b | 0.9129 | 0.6894 | +0.113 (+0.110 to +0.144) | +0.111 (+0.077 to +0.122) |
-| lin-d | 0.9128 | 0.6861 | +0.139 (+0.136 to +0.168) | +0.088 (+0.056 to +0.103) |
-| att-c | 0.9887 | 0.9573 | +0.033 (+0.031 to +0.036) | -0.002 (-0.006 to +0.003) |
-| att-d | 0.9884 | 0.9575 | +0.030 (+0.028 to +0.032) | +0.001 (-0.004 to +0.006) |
+| linear max2 | 0.8310 | 0.8565 | -0.026 (-0.028 to -0.023) | +0.001 (-0.005 to +0.005) |
+| linear min2 | 0.8900 | 0.8601 | +0.029 (+0.027 to +0.031) | +0.001 (-0.004 to +0.006) |
+| linear max4 | 0.9129 | 0.6894 | +0.113 (+0.110 to +0.144) | +0.111 (+0.077 to +0.122) |
+| linear min4 | 0.9128 | 0.6861 | +0.139 (+0.136 to +0.168) | +0.088 (+0.056 to +0.103) |
+| att max4 | 0.9887 | 0.9573 | +0.033 (+0.031 to +0.036) | -0.002 (-0.006 to +0.003) |
+| att min4 | 0.9884 | 0.9575 | +0.030 (+0.028 to +0.032) | +0.001 (-0.004 to +0.006) |
 
 The kept part is the run's lead over the baseline on a network its agent never saw. The gap is the
 part of the lead that holds on the run's own network and not on the held-out one: whatever was
@@ -200,11 +201,11 @@ frontier with the numbers, and `docs/figures/frontier.py` draws this from the ru
 
 ![The Pareto frontier of each pilot: cost against wrong answers](docs/figures/frontier.png)
 
-- On att-c, att-d and lin-c one exact entry is the whole frontier: it is also the cheapest, so
+- On att max4, att min4 and linear min2 one exact entry is the whole frontier: it is also the cheapest, so
   alpha decides nothing there.
-- On lin-a-1to4 the baseline's entry lies left of the whole frontier: exact, and cheaper than
+- On linear max2 the baseline's entry lies left of the whole frontier: exact, and cheaper than
   anything the run submitted.
-- On lin-b and lin-d the frontier trades cost for a few wrong answers, and alpha = 10 picks the
+- On linear max4 and min4 the frontier trades cost for a few wrong answers, and alpha = 10 picks the
   locked entry on it; the baseline's entry is exact but more than four times as costly. There, two
   scorings of one entry differ about as much as different entries do.
 
@@ -213,22 +214,23 @@ frontier with the numbers, and `docs/figures/frontier.py` draws this from the ru
 - Every locked entry beats the network by a wide margin, and the runs on 4 slots keep it on the
   second seed: there they are within 0.002 of the fresh sample.
 - On the 4-slot linear design almost all of the score is generic. An agent that never saw a trained
-  network found an exact entry worth 0.857 on lin-a-1to4's own network, more than that run's 0.831:
+  network found an exact entry worth 0.857 on linear max2's own network, more than that run's 0.831:
   a search that bounds blocks of outputs and computes exact logits only where one can still win,
-  where the run used tables of pair sums. lin-c's run keeps +0.03 over it.
+  where the run used tables of pair sums. Linear min2's run keeps +0.03 over it.
 - On the transformers the generic part is 0.957, and the runs keep +0.03 over it on networks their
   agents never saw, with no gap.
 - On the 8-slot linear design the runs keep +0.11 and +0.14 over a weaker baseline (0.69; its agent
   found much less than the 4-slot one did), and lose 0.11 and 0.09 between their two networks.
   Their entries compute exact logits only for the outputs that can still win on long
   inputs, and which outputs those are was read off the first network.
-- A frozen entry can score more on a trained network than on its own model's (lin-e's: 0.857 on
-  lin-a-1to4, 0.839 on its second network): it is exact for any weights, but what it costs depends
+- A frozen entry can score more on a trained network than on its own model's (the 4-slot linear
+  baseline's: 0.857 on linear max2, 0.839 on its own second network): it is exact for any weights, but what it costs depends
   on them.
 - The agents resubmit the same entry to draw a luckier sample, so the fresh sample is the number to
   compare.
 
-Not run yet: the pilots on pairs (lin-a, att-a, att-b) and on the recurrent networks.
+Not run yet: linear max2, att max2 and att min2 asked only about pairs of tokens, their training
+inputs (lin-a, att-a, att-b), and the recurrent networks.
 
 ## More implementation details
 
@@ -274,7 +276,7 @@ both. The network itself is written in the same language (`models/<name>/model.p
 pass costs it F operations, the same on every input.
 
 The verifier (`level1/verifier.py`) picks n inputs: every input of the data set when it can be
-listed (lin-a's 4,096 pairs), otherwise a sample drawn from D (16,384 inputs in the pilots), afresh
+listed (linear max2 asked only about pairs: 4,096 inputs), otherwise a sample drawn from D (16,384 inputs in the pilots), afresh
 for each of the agent's submissions, from a seed nobody chose. It runs the network on them for its
 outputs M(x), then the entry, with `lang.measure`:
 
@@ -351,7 +353,7 @@ Nothing the agent says is taken on trust: what it did is recorded, fenced in and
 
 In the nine runs so far the guard refused nothing, the probe got nothing out of the seatbelt
 sandbox, and no claimed fidelity was above the measured one by more than 0.0013. Two early pilots
-ran in process mode, lin-b with the guard and lin-a-1to4 before the guard existed; lin-a-1to4's 52
+ran in process mode, linear max4 with the guard and linear max2 before the guard existed; linear max2's 52
 programs were read by hand. The notes are the agent's own words: the measurements check the entries
 built on them, not the words.
 
@@ -362,8 +364,8 @@ repeats the same products for the same token in the same slot, and tables comput
 weights remove that on any network of the design. The baseline measures that part, so that a run can
 be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
 
-- **Baseline models.** `lin-e`, `lin-f` and `att-e` have the design, sizes and data set of lin-c,
-  lin-d and att-c (and so also serve lin-a-1to4, lin-b and att-d), and `rnn-d`, `rnn-e` and `rnn-f`
+- **Baseline models.** `lin-e`, `lin-f` and `att-e` have the design, sizes and data set of linear
+  min2, linear min4 and att max4 (and so also serve linear max2, linear max4 and att min4), and `rnn-d`, `rnn-e` and `rnn-f`
   those of rnn-a, rnn-b and rnn-c. Their networks have nothing in them for an agent to find; what
   they are is in `withheld/<name>/`. The first network is for the rounds, the second for the seed
   check, the others for freezing.
@@ -532,12 +534,12 @@ Everything is written as it happens, so a run can stop and resume, and can be re
       run_config.py    run configs: defaults, then what a config extends, then the config
       sandbox.py, runner.py, harness.py    where the agent's code runs
       util.py          small helpers
-    models/lin-a/           a linear network on pairs of tokens, two seeds
-    models/lin-a-1to4/      the same two networks, asked about inputs of 1 to 4 tokens
-    models/lin-b/           a network of the same design trained afresh, asked about inputs of 1 to 8 tokens
-    models/lin-c/, lin-d/   the designs of lin-a and lin-b trained afresh on another task
-    models/att-a/ .. att-d/   one-layer, one-head transformers: two with 2 slots, two with 4
-    models/lin-e/, lin-f/, att-e/   baseline models of the shapes of lin-c, lin-d and att-c
+    models/lin-a/           linear max2, asked only about pairs of tokens
+    models/lin-a-1to4/      linear max2: the same two networks, asked about inputs of 1 to 4 tokens
+    models/lin-b/           linear max4, asked about inputs of 1 to 8 tokens
+    models/lin-c/, lin-d/   linear min2 and linear min4
+    models/att-a/ .. att-d/   att max2, att min2 (2 slots), att max4, att min4 (4 slots)
+    models/lin-e/, lin-f/, att-e/   baseline models of the shapes of linear min2, linear min4 and att max4
     models/rnn-a/ .. rnn-c/   one-layer ReLU recurrent networks on 2, 3 and 10 real numbers, five seeds each
     models/rnn-d/ .. rnn-f/   their baseline models
     withheld/<model>/       what it was trained to do, and reference entries (never shown to the agent)

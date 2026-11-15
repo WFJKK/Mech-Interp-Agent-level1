@@ -6,8 +6,9 @@ that predicts a small network's outputs in fewer operations, and a verifier meas
 - The agent is never told what the model does. This holds for every route: the prompt, the tools'
   descriptions, the files placed in its sandbox, names (model folders, network ids, weights), the
   entry guide, examples, and what its code can import. What a network was trained to do is said
-  in `withheld/`, in the tests and in the README's table of the pilots' models (the README is
-  never on the agent's side), and nowhere else in the repository. The agent is told
+  in `withheld/`, in the tests and in the README, which names and describes the pilots' models
+  for people and is never on the agent's side, and nowhere else in the repository; the README's
+  frontier figure takes those names from it. The agent is told
   the data set in full (`data_set.says` in the model's config); where the data set is wider than
   the training, which inputs the network was trained on is withheld like the task.
   `level1/hygiene.py` checks the agent's side; a new route to the agent is added to
