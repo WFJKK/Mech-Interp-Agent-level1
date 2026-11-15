@@ -37,6 +37,80 @@ Nothing is proved: a claim is checked by measuring it.
 
 ## Reward function
 
+### What we use
+
+Each claim gets one number from what the verifier measured. With $\mu$ the coverage, $c$ the cost
+and $q_{\text{low}}$ the lower end of the fidelity's 95% interval on the sample (the fidelity itself
+when every input is checked):
+
+```math
+R = \mu \, \big[ (1 - c) - \alpha \, (1 - q_{\text{low}}) \big], \qquad \alpha = 10
+```
+
+Read it for one input of the region: answering it with the interpretation instead of the network
+saves $1 - c$ of a forward pass, and a wrong answer is charged $\alpha$ forward passes. Multiplied
+out over the $n$ inputs scored, with $F$ the operations of one forward pass and the measured
+fidelity in place of its lower bound:
+
+```math
+R = \mu - \frac{\text{operations spent}}{n F} - \alpha \, \frac{\text{wrong answers}}{n}
+```
+
+In units of $1/n$: every input covered earns 1, every operation costs $1/F$, and every wrong answer
+costs $\alpha$.
+
+- **The network itself scores 0**: $\mu = q = c = 1$. An input on which the network itself is run
+  earns nothing, so a positive score has to come from computing less than the network does.
+- **1 is the most**: right on every input at no cost. On a sample of 16,384 inputs the lower bound
+  caps it at about 0.998.
+- **Errors are expensive**: a claim gains only where $q > 1 - (1 - c)/\alpha$, so at $\alpha = 10$
+  it must be right more than 90% of the time even if it is free. $\alpha$ must exceed 1: at
+  $\alpha = 1$ the reward is $q - c$, and a free constant guess, right on 1 input in 64, would beat
+  the network.
+- **It adds up over the data set**: an input left out of the region earns 0, the same as an input on
+  which the network itself is run, so a claim's score is the sum of what its parts earn.
+- **As a speed-up**: run the network wherever the claim does not apply and count each wrong answer as
+  $\alpha$ forward passes. Then $R$ is 1 less the compute with the claim over the compute without it,
+  and $1/(1 - R)$ is the speed-up: 0.99 is about a hundredfold.
+- **The frontier needs no $\alpha$**: the reports also mark the Pareto frontier of right share, wrong
+  share and cost; $R$ picks one point on it.
+
+Rewards are functions in `level1/rewards.py`, chosen by the run config. Every receipt keeps the
+measured parts, so a finished run can be scored again under another reward
+(`python -m level1.loop rescore`), and a new reward has to give the network itself 0.
+`docs/REWARD.md` has the details and the ways a reward can be gamed.
+
+### Louis's suggestion
+
+The scoring Louis Jaburi proposed for level 1 credits the claim itself. The interpreter states a
+fidelity $p$ for its region and gets the claimed share of the data set, the region's size times the
+claimed percentage, when the verifier's sample confirms it; claiming more than is measured loses
+points. With $\hat q$ the fidelity measured on a sample of the region and a penalty $\lambda > 0$:
+
+```math
+\text{score} = \begin{cases} \mu \, p & \text{if } \hat q \ge p \\ \mu \, \big(\hat q - \lambda \, (p - \hat q)\big) & \text{otherwise} \end{cases}
+```
+
+Claiming $p = q$ is optimal, so the interpreter in effect maximises $\mu q$, the right share. The
+form of the penalty is ours; Louis said that claiming more than you get loses points.
+
+Why we do not use it as it is:
+
+- **It has no cost.** The network itself, claimed everywhere with $p = 1$, scores 1, the most there
+  is. Level 1 needs the cost, so that an interpretation is worth something only when it is cheaper
+  than the network.
+- **Admitted errors are free.** A claim of $p = 0.8$ that is right on 80% of its region scores
+  $0.8 \mu$: the 20% it gets wrong cost nothing beyond the credit not earned. Our reward charges
+  each wrong answer $\alpha$ forward passes.
+- **The claim adds nothing to a measurement.** The verifier measures every submission anyway, so
+  crediting the claim instead of the measurement only adds a way to lose points.
+
+It is in the repository as `r_alpha_claimed`: our reward with a credited fidelity in place of the
+measured one (the claim, if the measurement confirms it; otherwise the measured fidelity less twice
+the overclaim). Any finished run can be read under it:
+`python -m level1.loop rescore --run <run folder> --name r_alpha_claimed`. The agent states its
+claimed fidelity with every submission, and every receipt keeps it.
+
 ## Agentic setup / Auto-research
 
 ![The agentic flow of level 1](docs/figures/level1-flow.png)
@@ -57,14 +131,14 @@ a sixfold saving, 0.99 about a hundredfold.
 
 ### The runs
 
-| Run | Network | Inputs | F | Locked | Fresh sample | Second seed | Generic reference |
-| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |
-| lin-a-1to4 | linear, width 8 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 | 0.519 |
-| lin-c | linear, width 8 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 | 0.519 |
-| lin-b | linear, width 8 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 | 0.176 |
-| lin-d | linear, width 8 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 | 0.176 |
-| att-c | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 | 0.955 |
-| att-d | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 | 0.955 |
+| Run | Network | Inputs | F | Locked | Fresh sample | Second seed |
+| --- | --- | --- | ---: | ---: | ---: | ---: |
+| lin-a-1to4 | linear, width 8 | 1 to 4 tokens | 671 | 0.8314 | 0.8310 | 0.8298 |
+| lin-c | linear, width 8 | 1 to 4 tokens | 671 | 0.8898 | 0.8900 | 0.8893 |
+| lin-b | linear, width 8 | 1 to 8 tokens | 703 | 0.9180 | 0.9129 | 0.8027 |
+| lin-d | linear, width 8 | 1 to 8 tokens | 703 | 0.9257 | 0.9128 | 0.8301 |
+| att-c | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9889 | 0.9887 | 0.9905 |
+| att-d | transformer, 1 layer, 1 head, width 32 | 1 to 4 tokens | 12,987 | 0.9884 | 0.9884 | 0.9871 |
 
 - **F**: the operations of one forward pass, by the price list.
 - **Locked**: the reward of the run's best submission on its own network, as scored when it was
@@ -72,10 +146,6 @@ a sixfold saving, 0.99 about a hundredfold.
 - **Fresh sample**: the locked entry scored again on the same network, on a fresh sample.
 - **Second seed**: the locked entry, unchanged, on a network of the same design and training with
   another seed, which the agent never sees.
-- **Generic reference**: an entry written by hand from the algebra of the design alone, exact for any
-  weights (`contraction` in `withheld/lin-e/` and `withheld/lin-f/`, `tables` in `withheld/att-e/`),
-  scored on the run's networks on 4 fixed samples of 16,384 inputs and averaged. It scores the same
-  on both seeds. The baseline runs below found more than these on every design.
 
 ### Against their baselines
 
@@ -136,8 +206,8 @@ frontier with the numbers, and `docs/figures/frontier.py` draws this from the ru
   network found an exact entry worth 0.857 on lin-a-1to4's own network, more than that run's 0.831:
   a search that bounds blocks of outputs and computes exact logits only where one can still win,
   where the run used tables of pair sums. lin-c's run keeps +0.03 over it.
-- On the transformers the generic part is 0.957, close to the hand-written tables (0.955), and the
-  runs keep +0.03 over it on networks their agents never saw, with no gap.
+- On the transformers the generic part is 0.957, and the runs keep +0.03 over it on networks their
+  agents never saw, with no gap.
 - On the 8-slot linear design the runs keep +0.11 and +0.14 over a weaker baseline (0.69; its agent
   found much less than the 4-slot one did), and lose 0.11 and 0.09 between their two networks.
   Their entries compute exact logits only for the outputs that can still win on long
