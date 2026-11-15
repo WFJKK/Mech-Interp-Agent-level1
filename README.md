@@ -82,34 +82,9 @@ measured parts, so a finished run can be scored again under another reward
 
 ### Louis's suggestion
 
-The scoring Louis Jaburi proposed for level 1 credits the claim itself. The interpreter states a
-fidelity $p$ for its region and gets the claimed share of the data set, the region's size times the
-claimed percentage, when the verifier's sample confirms it; claiming more than is measured loses
-points. With $\hat q$ the fidelity measured on a sample of the region and a penalty $\lambda > 0$:
-
 ```math
 \text{score} = \begin{cases} \mu \, p & \text{if } \hat q \ge p \\ \mu \, \big(\hat q - \lambda \, (p - \hat q)\big) & \text{otherwise} \end{cases}
 ```
-
-Claiming $p = q$ is optimal, so the interpreter in effect maximises $\mu q$, the right share. The
-form of the penalty is ours; Louis said that claiming more than you get loses points.
-
-Why we do not use it as it is:
-
-- **It has no cost.** The network itself, claimed everywhere with $p = 1$, scores 1, the most there
-  is. Level 1 needs the cost, so that an interpretation is worth something only when it is cheaper
-  than the network.
-- **Admitted errors are free.** A claim of $p = 0.8$ that is right on 80% of its region scores
-  $0.8 \mu$: the 20% it gets wrong cost nothing beyond the credit not earned. Our reward charges
-  each wrong answer $\alpha$ forward passes.
-- **The claim adds nothing to a measurement.** The verifier measures every submission anyway, so
-  crediting the claim instead of the measurement only adds a way to lose points.
-
-It is in the repository as `r_alpha_claimed`: our reward with a credited fidelity in place of the
-measured one (the claim, if the measurement confirms it; otherwise the measured fidelity less twice
-the overclaim). Any finished run can be read under it:
-`python -m level1.loop rescore --run <run folder> --name r_alpha_claimed`. The agent states its
-claimed fidelity with every submission, and every receipt keeps it.
 
 ## Agentic setup / Auto-research
 
