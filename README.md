@@ -117,10 +117,27 @@ claimed fidelity with every submission, and every receipt keeps it.
 
 ## Results
 
-The six pilots run so far (11 and 12 November 2026), all on trained networks, and the three
-baseline runs they are read against (13 November). Every run used `claude-fable-5-1` at effort
-high, at most 5 rounds of at most 4 submissions, 16,384 inputs per scoring, and the reward r_alpha
-with alpha = 10.
+### The models and what we did
+
+Each of the six pilots so far (11 and 12 November 2026) has a model of its own: two small networks,
+trained by one recipe from two seeds on one task, over 64 tokens, on inputs of a fixed number of
+tokens. lin-a-1to4, lin-c, lin-b and lin-d are linear: the embedding columns of an input's tokens are
+added up, passed through a hidden layer of width 8 and an unembedding, and the output is the argmax.
+att-c and att-d are one-layer, one-head, attention-only transformers of width 32.
+
+Each pilot asks its network about more inputs than it was trained on: every number of tokens from 1
+up to its slots (4, or 8 for lin-b and lin-d), each number equally likely; about 17 million inputs
+with 4 slots and 2.8 x 10^14 with 8. The agent is told this data set in full, but neither the task
+nor which inputs the network was trained on, so finding where its behaviour can be described cheaply
+is part of the work. It works on the first network for at most 5 rounds of at most 4 submissions
+(`claude-fable-5-1` at effort high, 16,384 inputs per scoring, the reward r_alpha with alpha = 10),
+and its best entry is then locked and run unchanged on the second network. For each design an agent
+also made one run on networks of the same shape with nothing learned in them, the baseline
+(13 November).
+
+What each network was trained to do, and on which inputs, is in
+[`withheld/README.md`](withheld/README.md). Only that folder and the tests may say it, so that
+nothing the agent can reach does.
 
 **The reward scale.** 0 is the network itself, and 1 an entry that is always right and costs
 nothing; on a sample of 16,384 inputs the most an entry can score is about 0.998, because the reward
