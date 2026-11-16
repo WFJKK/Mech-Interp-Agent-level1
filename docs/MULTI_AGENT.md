@@ -9,7 +9,20 @@ The experiment is selected by `orchestration.enabled: true`.
 
 ## Run the experiment
 
-Use the repository's usual installation and Claude Code authentication. From the repository root:
+From the repository root, create an environment and install the dependencies:
+
+```bash
+python -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+python -m level1.sandbox info
+```
+
+Use a virtual environment inside this repository. The hygiene check inspects the Python path
+visible to researchers and rejects paths that disclose withheld information.
+
+The configured backend requires the Claude Code CLI (`claude`) to be installed and signed in.
+The API-key option below uses the same CLI with separate authentication. Then start the experiment:
 
 ```bash
 python -m level1.loop run --config config/experiments/lin-c-regional.yaml
