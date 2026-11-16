@@ -603,17 +603,23 @@ def run_reference(reference: dict, weights: dict, n_ctx: int, inputs) -> tuple:
 
 
 def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model_ops: int,
-            deadline: float | None = None) -> dict:
+            deadline: float | None = None, workload_size: int | None = None) -> dict:
     """What the verifier measures of an entry on these inputs.
 
     model_answers and model_ops come from run_reference on the same inputs. The job is these inputs: the
     entry's build is done once for them, so it is spread over as many forward passes as there are inputs
     (all of the data set when every input is checked, the sample when one is drawn).
+    An explicit workload_size instead spreads the build over that fixed number
+    of inputs, while this sample estimates the runtime and fidelity.
 
     cost is the entry's whole work per input of its region, over one forward pass: r + (r_rule + b) /
     coverage. With it, coverage * (1 - cost) is the share of the forward passes the entry saves."""
     ev = Evaluator(entry, weights, n_ctx, deadline)
     n = len(inputs)
+    if not n or len(model_answers) != n:
+        raise EntryError("measure needs a nonempty input set and one model answer per input")
+    if workload_size is not None and (isinstance(workload_size, bool) or not isinstance(workload_size, int) or workload_size <= 0):
+        raise EntryError("workload_size must be a positive whole number")
     inside_n = agree = rule_ops = predict_ops = 0
     for x, truth in zip(inputs, model_answers):
         inside, answer, c_rule, c_pred = ev.run(x)
@@ -623,7 +629,7 @@ def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model
             predict_ops += c_pred
             agree += int(answer == int(truth))
     f = float(model_ops)
-    return {
+    parts = {
         "n_inputs": n, "n_in_region": inside_n, "n_agree": agree,
         "model_ops": int(model_ops), "rule_ops": int(rule_ops), "predict_ops": int(predict_ops), "build_ops": int(ev.build_cost),
         "coverage": inside_n / n,
@@ -633,6 +639,11 @@ def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model
         "r_rule": rule_ops / (n * f),
         "b": ev.build_cost / (n * f),
     }
+    if workload_size is not None:
+        parts["b"] = ev.build_cost / (workload_size * f)
+        parts["cost"] = (parts["r"] + (parts["r_rule"] + parts["b"]) / parts["coverage"]) if inside_n else None
+        parts["workload_size"] = workload_size
+    return parts
 
 
 # the builder ---------------------------------------------------------------------------------

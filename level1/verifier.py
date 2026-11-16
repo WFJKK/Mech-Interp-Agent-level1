@@ -23,13 +23,10 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 import sys
 import time
 
-import numpy as np
-
-from . import lang, rewards
+from . import lang, regions, rewards
 from .lang import wilson_lower  # noqa: F401  (kept under this name for callers)
 from .networks import Model, load_model
 
@@ -61,28 +58,36 @@ class Verifier:
         self.reward_cfg = dict(cfg.get("reward") or {"name": "r_alpha", "alpha": 10.0})
         self.weights = model.load_weights(network_id)
         self.reference = model.reference_entry(self.weights)
-        self.check = resolve_check(model, self.cfg)
+        self.scope = None
+        self._scope_meta = None
+        if self.cfg.get("scope") is not None:
+            self.scope = regions.Scope(model.input_space, model.info()["data_set"], self.weights, model.n_ctx,
+                                       self.cfg["scope"], limits=self.limits,
+                                       enumerate_up_to=int(self.cfg["enumerate_up_to"]),
+                                       deadline=time.monotonic() + float(self.cfg["time_limit_s"]))
+            self.check = self.scope.resolve_check(self.cfg)
+        else:
+            self.check = resolve_check(model, self.cfg)
         self.enumerated = self.check == "all"
         self._all = None  # (inputs, the network's outputs, operations of one forward pass), when every input is checked
 
     def n_inputs(self) -> int:
         """How many inputs one scoring uses."""
-        return self.model.n_total if self.enumerated else int(self.cfg["sample_size"])
+        if self.enumerated:
+            return self.scope.cardinality if self.scope is not None else self.model.n_total
+        return int(self.cfg["sample_size"])
 
     def inputs(self, seed: int | None = None) -> tuple:
         """(inputs, the network's outputs on them, operations of a forward pass, how they were chosen)"""
-        if self.enumerated:
-            if self._all is None:
-                x = lang.all_inputs(self.model.input_space)
-                answers, ops = lang.run_reference(self.reference, self.weights, self.model.n_ctx, x)
-                self._all = (x, answers, ops)
-            return (*self._all, {"mode": "all", "n": self.model.n_total, "seed": None})
-        if seed is None:
-            seed = int.from_bytes(os.urandom(8), "big")
-        n = int(self.cfg["sample_size"])
-        x = lang.draw_inputs(self.model.data_set, self.model.input_space, n, np.random.default_rng(seed))
+        if self.enumerated and self._all is not None:
+            return self._all
+        x, how, self._scope_meta = regions.prepare_inputs(self.model.info(), self.weights, self.cfg,
+                                                         seed=seed, limits=self.limits, scope=self.scope)
         answers, ops = lang.run_reference(self.reference, self.weights, self.model.n_ctx, x)
-        return x, answers, ops, {"mode": "sample", "n": n, "seed": seed}
+        result = (x, answers, ops, how)
+        if self.enumerated:
+            self._all = result
+        return result
 
     def score(self, entry, claimed: float | None = None, seed: int | None = None) -> dict:
         t0 = time.monotonic()
@@ -93,8 +98,11 @@ class Verifier:
             receipt["entry_sha256"] = lang.entry_hash(entry)
             x, answers, ops, how = self.inputs(seed)
             receipt["inputs"] = how
-            parts = lang.measure(entry, self.weights, self.model.n_ctx, x, answers, ops,
-                                 deadline=time.monotonic() + float(self.cfg["time_limit_s"]))
+            if self._scope_meta is not None:
+                receipt["scope"] = self._scope_meta
+            parts = regions.measure(entry, self.weights, self.model.n_ctx, x, answers, ops, how=how,
+                                    scope=self._scope_meta, verifier_cfg=self.cfg, limits=self.limits,
+                                    deadline=time.monotonic() + float(self.cfg["time_limit_s"]))
         except lang.EntryError as exc:
             receipt["reason"] = str(exc)[:1000]
             receipt["seconds"] = round(time.monotonic() - t0, 3)
@@ -105,10 +113,6 @@ class Verifier:
             receipt["verifier_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
-        if how["mode"] == "sample" and parts["n_in_region"]:
-            parts["fidelity_low"] = lang.wilson_lower(parts["n_agree"], parts["n_in_region"])
-        else:
-            parts["fidelity_low"] = parts["fidelity"]
         r = rewards.compute(parts, self.reward_cfg, claimed)
         receipt.update(status="scored", parts=parts, reward=r["reward"],
                        reward_detail={k: v for k, v in r.items() if k != "reward"})

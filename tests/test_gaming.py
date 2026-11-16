@@ -4,12 +4,72 @@ A hole found later gets its own test here.
 """
 
 import pytest
+import numpy as np
 
 from level1 import lang, rewards
 from level1.lang import Graph
 from level1.verifier import Verifier
 
 CFG = {"reward": {"name": "r_alpha", "alpha": 10.0}}
+
+
+def test_declared_workload_cannot_be_discounted_by_requesting_more_checks(model4):
+    """The same fixed setup is not made cheaper by checking a larger sample."""
+    w = model4.load_weights("lin-a-1to4-s0")
+    entry = model4.reference_entries(w)["contraction"]
+    parts = []
+    for n in (40, 80):
+        v = Verifier(model4, "lin-a-1to4-s0", {
+            "verifier": {"check": "sample", "sample_size": n, "workload_size": 512},
+        })
+        parts.append(v.score(entry, seed=7)["parts"])
+    a, b = parts
+    assert a["build_ops"] == b["build_ops"] > 0
+    assert a["b"] == b["b"] == pytest.approx(a["build_ops"] / (512 * 671))
+    for p in parts:
+        assert p["cost"] == pytest.approx(p["r"] + (p["r_rule"] + p["b"]) / p["coverage"])
+
+
+def test_a_fixed_development_seed_prevents_duplicate_draw_luck(model4):
+    v = Verifier(model4, "lin-a-1to4-s0", {
+        "verifier": {"check": "sample", "sample_size": 50, "sample_seed": 71},
+    })
+    first, again = v.score(v.reference), v.score(v.reference)
+    assert first["inputs"] == again["inputs"]
+    assert first["inputs"]["seed"] == 71
+    assert first["parts"] == again["parts"]
+    assert v.score(v.reference, seed=72)["inputs"]["seed"] == 72
+
+
+def test_predicate_diagnostics_cannot_redraw_the_fidelity_sample():
+    """A scope's optional mass probe is not another development-sample seed."""
+    from level1 import regions
+
+    info = {"sizes": {"n_ctx": 2}, "input_space": ["real", "real"], "data_set": {"kind": "normal"}}
+    g = Graph({}, 2, real=True)
+    entry = g.entry(predict=g.const(0), rule=g.token(0) > 0)
+    arrays = []
+    for probe_n in (20, 200):
+        spec = {"kind": "predicate", "entry": entry, "mass_samples": probe_n, "max_draws": 1000}
+        x, _, _ = regions.prepare_inputs(info, {}, {"scope": spec, "sample_size": 64, "workload_size": 200}, seed=7)
+        arrays.append(x)
+    assert np.array_equal(*arrays)
+
+
+def test_predicate_rejection_cap_cannot_redraw_successful_samples():
+    """Increasing a safety bound keeps the same accepted input prefix."""
+    from level1 import regions
+
+    info = {"sizes": {"n_ctx": 2}, "input_space": [4, 3], "data_set": {"kind": "all"}}
+    g = Graph({}, 2)
+    entry = g.entry(predict=g.const(0), rule=g.token(0) >= 0)
+    arrays = []
+    for cap in (20, 200):
+        spec = {"kind": "predicate", "entry": entry, "mass_samples": 20, "max_draws": cap}
+        x, _, _ = regions.prepare_inputs(info, {}, {"scope": spec, "enumerate_up_to": 3,
+                                                   "sample_size": 10, "workload_size": 100}, seed=7)
+        arrays.append(x)
+    assert np.array_equal(*arrays)
 
 
 def test_running_the_network_is_worth_nothing_anywhere(model, nets):
