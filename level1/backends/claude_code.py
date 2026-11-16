@@ -558,8 +558,9 @@ class ClaudeCodeBackend:
             if grouped:
                 meta["budget"].update(cycle_id=st["cycle_id"], cycle_usd=st["cycle_usd"],
                                       cycle_counted_usd=round(st["cycles"].get(st["cycle_id"], 0.0), 6))
+            stopped_text = "have no closing record" if grouped else "stopped with the loop, counted in the run's total only"
             self.log(f"  API: round {k} ${st['rounds'].get(k, 0.0):.2f}; the run ${st['spent']:.2f} of ${st['run_usd']:.2f}"
                      + (f" ({st['unreported']} tries counted at their caps: the CLI reported no cost"
-                        + (f"; {st['stopped']} of them have no closing record" if st.get("stopped") else "")
+                        + (f"; {st['stopped']} of them {stopped_text}" if st.get("stopped") else "")
                         + ")" if st["unreported"] else ""))
         return Response(text=str(text or ""), meta=meta)
