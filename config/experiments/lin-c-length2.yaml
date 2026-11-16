@@ -1,0 +1,7 @@
+# A single-researcher control on one explicitly assigned input domain.
+extends: ../pilot/lin-c.yaml
+run_id: experiment-lin-c-length2
+verifier:
+  check: auto
+  scope: {kind: lengths, lengths: [2]}
+  sample_seed: 0

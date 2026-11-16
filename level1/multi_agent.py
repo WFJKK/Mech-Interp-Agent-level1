@@ -3,7 +3,7 @@
 This driver is opt-in. Its sessions use the ordinary backend, sandbox and verifier. A
 lead assigns bounded regional investigations, workers submit on those conditional
 input distributions, and the lead submits complete programs on the original one.
-Only those global submissions may become the global winner. The coordinator owns
+Only submissions measured on the full domain may become the global winner, whoever wrote them. The coordinator owns
 the archive and the final lock; neither worker notes nor held-out results select it.
 
 Session plans, indices and input snapshots are written before a backend is called.
@@ -96,7 +96,7 @@ def _frontier(candidates: list[dict]) -> list[str]:
 def update_frontiers(archive: dict) -> dict:
     """Rebuild selections from development receipts, never from final audits."""
     archive["candidates"].sort(key=lambda c: (c["session_id"], c["submitted"]["submission"]))
-    global_candidates = [c for c in archive["candidates"] if c["role"] == "lead" and c["scope_id"] == "all"]
+    global_candidates = [c for c in archive["candidates"] if c["scope_id"] == "all"]
     scored_global = [c for c in global_candidates if _usable(c)]
     best = max(scored_global, key=lambda c: c["selection"]["reward"], default=None)
     archive["global"] = {"best": best["id"] if best else None, "frontier": _frontier(global_candidates)}
@@ -204,7 +204,7 @@ def archive_summary(archive: dict, limit: int) -> str:
                         "\n".join(row(cid) for cid in ids[:limit]))
     for key, receipt in archive["baseline_scores"].items():
         if receipt["status"] == "scored":
-            sections.append(f"Generic comparison on {key}: reward {receipt['reward']:.6f}, "
+            sections.append(f"Supplied comparison on {key}: reward {receipt['reward']:.6f}, "
                             f"fidelity {receipt['parts']['fidelity']}, cost {rewards.cost_of(receipt['parts'])}.")
     return "\n\n".join(sections) or "No measured candidates yet."
 
@@ -551,7 +551,9 @@ def _audit_candidate(path: Path, cfg: dict, model, candidate: dict) -> dict:
         if purpose in audit:
             continue
         seed = _audit_seed(cfg["run_id"], candidate["scope_id"], purpose)
-        audit[purpose] = Verifier(model, network, scoped).score(entry, seed=seed)
+        claimed = (candidate["selection"].get("claimed_fidelity") if purpose == "fresh"
+                   else candidate.get("expected_fidelity_other"))
+        audit[purpose] = Verifier(model, network, scoped).score(entry, claimed=claimed, seed=seed)
         comparison = _baselines(path, cfg)
         if comparison is not None:
             audit[f"{purpose}_baseline"] = Verifier(model, network, scoped).score(comparison, seed=seed)
@@ -588,7 +590,7 @@ def _finish(path, out=print) -> dict:
     global_id = frozen["global"]
     if global_id:
         candidate = candidates[global_id]
-        if candidate["role"] != "lead" or candidate["scope_id"] != "all":
+        if candidate["scope_id"] != "all":
             raise RuntimeError("a regional score cannot select the global program")
         write_json(path / "locked_entry.json", _entry(path, candidate))
         lock = {"locked": True, "candidate_id": global_id, "entry_sha256": candidate["entry_sha256"],
@@ -650,7 +652,8 @@ def write_report(path) -> None:
         lines.append(f"- `{key}`: {', '.join(group['frontier']) or 'no covered candidate'}; scope `{json.dumps(group['scope'], sort_keys=True)}`.")
         if group["best"]:
             metadata = _candidate_map(archive)[group["best"]]["selection"].get("scope") or {}
-            lines.append(f"  Outer probability: {metadata.get('mass')}; support size: {metadata.get('cardinality')}; "
+            mass_basis = "exact" if metadata.get("mass_exact") else "estimated"
+            lines.append(f"  Outer probability ({mass_basis}): {metadata.get('mass')}; support size: {metadata.get('cardinality')}; "
                          f"declared workload: {metadata.get('workload_size')}.")
     lines += ["", "## Final locked checks", "", "| Candidate | Check | Network | Fidelity | Reward |", "| --- | --- | --- | ---: | ---: |"]
     for cid, audit in audits.items():
@@ -668,7 +671,7 @@ def write_report(path) -> None:
 
 
 def rescore(path, reward_cfg: dict, out=print) -> list[dict]:
-    """Read-only development rescoring, with independent selections per role/scope."""
+    """Read-only development rescoring, with independent selections per scope."""
     archive = read_archive(Path(path))
     rows = []
     for candidate in archive["candidates"]:
@@ -685,9 +688,9 @@ def rescore(path, reward_cfg: dict, out=print) -> list[dict]:
         out(f"{row['entry']}  {row['role']}  {row['scope_id']}  recorded {row['recorded']:.6f}  rescored {row['rescored']:.6f}")
     groups = {}
     for row in rows:
-        groups.setdefault((row["role"], row["scope_id"]), []).append(row)
-    for (role, scope_id), candidates in groups.items():
+        groups.setdefault(row["scope_id"], []).append(row)
+    for scope_id, candidates in groups.items():
         best = max(candidates, key=lambda row: row["rescored"])
-        label = "global" if role == "lead" and scope_id == "all" else f"regional scope {scope_id}"
+        label = "global" if scope_id == "all" else f"regional scope {scope_id}"
         out(f"Best {label} under this reward: {best['entry']} ({best['rescored']:.6f}).")
     return rows

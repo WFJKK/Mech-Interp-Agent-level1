@@ -2,7 +2,7 @@
 
 import pytest
 
-from level1 import budget, multi_agent, run_config
+from level1 import budget, lang, multi_agent, rewards, run_config
 from level1.networks import load_model
 from level1.session import Session
 from level1.util import read_json, write_json
@@ -69,14 +69,14 @@ def candidate(cid, role, scope_id, reward, fidelity=1.0, cost=0.1, coverage=1.0,
             "submitted": {"submission": 1}}
 
 
-def test_regional_scores_never_choose_global_winner():
+def test_only_full_domain_scores_choose_global_winner():
     archive = multi_agent._empty_archive()
     archive["candidates"] = [candidate("global", "lead", "all", 0.2, cost=0.8),
-                             candidate("local", "regional", "scope-x", 0.99, cost=0.01),
-                             candidate("local_all", "regional", "all", 0.999, cost=0.001)]
+                             candidate("local", "regional", "scope-x", 0.999, cost=0.001),
+                             candidate("local_all", "regional", "all", 0.99, cost=0.01)]
     multi_agent.update_frontiers(archive)
-    assert archive["global"]["best"] == "global"
-    assert archive["global"]["frontier"] == ["global"]
+    assert archive["global"]["best"] == "local_all"
+    assert archive["global"]["frontier"] == ["local_all"]
     assert archive["regions"]["scope-x"]["frontier"] == ["local"]
     assert archive["regions"]["all"]["frontier"] == ["local_all"]
 
@@ -190,6 +190,23 @@ def test_final_scope_locks_and_audits_are_immutable(completed, monkeypatch):
     assert multi_agent.drive(path, fake_scripts=fake, out=lambda *_: None) == "finished"
     assert read_json(path / "multi_agent/lock.json") == lock
     assert all(target.read_bytes() == content for target, content in snapshots.items())
+    assert "Outer probability (exact):" in (path / "report.md").read_text()
+
+
+def test_final_audits_preserve_claimed_reward_semantics(tmp_path):
+    path, cfg = prepare(tmp_path, reward={"name": "r_alpha_claimed"})
+    model = load_model(cfg["model"])
+    entry = model.reference_entry(model.load_weights(cfg["network"]))
+    write_json(path / "entry.json", entry)
+    frozen = {"id": "claimed", "entry_path": "entry.json", "entry_sha256": lang.entry_hash(entry),
+              "scope": {"kind": "all"}, "scope_id": "all",
+              "selection": {"claimed_fidelity": 0.6}, "expected_fidelity_other": 0.8}
+    audit = multi_agent._audit_candidate(path, cfg, model, frozen)
+    for purpose, claim in (("fresh", 0.6), ("held_out", 0.8)):
+        receipt = audit[purpose]
+        assert receipt["status"] == "scored" and receipt["claimed_fidelity"] == claim
+        assert receipt["reward"] == pytest.approx(rewards.compute(receipt["parts"], cfg["reward"], claim)["reward"])
+        assert receipt["reward"] != pytest.approx(rewards.compute(receipt["parts"], cfg["reward"])["reward"])
 
 
 def test_rescoring_keeps_global_and_regional_comparisons_separate(completed):

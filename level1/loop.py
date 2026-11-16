@@ -49,7 +49,7 @@ from pathlib import Path
 from . import budget, hygiene, lang, prompt, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
-from .session import Session, surface
+from .session import RESEARCH_TOOLS, Session, surface
 from .util import REPO_ROOT, append_jsonl, atomic_write, git_state, now, read_json, read_jsonl, sha256_file, write_json
 from .verifier import Verifier, describe
 
@@ -198,6 +198,15 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
     own paths), the sandbox folder's location and this Python's (a traceback prints it)."""
     out = {**surface(model, cfg["verifier"]), "restart note": prompt.RESTART_NOTE,
            "temporary folder's location": tempfile.gettempdir()}
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        import json
+
+        out.update({f"research tool {name}": json.dumps(spec) for name, spec in RESEARCH_TOOLS.items()})
+        out["research roles"] = json.dumps(prompt.RESEARCH_ROLES)
+        out["research assignment instructions"] = prompt.ASSIGNMENT_NOTE
+        out["research prompt template"] = (prompt.TEMPLATES / "research_v1.md").read_text()
+        # These are operator-supplied tasks. Agent-generated discoveries are handled as history.
+        out["configured regional investigations"] = json.dumps(cfg["orchestration"].get("initial_regions", []))
     if sandbox_mode != "container":
         out["sandbox folder's location"] = str(cfg.get("sandbox_dir") or tempfile.gettempdir())
         out["python's location"] = " ".join(sorted({sys.prefix, sys.base_prefix, sys.executable,
@@ -229,7 +238,10 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     if itself["status"] != "scored" or itself["parts"]["fidelity"] != 1.0 or itself["parts"]["cost"] != 1.0:
         raise RuntimeError(f"the network written as an entry does not come out at fidelity 1 and cost 1: {describe(itself)}")
     sb = choose(cfg, protected_paths(cfg, model, path))
-    first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        first_prompt = prompt.build_multi(cfg, model, 0, "lead", "Plan the regional investigations.", "", [])
+    else:
+        first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
     report = probe(sb, model, cfg["network"], path / "probe")                      # the system's sandbox on its own
     guarded = probe(sb, model, cfg["network"], path / "probe", guard=True)         # with the guard inside Python
@@ -249,10 +261,12 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     write_json(path / "run.json", {
         "run_id": cfg["run_id"], "config": cfg, "created": now(), "git": git_state(), "trusted_hash": trusted_hash(model),
         "sandbox": {**sb.describe(), "probe": report, "guard_probe": guarded}, "prices": lang.PRICES, "model_ops": itself["parts"]["model_ops"],
-        "n_total": model.n_total, "enumerated": verifier.enumerated, "check": verifier.check, "n_inputs": verifier.n_inputs(),
+        "n_total": verifier.scope.cardinality if verifier.scope is not None else model.n_total,
+        "enumerated": verifier.enumerated, "check": verifier.check, "n_inputs": verifier.n_inputs(),
+        **({"scope": itself["scope"]} if "scope" in itself else {}),
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
-        + (f"every one of {model.n_total:,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
+        + (f"every one of {verifier.n_inputs():,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
     if cfg["backend"] == "claude_code" and cfg["auth"] == "api_key":
         b = cfg["budget"]
         log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
@@ -270,14 +284,14 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
     run = read_json(path / "run.json")
     cfg = run["config"]
     log = Log(path, out)
-    if budget_usd is not None:
+    if budget_usd is not None and not (cfg.get("orchestration") or {}).get("enabled"):
         if cfg.get("auth") != "api_key":
             raise RuntimeError("this run is not billed to an API key, so it has no budget to change")
         errors = budget.check({**cfg["budget"], "run_usd": budget_usd})
         if errors:
             raise RuntimeError("; ".join(errors))
         before = budget.state(path, cfg["budget"])
-        budget.set_run_budget(path, budget_usd)
+        budget.set_run_budget(path, budget_usd, atomic=bool((cfg.get("orchestration") or {}).get("enabled")))
         log(f"the run's API budget is now ${budget_usd:.2f} (was ${before['run_usd']:.2f}; ${before['spent']:.2f} counted so far)",
             budget_usd=budget_usd)
     model = load_model(cfg["model"])
@@ -286,6 +300,10 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
             raise RuntimeError("the code, the prompt, the guide or the model folder changed since this run began; "
                                "resume with --accept-changes to go on all the same (the log will say so)")
         log("the trusted files changed since the run began; going on as asked", trusted_hash=trusted_hash(model))
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        from . import multi_agent
+
+        return multi_agent.drive(path, fake_scripts=fake_scripts, out=out, budget_usd=budget_usd)
     backend = make(cfg, log=log, fake_scripts=fake_scripts)
     forbidden = forbidden_strings(cfg, model)
     while True:
@@ -354,6 +372,10 @@ def finish(path: Path, out=print) -> dict:
 
     path = Path(path)
     cfg = read_json(path / "run.json")["config"]
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        from . import multi_agent
+
+        return multi_agent.finish(path, out=out)
     log = Log(path, out)
     model = load_model(cfg["model"])
     done = completed(path)
@@ -381,7 +403,11 @@ def finish(path: Path, out=print) -> dict:
         elif not first.enumerated:
             # The locked entry was picked as the best of several scorings, each on its own sample, so its recorded
             # reward leans high. One more scoring on a fresh sample is a fair measurement of it.
-            again = first.score(entry, claimed=best.get("claimed_fidelity"))
+            if cfg["verifier"].get("sample_seed") is not None:
+                again = first.score(entry, claimed=best.get("claimed_fidelity"),
+                                    seed=int.from_bytes(os.urandom(8), "big"))
+            else:
+                again = first.score(entry, claimed=best.get("claimed_fidelity"))
             if again["entry_sha256"] != lock["entry_sha256"]:
                 raise RuntimeError("the second scoring did not score the locked entry")
             lock["measured_again"] = {k: again[k] for k in ("status", "reason", "reward", "parts", "inputs")}
@@ -392,7 +418,12 @@ def finish(path: Path, out=print) -> dict:
         if second and old_seed.get("entry_sha256") == lock["entry_sha256"] and old_seed.get("status") == "scored":
             log(f"seed check on the second network (as measured before): {describe(old_seed)}")
         elif second:
-            receipt = Verifier(model, second, cfg).score(read_json(path / "locked_entry.json"), claimed=best.get("expected_fidelity_other"))
+            final_verifier = Verifier(model, second, cfg)
+            if cfg["verifier"].get("sample_seed") is not None:
+                receipt = final_verifier.score(read_json(path / "locked_entry.json"), claimed=best.get("expected_fidelity_other"),
+                                               seed=int.from_bytes(os.urandom(8), "big"))
+            else:
+                receipt = final_verifier.score(read_json(path / "locked_entry.json"), claimed=best.get("expected_fidelity_other"))
             if receipt["entry_sha256"] != lock["entry_sha256"]:
                 raise RuntimeError("the seed check did not score the locked entry")
             write_json(path / "seed_check.json", {**receipt, "at": now()})
@@ -432,6 +463,10 @@ def run_baseline(cfg: dict, fake_scripts=None, out=print, prices: str | None = N
     """The baseline for a run's config: found and frozen if it is on record, resumed if it was stopped, made if it is
     not. One process at a time runs a baseline; another one waits for it."""
     from . import baseline
+
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        raise RuntimeError("automatic baseline runs use the original round layout; for a research run, set "
+                           "orchestration.baseline_entry to a frozen comparison program instead")
 
     if (prices or lang.PRICES) != lang.PRICES:
         raise RuntimeError(f"the run was measured under {prices}, and this code prices under {lang.PRICES}: no baseline "
@@ -474,6 +509,10 @@ def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | No
     its folder), the run in this one; at the end this one waits for the baseline and reads the run against it."""
     from . import baseline
 
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        raise RuntimeError("--with-baseline is for the original run mode; set orchestration.baseline_entry "
+                           "to score a frozen comparison program on every research domain")
+
     prices = read_json(Path(resume) / "run.json").get("prices") if resume else lang.PRICES
     if prices != lang.PRICES:
         raise RuntimeError(f"{resume} was measured under {prices}, and this code prices under {lang.PRICES}")
@@ -513,6 +552,11 @@ def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | No
 def rescore(path: Path, reward_cfg: dict, out=print) -> list:
     """Every scored submission (and the seed check) under another reward, from the parts on record."""
     path = Path(path)
+    cfg = read_json(path / "run.json")["config"]
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        from . import multi_agent
+
+        return multi_agent.rescore(path, reward_cfg, out=out)
     rows = []
     for s in scored(completed(path)):
         r = rewards.compute(s["parts"], reward_cfg, s.get("claimed_fidelity"))

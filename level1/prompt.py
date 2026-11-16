@@ -8,6 +8,7 @@ second network".
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 from . import rewards
 from .util import REPO_ROOT
@@ -110,6 +111,9 @@ network makes the entry fail on the others."""
 
 
 def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumerated: bool) -> str:
+    if cfg["verifier"].get("scope") is not None:
+        return build_multi(cfg, model, round_no - 1, "regional", "Improve the interpretation on the assigned input domain.",
+                           "", history(rounds))
     template = (TEMPLATES / f"{cfg['prompt_template']}.md").read_text()
     sizes = ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}"
     inputs_note = (f"every input of the data set ({model.n_total:,} inputs)" if enumerated else
@@ -129,4 +133,94 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
         text = text.replace("{{" + k + "}}", str(v))
     if "{{" in text:
         raise ValueError(f"the prompt template has a field nobody fills: {text[text.index('{{'):][:40]}")
+    return text
+
+
+RESEARCH_ROLES = {
+    "lead": (
+        "You are the research lead and global integrator. Improve the complete program over the original "
+        "input distribution and develop the portfolio of regional explanations. Use checked regional "
+        "results to identify useful combinations, shared computations, counterexamples and missing "
+        "investigations. Submit global candidates for evaluation; conditional regional rewards are never "
+        "a substitute for measuring the composed program. Preserve useful regional findings even when "
+        "their integration does not improve the global score."),
+    "regional": (
+        "You are a regional investigator. Optimize the ordinary reward within the assigned domain. "
+        "Investigate the proposed question, but test competing explanations and refine an entry's region "
+        "when needed. Return executable candidates, the evidence for their behavior, failure cases and "
+        "ideas that the global integrator can reuse. You can submit directly to the evaluator; your "
+        "results are retained independently of the global score."),
+}
+
+ASSIGNMENT_NOTE = """
+You may schedule up to {count} regional investigations with
+`assign_region(scope, task, entry_name=None)`. Give each a concrete question, relevant evidence and a
+desired output. Scopes have kind `all`, `lengths` with a `lengths` list, or `predicate`. To use a
+predicate, save an ordinary entry whose region test defines the domain and pass its saved name as
+`entry_name`. The scope is fixed before the investigator begins. This tool cannot change the reward,
+operation prices or workload policy. Distinct hypotheses can run independently in the next phase.
+When assigning more than one investigation, leave one room to pursue an alternative explanation or an
+underexplored domain instead of making every worker follow the same hypothesis.
+"""
+
+
+def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
+                archive_summary, history) -> str:
+    """The research prompt uses the same language and reward, with an explicit conditional domain."""
+    import numpy as np
+
+    from . import lang
+    from .verifier import Verifier
+
+    if role not in RESEARCH_ROLES:
+        raise ValueError(f"unknown research role: {role}")
+    verifier = Verifier(model, cfg["network"], cfg)
+    example = lang.draw_inputs(model.data_set, model.input_space, 1, np.random.default_rng(0))
+    _, model_ops = lang.run_reference(verifier.reference, verifier.weights, model.n_ctx, example)
+    scope = cfg["verifier"].get("scope") or {"kind": "all"}
+    scope_meta = verifier.scope.metadata() if getattr(verifier, "scope", None) is not None else {}
+    workload = cfg["verifier"].get("workload_size") or scope_meta.get("cardinality")
+    if workload is None and getattr(verifier, "scope", None) is not None:
+        workload = verifier.scope.cardinality
+    if workload is None:
+        raise ValueError("a scoped research session needs a known finite support size or an explicit workload_size")
+    fixed = cfg["verifier"].get("sample_seed") is not None
+    inputs_note = (f"Every input of this task is checked ({verifier.n_inputs():,} inputs)." if verifier.enumerated else
+                   f"Development uses {'a fixed' if fixed else 'a fresh'} sample of {verifier.n_inputs():,} inputs "
+                   "from the conditional distribution.")
+    sample_note = ("The exact fidelity is used when every task input is checked." if verifier.enumerated else
+                   "The reward uses the lower end of the fidelity's 95% confidence interval. " +
+                   ("Repeating an identical entry uses the same development inputs and does not draw a luckier score. " if fixed else
+                    "Submissions receive fresh development samples. ") +
+                   "Adaptive search can fit development evidence, so final locked evaluation is reported separately.")
+    research = cfg.get("research_task") or {}
+    count = int(research.get("max_assignments", 0))
+    if isinstance(history, str):
+        notes = history
+    else:
+        notes = "\n\n".join(str(item.get("notes", "")) if isinstance(item, dict) else str(item) for item in (history or []))
+    if not isinstance(archive_summary, str):
+        archive_summary = json.dumps(archive_summary, indent=2, sort_keys=True)
+    fields = {
+        "ROLE": role, "ROLE_INSTRUCTIONS": RESEARCH_ROLES[role], "TASK": task,
+        "SCOPE": json.dumps(scope, indent=2, sort_keys=True), "MODEL_SOURCE": model.source().strip(),
+        "SIZES": ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}",
+        "MODEL_OPS": f"{model_ops:,}", "DATA_SET": model.data_set_text(), "ENTRY_DOC": ENTRY_DOC.read_text().strip(),
+        "REWARD_FORMULA": rewards.formula(cfg["reward"]), "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
+        "INPUTS_NOTE": inputs_note,
+        "WORKLOAD_NOTE": f"Setup is amortized over a declared workload of {int(workload):,} inputs at the task's distribution. "
+                         "This is separate from the number of verification inputs. For an exhaustively checked uniform "
+                         "finite domain, the default workload is one evaluation of each input.",
+        "SAMPLE_NOTE": sample_note, "EXACT_NOTE": EXACT_NOTE if cfg.get("exact_on_any_weights") else "",
+        "PYTHON_CALLS": cfg["session"]["python_calls"], "PYTHON_SECONDS": cfg["python"]["time_limit_s"],
+        "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
+        "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
+        "ASSIGNMENT_NOTE": ASSIGNMENT_NOTE.format(count=count) if role == "lead" and count else "No further investigations can be scheduled in this session.",
+        "ARCHIVE": archive_summary or "No checked submissions yet.", "HISTORY": notes or "No earlier research notes.",
+    }
+    text = (TEMPLATES / "research_v1.md").read_text()
+    for key, value in fields.items():
+        text = text.replace("{{" + key + "}}", str(value))
+    if "{{" in text:
+        raise ValueError("the research prompt has an unfilled template field")
     return text

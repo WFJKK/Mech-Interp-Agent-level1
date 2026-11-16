@@ -25,6 +25,19 @@ prompt_template: round_v1
 rounds_max: 5
 patience: 2                           # stop after this many rounds in a row that did not raise the best reward
 
+# Optional research lead, regional investigators and global integration. The original loop is the default.
+# In this mode rounds_max counts research cycles; the existing tool allowances are shared across roles.
+orchestration:
+  enabled: false
+  workers: 2
+  parallel: true
+  planning_fraction: 0.1
+  regional_fraction: 0.6             # the rest is reserved for global integration
+  development_seed: 0                # fixed development inputs; final evaluation is separate
+  archive_per_scope: 8               # entries shown in summaries; all records are retained
+  initial_regions: []                # optional [{scope: {...}, task: "..."}] if the lead proposes none
+  baseline_entry: null               # an optional frozen entry, scored under each task's conditions
+
 # one session (one round)
 session:
   python_calls: 40
@@ -53,6 +66,9 @@ verifier:
   reference_samples: 8                # when it samples, the report scores each reference entry on this many
                                       # fixed samples and gives the mean
   time_limit_s: 120                   # per entry
+  scope: null                        # null keeps original evaluation; all, lengths or predicate in regional mode
+  workload_size: null                # scoped mode: finite support size, or an explicit workload when unknown
+  sample_seed: null                  # null draws fresh development samples in the original mode
 
 # what an entry may hold
 entry:

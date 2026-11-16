@@ -58,7 +58,7 @@ print(measure(g.entry(predict=g.token(0)))["n_inputs"])
 """
     out = session.run_python(code)
     assert out["sandbox"] == "landlock" and "READ" not in out["output"] and out["output"].count("blocked PermissionError") == 3
-    assert "['harness.py', 'input.json', 'lv1.py', 'model.py', 'out', 'recipe.py', 'rewards.py', 'tmp', 'weights.npz']" in out["output"]
+    assert "['harness.py', 'input.json', 'lv1.py', 'model.py', 'out', 'recipe.py', 'regions.py', 'rewards.py', 'tmp', 'weights.npz']" in out["output"]
     assert out["output"].strip().endswith("4096")
 
 

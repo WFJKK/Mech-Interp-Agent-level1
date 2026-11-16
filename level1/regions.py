@@ -69,7 +69,7 @@ def normalize_scope(spec=None):
     kind = spec.get("kind")
     keys = {"all": {"kind"}, "lengths": {"kind", "lengths"},
             "predicate": {"kind", "entry", "max_draws", "mass_samples"}}
-    if kind not in keys:
+    if not isinstance(kind, str) or kind not in keys:
         raise lang.EntryError("scope.kind must be all, lengths or predicate")
     extra = set(spec) - keys[kind]
     if extra:

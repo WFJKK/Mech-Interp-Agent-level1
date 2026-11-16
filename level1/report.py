@@ -23,6 +23,7 @@ which of them reach for files or the system, for a person to read (in a weak san
 from __future__ import annotations
 
 import argparse
+import json
 import re
 import sys
 from pathlib import Path
@@ -244,6 +245,7 @@ def build(path: Path) -> dict:
         "backend": cfg["backend"], "agent_model": cfg["agent_model"], "effort": cfg["effort"], "reward": cfg["reward"],
         "prices": run["prices"], "model_ops": run["model_ops"], "n_total": run["n_total"], "enumerated": run["enumerated"],
         "n_inputs": run.get("n_inputs"),
+        "scope": run.get("scope"), "development_seed": cfg.get("verifier", {}).get("sample_seed"),
         "sandbox": {k: v for k, v in run["sandbox"].items() if k not in ("probe", "guard_probe")},
         "sandbox_escapes": run["sandbox"]["probe"]["critical_escapes"],
         "guard_escapes": (run["sandbox"].get("guard_probe") or {}).get("critical_escapes"), "ended": ended,
@@ -384,6 +386,8 @@ def markdown(rep: dict) -> str:
     second = rep["networks"][1] if len(rep["networks"]) > 1 else None
     checked = ("every one checked" if rep["enumerated"] else
                f"{rep['n_inputs']:,} drawn afresh for each scoring" if rep.get("n_inputs") else "sampled for each scoring")
+    if not rep["enumerated"] and rep.get("development_seed") is not None:
+        checked = f"{rep['n_inputs']:,} inputs in a fixed development sample"
     out = [f"# Run {rep['run_id']}", ""]
     out += [f"- Model {rep['model']}, rounds on {first}" + (f", seed check on {second}" if second else "") + ".",
             f"- Agent: {rep['agent_model']} at effort {rep['effort']}, through the {rep['backend']} backend.",
@@ -393,6 +397,13 @@ def markdown(rep: dict) -> str:
             f"- Sandbox: {rep['sandbox']['mode']}" + _sandbox_note(rep) + ".",
             f"- The rounds ended: {rep['ended'] or 'not yet'}.", ""]
 
+    if rep.get("scope"):
+        scope = rep["scope"]
+        out += ["## Assigned input domain", "",
+                f"Scope `{scope['id']}`: `{json.dumps(scope['spec'], sort_keys=True)}`.", "",
+                f"Mass in the original distribution: {scope.get('mass')}; exact mass: {scope.get('mass_exact')}.",
+                f"Setup workload: {scope.get('workload_size')} inputs ({scope.get('workload_basis')}). "
+                "This is independent of the verification sample size.", ""]
     out += ["## The locked entry", ""]
     lock, seed = rep["lock"], rep["seed_check"]
     if not lock or not lock.get("locked"):
@@ -503,6 +514,12 @@ def markdown(rep: dict) -> str:
 
 def write(path: Path) -> dict:
     path = Path(path)
+    cfg = read_json(path / "run.json")["config"]
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        from . import multi_agent
+
+        multi_agent.write_report(path)
+        return read_json(path / "report.json")
     rep = build(path)
     write_json(path / "report.json", rep)
     atomic_write(path / "report.md", markdown(rep))

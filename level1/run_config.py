@@ -8,6 +8,7 @@ be merged into replaces it whole, since the parameters of one reward mean nothin
 from __future__ import annotations
 
 from pathlib import Path
+import math
 
 from . import budget, rewards
 from .util import REPO_ROOT, read_yaml
@@ -53,8 +54,10 @@ def load(path, overrides: dict | None = None) -> dict:
     missing = [k for k in REQUIRED if not cfg.get(k)]
     if missing:
         raise ConfigError(f"the run config needs {missing}")
-    if cfg["rounds_max"] < 1 or cfg["patience"] < 1:
-        raise ConfigError("rounds_max and patience must be at least 1")
+    for key in ("rounds_max", "patience"):
+        if isinstance(cfg[key], bool) or not isinstance(cfg[key], int) or cfg[key] < 1:
+            raise ConfigError("rounds_max and patience must be positive whole numbers")
+    check_orchestration(cfg)
     try:
         rewards.check(cfg["reward"])
     except ValueError as exc:
@@ -72,6 +75,79 @@ def load(path, overrides: dict | None = None) -> dict:
         if errors:
             raise ConfigError("; ".join(errors))
     return cfg
+
+
+def check_orchestration(cfg: dict) -> None:
+    """Validate the optional research loop without changing old runs' reward or measurement policy."""
+    options = cfg.get("orchestration") or {}
+    defaults = read_yaml(DEFAULTS).get("orchestration", {})
+    if not isinstance(options, dict):
+        raise ConfigError("orchestration must be a mapping")
+    unknown = sorted(set(options) - set(defaults))
+    if unknown:
+        raise ConfigError(f"unknown orchestration options: {unknown}")
+    for key in ("enabled", "parallel"):
+        if not isinstance(options.get(key), bool):
+            raise ConfigError(f"orchestration.{key} must be true or false")
+    if not options.get("enabled"):
+        return
+    workers = options.get("workers")
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers not in (1, 2):
+        raise ConfigError("orchestration.workers must be 1 or 2")
+    fractions = []
+    for key in ("planning_fraction", "regional_fraction"):
+        value = options.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or not 0 < value < 1:
+            raise ConfigError(f"orchestration.{key} must be between 0 and 1")
+        fractions.append(value)
+    if sum(fractions) >= 1:
+        raise ConfigError("planning_fraction + regional_fraction must leave a positive share for global integration")
+    for key in ("python_calls", "submissions", "max_turns"):
+        value = cfg["session"][key]
+        if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+            raise ConfigError(f"session.{key} must be a positive whole number in research mode")
+    seconds = cfg["session"]["seconds"]
+    if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds <= 0:
+        raise ConfigError("session.seconds must be a positive finite number")
+    planning, regional = fractions
+    global_fraction = 1 - planning - regional
+    for key in ("python_calls", "max_turns"):
+        amount = cfg["session"][key]
+        if math.floor(amount * regional) // workers < 1 or math.floor(amount * global_fraction) < 1:
+            raise ConfigError(f"session.{key} is too small after sharing its allocation between regional and global integration roles")
+    if math.floor(cfg["session"]["max_turns"] * cfg["rounds_max"] * planning) < 1:
+        raise ConfigError("the planning allocation must allow at least one turn")
+    for key in ("development_seed", "archive_per_scope"):
+        value = options.get(key)
+        if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key == "archive_per_scope" else 0):
+            raise ConfigError(f"orchestration.{key} must be a valid nonnegative integer (archive_per_scope must be positive)")
+    if int(cfg["session"]["submissions"]) <= workers:
+        raise ConfigError("session.submissions must leave a submission for global integration after the regional workers")
+    if int(cfg["session"]["python_calls"]) <= workers:
+        raise ConfigError("session.python_calls must leave exploration calls for global integration")
+    initial = options.get("initial_regions")
+    if not isinstance(initial, list):
+        raise ConfigError("orchestration.initial_regions must be a list of scope/task mappings")
+    from .regions import normalize_scope
+
+    for assignment in initial:
+        if not isinstance(assignment, dict) or set(assignment) != {"scope", "task"}:
+            raise ConfigError("each initial region needs only scope and task")
+        if not isinstance(assignment["task"], str) or not assignment["task"].strip():
+            raise ConfigError("each initial region needs a nonempty task")
+        try:
+            assignment["scope"] = normalize_scope(assignment["scope"])
+        except (ValueError, RuntimeError) as exc:
+            raise ConfigError(f"invalid initial region: {exc}") from None
+    baseline = options.get("baseline_entry")
+    if baseline is not None and (not isinstance(baseline, str) or not baseline.strip()):
+        raise ConfigError("orchestration.baseline_entry must be a path or null")
+    # An explicit scope opts into stable workload accounting. The absent scope retains the old evaluator.
+    if cfg["verifier"].get("scope") is None:
+        cfg["verifier"]["scope"] = {"kind": "all"}
+    elif normalize_scope(cfg["verifier"]["scope"]) != {"kind": "all"}:
+        raise ConfigError("the orchestration's global task must use scope kind all; put regional scopes in initial_regions")
+    cfg["verifier"]["sample_seed"] = options["development_seed"]
 
 
 def reward_from_args(name: str = "r_alpha", params: list | None = None, alpha: float | None = None,

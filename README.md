@@ -90,6 +90,35 @@ measured parts, so a finished run can be scored again under another reward
 
 ![The agentic flow of level 1](docs/figures/level1-flow.png)
 
+### Experimental regional and global researchers
+
+The `multi-agent-experiment` branch adds an optional research lead with up to two regional workers.
+Each worker optimizes the **same reward** on its assigned input domain. The lead uses the checked
+findings to build a global program, whose reward is measured on the original distribution. Useful
+regional results remain in a separate archive even when the best global reward does not change.
+
+```bash
+python -m level1.loop run --config config/experiments/lin-c-regional.yaml
+```
+
+This experiment includes initial investigations of the two-token region and its complement. The
+agents receive the input domains and research questions, without being told the training objective.
+The lead can propose further regions. A separate single-researcher run asks only about the two-token
+domain and checks all 4,096 inputs:
+
+```bash
+python -m level1.loop run --config config/experiments/lin-c-length2.yaml
+```
+
+The original configurations keep the original run mode. In the new scoped mode, setup cost uses a
+declared workload independently of the number of verification samples. The report records that
+convention, so compare methods under matching conditions. The entry format, operation prices and
+reward function are unchanged.
+
+See [the research-mode guide](docs/MULTI_AGENT.md) for shared budgets, parallel workers, generic
+comparison entries, resume behavior, final evaluation and the archive layout. Implementation tests
+use the fake backend; adding this mode does not establish that it improves research performance.
+
 ## Results
 
 ### The models and what we did
