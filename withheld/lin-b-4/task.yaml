@@ -1,0 +1,28 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The network was trained to output the largest of its four tokens (max of 4), on inputs of exactly four
+  tokens and on nothing else, and here it is asked about exactly those inputs: the data set is what it was
+  trained on. The agent is told the data set in full, as for every model (four tokens, no empty slot), but
+  not what the network was trained to do.
+provenance:
+  source: models/lin-b of this repository, the same two networks byte for byte (the same sha256), asked
+    about four slots instead of eight. The network has no positions and an empty slot adds an all-zero column,
+    so four tokens give the same output in four slots as in the first four of eight.
+  networks:
+    lin-b-4-s0: {was: lin-b-s0}
+    lin-b-4-s1: {was: lin-b-s1}
+  how_often_the_output_is_the_largest_token:   # every one of the 64^4 inputs, in float64 (16 November 2026)
+    lin-b-4-s0: {inputs: "16,748,696 of 16,777,216", share: 0.99830}
+    lin-b-4-s1: {inputs: "16,741,131 of 16,777,216", share: 0.99785}
+hygiene:
+  - max4
+  - max-of
+  - max of
+  - largest
+  - larger
+  - greater of
+  - bigger of
+  - Gross
+  - compact proof
+  - trained on

@@ -12,12 +12,14 @@ they were trained, how often they follow the task, and the words the hygiene che
 | lin-c | linear, width 8 | the smaller of its tokens (min of 2) | exactly 2 tokens | 1 to 4 tokens |
 | lin-b | linear, width 8 | the largest of its tokens (max of 4) | exactly 4 tokens | 1 to 8 tokens |
 | lin-d | linear, width 8 | the smallest of its tokens (min of 4) | exactly 4 tokens | 1 to 8 tokens |
+| lin-b-4 | lin-b's two networks | max of 4 | exactly 4 tokens | exactly 4 tokens, in 4 slots: its training inputs |
 | att-a | transformer, width 32 | max of 2 | exactly 2 tokens | 1 or 2 tokens |
 | att-b | transformer, width 32 | min of 2 | exactly 2 tokens | 1 or 2 tokens |
 | att-c | transformer, width 32 | max of 4 | exactly 4 tokens | 1 to 4 tokens |
 | att-d | transformer, width 32 | min of 4 | exactly 4 tokens | 1 to 4 tokens |
 | rnn-a, rnn-b, rnn-c | ReLU RNN, 2, 4 and 16 units | the position of the second-largest of 2, 3 and 10 numbers (2nd argmax) | standard normal numbers | the same: its training inputs |
 | lin-e, lin-f, att-e | the shapes of lin-c, lin-d and att-c | nothing: never trained | | as their twins |
+| lin-f-4 | lin-f's networks, in lin-b-4's design and data set | nothing: never trained | | as lin-b-4 |
 | rnn-d, rnn-e, rnn-f | the shapes of rnn-a, rnn-b and rnn-c | nothing: never trained | | as their twins |
 
 - **Linear**: 64 tokens, each with an embedding column; the columns of an input's tokens are added up,

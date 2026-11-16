@@ -1,0 +1,34 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  Untrained. The networks were never trained: they are lin-f's networks byte for byte, each the state lin-d's
+  trainer starts from, drawn and kept as drawn. A model for the baseline of lin-b-4: the same design, sizes
+  and data set (four tokens in four slots), so a run on it is a usual run in everything the agent is given,
+  with nothing learned to find, and what the agent achieves here is generic.
+baseline_of: [lin-b-4]
+initialization:
+  how: withheld/lin-d/train.py, init(numpy.random.default_rng(seed)), uniform in +-1/sqrt(fan_in) for embed (8 x 64), hidden (8 x 8) and unembed (64 x 8), float32; then embed given one more column, all zeros, for an empty slot
+  drawn_by: withheld/lin-f-4/draw.py (the same seeds as withheld/lin-f/draw.py, so the same networks)
+  networks:
+    lin-f-4-s0: {seed: 2000}
+    lin-f-4-s1: {seed: 2001}
+    lin-f-4-s2: {seed: 2002}
+    lin-f-4-s3: {seed: 2003}
+    lin-f-4-s4: {seed: 2004}
+    lin-f-4-s5: {seed: 2005}
+  roles: s0 for the rounds, s1 for the seed check, s2 to s5 for checking an entry again later
+hygiene:
+  - untrained
+  - not trained
+  - never trained
+  - before training
+  - random weights
+  - randomly initialized
+  - randomly initialised
+  - random init
+  - initialization
+  - initialisation
+  - baseline
+  - trained on
+  - Gross
+  - compact proof

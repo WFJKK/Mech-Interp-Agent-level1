@@ -1,6 +1,6 @@
-"""The baseline models lin-e, lin-f and att-e: networks of the shapes of lin-c, lin-d and att-c (and of lin-a-1to4,
-lin-b and att-d, which share them) that were never trained, drawn the way their twins' trainers start
-(withheld/<name>/draw.py). A run on one is a usual run in everything the agent is given, so what it achieves
+"""The baseline models lin-e, lin-f, lin-f-4 and att-e: networks of the shapes of lin-c, lin-d, lin-b-4 and att-c
+(and of lin-a-1to4, lin-b and att-d, which share them) that were never trained, drawn the way their twins'
+trainers start (withheld/<name>/draw.py). A run on one is a usual run in everything the agent is given, so what it achieves
 there owes nothing to learning: it is the baseline that runs of that shape are read against."""
 
 import importlib.util
@@ -21,7 +21,7 @@ from level1.verifier import Verifier
 pytestmark = pytest.mark.filterwarnings("ignore:(divide by zero|overflow|invalid value) encountered in matmul:RuntimeWarning")
 
 REPO = Path(__file__).resolve().parent.parent
-BASELINES = {"lin-e": ("lin-c", "lin-a-1to4"), "lin-f": ("lin-d", "lin-b"), "att-e": ("att-c", "att-d")}
+BASELINES = {"lin-e": ("lin-c", "lin-a-1to4"), "lin-f": ("lin-d", "lin-b"), "lin-f-4": ("lin-b-4",), "att-e": ("att-c", "att-d")}
 NETWORKS = [f"s{i}" for i in range(6)]
 # What these networks are, in the words the agent must never meet. They are said in withheld/ and here only.
 UNTRAINED_WORDS = ["untrained", "not trained", "never trained", "before training", "random weights", "randomly initialized",

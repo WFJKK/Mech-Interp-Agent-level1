@@ -1,0 +1,27 @@
+name: lin-b-4
+sizes:
+  n_ctx: 4        # slots per input; a slot holds a token or is empty
+  d_vocab: 64     # tokens are whole numbers 0 .. d_vocab - 1; the output is one of them too
+  d_model: 8
+input_space: [65, 65, 65, 65]   # per slot: a token 0 .. 63, or 64 for an empty slot
+n_outputs: 64
+data_set:
+  kind: lengths
+  lengths: [4]            # every input has four tokens
+  vocab: 64               # each below this and equally likely
+  empty: 64               # what an empty slot holds; this data set has none
+  says: >
+    An input is drawn like this. Four tokens are picked, each a whole number from 0 to 63 and equally
+    likely, and they fill the four slots, so no slot is empty. The data set is every input that can be
+    drawn this way, each as likely as any other: 64^4 = 16,777,216 different inputs.
+weights:                # as stored in the zoo and as the agent sees them: name and shape
+  embed: [8, 65]        # its last column, the empty slot's, is all zeros
+  hidden: [8, 8]
+  unembed: [64, 8]
+networks:
+  - id: lin-b-4-s0
+    weights: zoo/lin-b-4-s0.npz
+    sha256: e51fcaa64340dca007dc460b02c3efef285eacaeb1743ea8d4c945b1bc469f39
+  - id: lin-b-4-s1
+    weights: zoo/lin-b-4-s1.npz
+    sha256: aefa53e155168662f19f9644c3f9f2fbae116de5ac3659a1d5d6e3c09308e9da
