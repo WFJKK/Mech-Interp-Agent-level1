@@ -145,6 +145,38 @@ def test_other_conditions_need_another_baseline(pair, tmp_path):
     assert baseline.find(pair["cfg"], where=pair["run"].parent)["state"] == "frozen"
 
 
+def test_optional_research_defaults_preserve_legacy_baseline_conditions(tmp_path):
+    current = config(tmp_path)
+    legacy = {k: v for k, v in current.items() if k != "orchestration"}
+    legacy["verifier"] = {k: v for k, v in current["verifier"].items()
+                          if k not in {"scope", "workload_size", "sample_seed"}}
+    assert baseline.conditions(current, lang.PRICES) == baseline.conditions(legacy, lang.PRICES)
+    assert baseline.config_for(current)["run_id"] == baseline.config_for(legacy)["run_id"]
+    assert all(k in current["verifier"] for k in ("scope", "workload_size", "sample_seed"))
+    for key, value in (("scope", {"kind": "all"}), ("workload_size", 4096), ("sample_seed", 0)):
+        changed = {**current, "verifier": {**current["verifier"], key: value}}
+        assert baseline.differences(baseline.conditions(changed, lang.PRICES),
+                                    baseline.conditions(legacy, lang.PRICES)) == ["verifier"]
+
+
+def test_enabled_orchestration_cannot_find_a_single_agent_baseline(tmp_path):
+    current = config(tmp_path)
+    old_baseline = baseline.config_for(current)
+    old_baseline.pop("orchestration", None)
+    old_baseline["verifier"] = {k: v for k, v in old_baseline["verifier"].items()
+                                if k not in {"scope", "workload_size", "sample_seed"}}
+    write_json(tmp_path / "existing-baseline" / "run.json", {"config": old_baseline, "prices": lang.PRICES})
+    assert baseline.find(current)["path"] == tmp_path / "existing-baseline"
+    research = {**current, "orchestration": {**current["orchestration"], "enabled": True}}
+    assert baseline.find(research) is None
+    assert baseline.differences(baseline.conditions(current, lang.PRICES),
+                                baseline.conditions(research, lang.PRICES)) == ["orchestration"]
+    one_worker = {**research, "orchestration": {**research["orchestration"], "workers": 1}}
+    two_workers = {**research, "orchestration": {**research["orchestration"], "workers": 2}}
+    assert baseline.differences(baseline.conditions(one_worker, lang.PRICES),
+                                baseline.conditions(two_workers, lang.PRICES)) == ["orchestration"]
+
+
 def test_a_run_measured_under_other_prices_is_not_compared(pair, tmp_path):
     copy = tmp_path / "old-run"
     copy.mkdir()

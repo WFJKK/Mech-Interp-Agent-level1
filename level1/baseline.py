@@ -99,7 +99,16 @@ def baseline_models(model) -> list:
 
 # which runs ---------------------------------------------------------------------------------------
 def conditions(cfg: dict, prices: str | None) -> dict:
-    return {**{k: cfg.get(k) for k in CONDITIONS}, "prices": prices}
+    out = {**{k: cfg.get(k) for k in CONDITIONS}, "prices": prices}
+    if isinstance(out.get("verifier"), dict):
+        # New optional defaults do not change legacy measurements or invalidate their frozen baselines.
+        optional = {"scope", "workload_size", "sample_seed"}
+        out["verifier"] = {k: v for k, v in out["verifier"].items() if k not in optional or v is not None}
+    orchestration = cfg.get("orchestration") or {}
+    if orchestration.get("enabled"):
+        # A research portfolio has different search conditions and cannot reuse a single-agent baseline.
+        out["orchestration"] = orchestration
+    return out
 
 
 def differences(a: dict, b: dict) -> list:
