@@ -367,7 +367,7 @@ class ClaudeCodeBackend:
         st = budget.state(run_path, self.cfg["budget"])
         return budget.spent_why(st) if budget.left(st) < budget.MIN_CAP_USD else None
 
-    def command_line(self, mcp_config: Path) -> list[str]:
+    def command_line(self, mcp_config: Path, tool_names=None) -> list[str]:
         cmd = [self.command, "-p"]
         if self.auth == "api_key":
             # --bare reads no login at all (no OAuth, no keychain), so the key is the only way it can pay; the
@@ -377,7 +377,8 @@ class ClaudeCodeBackend:
         # flags below give the same isolation either way.
         cmd += ["--tools", "", "--output-format", "stream-json", "--verbose", "--no-session-persistence"]
         cmd += ["--setting-sources", "", "--disable-slash-commands", "--strict-mcp-config"]
-        cmd += ["--mcp-config", str(mcp_config), "--allowedTools", ",".join(f"mcp__{SERVER_NAME}__{t}" for t in TOOLS)]
+        names = TOOLS if tool_names is None else tool_names
+        cmd += ["--mcp-config", str(mcp_config), "--allowedTools", ",".join(f"mcp__{SERVER_NAME}__{t}" for t in names)]
         cmd += ["--max-turns", str(int(self.cfg["session"]["max_turns"]))]
         cmd += ["--system-prompt", SYSTEM_PROMPT, "--model", self.cfg["agent_model"]]
         if self.cfg.get("effort") is not None:
@@ -417,8 +418,9 @@ class ClaudeCodeBackend:
     def respond(self, prompt_text: str, index: int, where, session) -> Response:
         where = Path(where)
         where.mkdir(parents=True, exist_ok=True)
-        cmd = self.command_line(self.mcp_config(session, where))
+        cmd = self.command_line(self.mcp_config(session, where), session.TOOLS)
         k, run_path = index + 1, self.run_path(session)
+        grouped = self.auth == "api_key" and "cycle_id" in self.cfg["budget"]
         t0 = time.monotonic()
         failures = []
         tries = int(self.retries["tries"])
@@ -433,14 +435,20 @@ class ClaudeCodeBackend:
             n = next_stream(where)
             this_try = list(cmd)
             if self.auth == "api_key":
-                st = budget.state(run_path, self.cfg["budget"])
-                cap = budget.cap(st, k)
+                if grouped:
+                    cap = budget.claim(run_path, k, n, self.cfg["budget"])
+                else:
+                    st = budget.state(run_path, self.cfg["budget"])
+                    cap = budget.cap(st, k)
                 if cap <= 0:  # what the session submitted stands; the loop ends the rounds if the run's is spent
+                    if grouped:
+                        st = budget.state(run_path, self.cfg["budget"])
                     ended = budget.spent_why(st, k)
                     self.log(f"  {ended}; the round ends with what it submitted")
                     data, messages, text = {}, [], f"({ended})"
                     break
-                budget.start(run_path, k, n, cap)
+                if not grouped:
+                    budget.start(run_path, k, n, cap)
                 caps.append(cap)
                 this_try += ["--max-budget-usd", f"{cap:.2f}"]
             r, timed_out = None, False
@@ -453,7 +461,7 @@ class ClaudeCodeBackend:
                     timed_out, stdout = True, as_text(exc.stdout)
                 except OSError as exc:
                     if self.auth == "api_key":
-                        budget.end(run_path, k, n, 0.0, "not started")
+                        budget.end(run_path, k, n, 0.0, "not started", atomic=grouped)
                     raise StopRun(f"could not run the Claude Code CLI: {exc}") from exc
             # Everything the CLI emitted on this try, as it came: the messages, the tool calls and as much of the
             # model's reasoning as the CLI shows (a try stopped at the time limit: what it emitted until then).
@@ -467,7 +475,7 @@ class ClaudeCodeBackend:
             if isinstance(cost, (int, float)) and not isinstance(cost, bool):
                 costs.append(float(cost))
             if self.auth == "api_key":
-                budget.end(run_path, k, n, cost, "timed out" if timed_out else (data or {}).get("subtype"))
+                budget.end(run_path, k, n, cost, "timed out" if timed_out else (data or {}).get("subtype"), atomic=grouped)
             if init:
                 version = init.get("claude_code_version") or version
                 sources.append(init.get("apiKeySource"))
@@ -547,8 +555,11 @@ class ClaudeCodeBackend:
             meta["budget"] = {"caps_usd": caps, "round_counted_usd": round(st["rounds"].get(k, 0.0), 6),
                               "run_counted_usd": round(st["spent"], 6), "round_usd": st["round_usd"], "run_usd": st["run_usd"],
                               "unreported_tries": st["unreported"], "stopped_tries": st["stopped"]}
+            if grouped:
+                meta["budget"].update(cycle_id=st["cycle_id"], cycle_usd=st["cycle_usd"],
+                                      cycle_counted_usd=round(st["cycles"].get(st["cycle_id"], 0.0), 6))
             self.log(f"  API: round {k} ${st['rounds'].get(k, 0.0):.2f}; the run ${st['spent']:.2f} of ${st['run_usd']:.2f}"
                      + (f" ({st['unreported']} tries counted at their caps: the CLI reported no cost"
-                        + (f"; {st['stopped']} of them stopped with the loop, counted in the run's total only" if st.get("stopped") else "")
+                        + (f"; {st['stopped']} of them have no closing record" if st.get("stopped") else "")
                         + ")" if st["unreported"] else ""))
         return Response(text=str(text or ""), meta=meta)
