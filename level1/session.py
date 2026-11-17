@@ -26,8 +26,10 @@ started again (a resumed run) continues them, and its earlier submissions stay.
 from __future__ import annotations
 
 import json
+import math
 import re
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from . import lang
@@ -114,12 +116,14 @@ def make_result(weights, info, extra):
              "entries": entries, "save_entry": save_entry, "measure": measure, "network_outputs": network_outputs,
              "reference_entry": reference_entry, "__name__": "__main__"}
     buf = io.StringIO()
+    error = None
     with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
         try:
             exec(compile(CODE, "<run_python>", "exec"), scope)
-        except BaseException:
+        except BaseException as exc:
+            error = {"type": type(exc).__name__, "message": str(exc)[:1000]}
             buf.write(traceback.format_exc())
-    return {"stdout": buf.getvalue()[-20000:], "entries": saved}
+    return {"stdout": buf.getvalue()[-20000:], "entries": saved, "error": error}
 '''
 
 TOOLS = {
@@ -275,14 +279,28 @@ class Session:
         append_jsonl(self.path / "tools.jsonl", {"at": now(), "tool": tool, "args": short, "outcome": outcome, "seconds": round(seconds, 2)})
 
     def _spend(self, tool: str) -> None:
+        if self.state.get("attempt_deadline") is not None and time.time() >= self.state["attempt_deadline"]:
+            raise ToolError("the current attempt has reached its wall-clock deadline")
         used, budget = self.state["used"][tool], self.state["budgets"][tool]
         if used >= budget:
             raise ToolError(f"the {tool} budget of this session ({budget} calls) is used up")
         self.state["used"][tool] = used + 1
         write_json(self.state_path, self.state)
 
+    def begin_attempt(self, timeout_s: float) -> None:
+        """Publish the current CLI attempt's deadline without refreshing any tool quota."""
+        if isinstance(timeout_s, bool) or not isinstance(timeout_s, (int, float)) or not math.isfinite(timeout_s) or timeout_s <= 0:
+            raise ValueError("an attempt needs a positive finite timeout")
+        self.reload()
+        started = time.time()
+        self.state.update(attempt_started_at=started, attempt_deadline=started + float(timeout_s))
+        write_json(self.state_path, self.state)
+
     def remaining(self) -> dict:
-        return {t: self.state["budgets"][t] - self.state["used"][t] for t in self.state["budgets"]}
+        out = {t: self.state["budgets"][t] - self.state["used"][t] for t in self.state["budgets"]}
+        if self.state.get("attempt_deadline") is not None:
+            out["wall_seconds_remaining"] = max(0.0, self.state["attempt_deadline"] - time.time())
+        return out
 
     def model(self):
         if self._model is None:
@@ -330,15 +348,18 @@ class Session:
             m = self.model()
             py = self.state["python"]
             limits = Limits.from_config(py)
+            if self.state.get("attempt_deadline") is not None:
+                limits = replace(limits, time_s=min(limits.time_s, max(0.0, self.state["attempt_deadline"] - time.time())))
             cfg = {"sandbox": self.state["sandbox"], "sandbox_image": self.state["sandbox_image"], "runs_dir": self.state["runs_dir"]}
             sb = choose(cfg, protected_paths(cfg, m, Path(self.state["run_path"])))
             extra = {"entries": self.entries(), "reward": self.state["reward"], "limits": self.state["entry"],
                      "verifier": self.state["verifier"]}
             ex = run_recipe(WRAPPER.replace("@@CODE@@", repr(code)), self.box_files(), m.load_weights(self.state["network"]),
                             self.info(), extra, limits, self.state["sandbox_dir"], sandbox=sb)
-            saved, problems = [], []
+            saved, problems, error = [], [], None
             if ex.status == "ok" and isinstance(ex.result, dict):
                 output = str(ex.result.get("stdout", ""))
+                error = ex.result.get("error")
                 got = ex.result.get("entries")
                 for name, entry in (got.items() if isinstance(got, dict) else []):
                     try:
@@ -351,16 +372,19 @@ class Session:
                         problems.append(f"{name}: not saved: {exc}")
             else:
                 output = f"({ex.status}) {ex.error or ''}"
-            out = {"status": ex.status, "output": output[-MAX_TEXT:], "saved_entries": sorted(saved), "runtime_s": ex.runtime_s,
+            status = "error" if error or problems else ex.status
+            out = {"status": status, "output": output[-MAX_TEXT:], "saved_entries": sorted(saved), "runtime_s": ex.runtime_s,
                    "sandbox": ex.mode, "remaining": self.remaining()}
+            if error:
+                out["error"] = error
             if problems:
                 out["problems"] = problems
             atomic_write(self.path / "python" / f"{n:03d}.txt", out["output"])
             audit = ex.audit or {"present": False, "complete": False, "n_blocked": 0, "blocked": []}
             record = "complete" if audit.get("complete") else ("incomplete" if audit.get("present") else "missing")
             if audit.get("n_blocked") or record != "complete":
-                write_json(self.path / "python" / f"{n:03d}.audit.json", {**audit, "record": record, "status": ex.status})
-            self._log("run_python", args, {"status": ex.status, "output": output[:500], "saved": sorted(saved), "sandbox": ex.mode,
+                write_json(self.path / "python" / f"{n:03d}.audit.json", {**audit, "record": record, "status": status})
+            self._log("run_python", args, {"status": status, "output": output[:500], "saved": sorted(saved), "sandbox": ex.mode,
                                            "blocked": int(audit.get("n_blocked") or 0), "guard_record": record}, time.monotonic() - t0)
             return out
         except ToolError as exc:

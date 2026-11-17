@@ -1,5 +1,6 @@
 """A session's two tools against the real sandbox (process mode) and the real verifier."""
 
+import json
 from pathlib import Path
 
 import pytest
@@ -99,9 +100,36 @@ def test_a_program_stopped_from_outside_leaves_an_incomplete_record(tmp_path):
 
 def test_mistakes_in_the_code_come_back_as_text(session):
     out = session.run_python("print('before')\nprint(1 / 0)")
-    assert out["status"] == "ok" and "before" in out["output"] and "ZeroDivisionError" in out["output"]
+    assert out["status"] == "error" and "before" in out["output"] and "ZeroDivisionError" in out["output"]
+    assert out["error"]["type"] == "ZeroDivisionError"
+    assert read_jsonl(session.path / "tools.jsonl")[-1]["outcome"]["status"] == "error"
     out = session.run_python("g = graph()\nsave_entry('bad name!', g.entry(predict=g.token(0)))\nsave_entry('fine', g.entry(predict=g.token(0)))")
     assert out["saved_entries"] == ["fine"] and "bad name!" in out["problems"][0]
+    assert out["status"] == "error"
+
+
+def test_python_error_keeps_entries_saved_before_the_failure(session):
+    from level1 import mcp_server
+
+    response = mcp_server.handle(session, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                          "params": {"name": "run_python", "arguments": {
+                                              "code": SAVE + "\nraise ValueError('unfinished improvement')"}}})
+    assert response["result"]["isError"] is True
+    result = json.loads(response["result"]["content"][0]["text"])
+    assert result["status"] == "error" and result["saved_entries"] == ["diagonal"]
+    assert result["error"]["type"] == "ValueError"
+    assert session.submit_entry("diagonal", 0.9)["status"] == "scored"
+
+
+def test_expired_attempt_does_not_spend_a_tool_slot(session, monkeypatch):
+    monkeypatch.setattr("level1.session.time.time", lambda: 100.0)
+    session.begin_attempt(10)
+    assert session.remaining()["wall_seconds_remaining"] == 10.0
+    monkeypatch.setattr("level1.session.time.time", lambda: 111.0)
+    with pytest.raises(ToolError, match="wall-clock deadline"):
+        session.run_python("print('too late')")
+    assert session.state["used"]["run_python"] == 0
+    assert session.remaining()["wall_seconds_remaining"] == 0.0
 
 
 def test_submit_scores_and_keeps_the_receipt(session):

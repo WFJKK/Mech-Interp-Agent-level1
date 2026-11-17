@@ -51,7 +51,7 @@ def handle(session: Session, msg: dict) -> dict | None:
         try:
             result = session.call(name, arguments)
             return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": json.dumps(result, indent=1)}],
-                                                           "isError": False}}
+                                                           "isError": name == "run_python" and result.get("status") != "ok"}}
         except ToolError as exc:
             return {"jsonrpc": "2.0", "id": mid, "result": {"content": [{"type": "text", "text": f"refused: {exc}"}], "isError": True}}
         except Exception as exc:  # a tool that failed for the pipeline's reasons: say so, keep serving
