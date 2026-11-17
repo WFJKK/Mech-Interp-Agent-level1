@@ -2,7 +2,8 @@
 
 The optional research mode uses the existing reward and entry language. A lead researcher assigns
 input domains to regional researchers, then uses their checked results to construct a complete
-program. Code owns evaluation, the shared budget, the archive and the final lock.
+program. Code owns evaluation, the shared budget, the archive and the final lock. After the final
+checks, a separate tool-free lead session explains the frozen results.
 
 The original run mode remains the default. No operation prices or entry-format identifiers change.
 The experiment is selected by `orchestration.enabled: true`.
@@ -28,9 +29,11 @@ The API-key option below uses the same CLI with separate authentication. Then st
 python -m level1.loop run --config config/experiments/lin-c-regional.yaml
 ```
 
-The configuration includes two initial input-defined investigations. The lead may propose other
-investigations; the configured tasks supply a fallback if it makes no assignments. A regional result
-does not need to improve the global score to be retained.
+The model-neutral profile is `config/experiments/research.yaml`. The example above selects one model
+and its checkpoints but supplies no expected behavior or input-length split. The lead chooses regions
+from its investigation. If it makes no assignments, two generic full-domain questions provide a
+fallback: search for useful special explanations, and independently examine alternatives and exceptions.
+A regional result does not need to improve the global score to be retained.
 
 To bill the experiment through the existing API-key backend with one total spending limit:
 
@@ -49,7 +52,8 @@ python -m level1.loop run --config config/experiments/lin-c-length2.yaml
 ```
 
 This control exhaustively checks its finite uniform domain under `verifier.check: auto`. It does
-not infer or receive a training objective.
+not infer or receive a training objective. Its explicitly selected domain is an optional diagnostic,
+not an assumption in the shared profile or research prompts.
 
 As usual, each execution needs a fresh run ID, or resumes an existing run:
 
@@ -60,6 +64,24 @@ python -m level1.loop finish --run /absolute/path/to/the/run
 
 The normal sandbox checks and trusted-code fingerprint apply. Do not resume an old scientific run
 under changed trusted code unless deliberately accepting that change with the existing flag.
+
+## Applying the framework to another model
+
+The controller and prompts do not assume a particular architecture, training objective or special
+input length. Researchers receive the definition of the actual model being investigated, its weights,
+the declared input distribution and their assigned scopes. They do not receive withheld training
+objectives, training-input metadata or the target checkpoint's training status.
+
+An experiment can extend `research.yaml` and supply its own `model`, `network`, `run_id`, optional
+`seed_check.network`, and verifier settings. Those are experiment choices; no controller code or
+research prompt needs to change when selecting another compatible adapter.
+
+Model independence is relative to the existing model interface. An adapter supplies `reference(g,
+lv1)`, configured weight arrays and a supported input distribution. The current reference returns one
+integer output per input, has constant forward operation cost across those inputs, and is expressible
+in the entry language. Existing adapters cover several architectures and both discrete and real
+inputs. An arbitrary external model or natural-language corpus may need a new adapter, distribution
+implementation and cost model. Unknown-cardinality domains need an explicit workload.
 
 ## Roles and schedule
 
@@ -144,10 +166,17 @@ under matching workload conventions, rather than comparing raw scores from diffe
 ## Shared resource limits
 
 The original `rounds_max` now counts research cycles. Tool quotas are divided across roles from
-the original overall allowance, rather than copied to each agent. By default, planning receives
-10 percent, regional work 60 percent, and integration the remaining 30 percent of exploration and
-API allocations. Each worker receives one submission per cycle; the lead receives the remaining
-submissions in that cycle. The planning session receives no submissions.
+the original overall allowance, rather than copied to each agent. Planning receives 10 percent of
+exploration calls, regional work 60 percent, and integration the remaining 30 percent. Each worker
+receives one submission per cycle; the lead receives the remaining submissions in that cycle.
+The planning session receives no submissions, and the final summary has no tools.
+
+For new research runs, `orchestration.final_summary: true` reserves `summary_fraction: 0.1` of the
+API, turn and time allowances for final synthesis. Planning, regional work and integration divide the
+remaining 90 percent in the same 10/60/30 proportions. Thus a configured $60 API allowance reserves
+up to $6 for synthesis and up to $54 for research; it does not add another $6. Disabling final synthesis
+restores the original allocation. Python-call and submission totals are unchanged because synthesis
+cannot use those tools.
 
 The default five cycles and four submissions per cycle therefore allow twenty submissions in total.
 One shared API spending log covers every role, retry and resume. Session identifiers are unique.
@@ -178,12 +207,18 @@ layout. Those commands fail with an explanation instead of silently comparing in
 single-agent and regional experiments. Existing baseline runs continue to work in the original
 mode.
 
+An imported program does not, by itself, establish that an independent search was run on randomly
+generated parameter controls. These are separate experiments. See `RANDOM_BASELINES.md` for the
+distinction between a same-target generic comparison, an independent matched control search, and
+transfer of one frozen interpretation.
+
 ## Development, locking and reports
 
 Development uses fixed samples per task so resubmitting an identical program cannot obtain a new
 lucky draw. This does not prevent adaptive overfitting. The global winner and regional frontier
-portfolio are frozen before fresh-input evaluation or second-network evaluation. Final results
-never enter researchers' prompts and do not select the winners.
+portfolio are frozen before fresh-input evaluation or second-network evaluation. Final results never
+enter research-session prompts and do not select the winners. A terminal synthesis session may read
+them to explain the already frozen results; it cannot restart research or alter selection.
 
 The run folder contains:
 
@@ -195,10 +230,43 @@ The run folder contains:
 | `multi_agent/lock.json` | Frozen global and regional portfolio |
 | `multi_agent/audits/` | Fresh-input and second-network measurements after locking |
 | `locked_entry.json` | The selected global program, if one was submitted successfully |
+| `lead_summary.md` | The completed lead explanation of global and regional findings |
+| `multi_agent/summary/` | Frozen synthesis evidence, prompt, response, status and execution metadata |
 | `report.md`, `report.json` | Global and regional results with their evaluation conditions |
 
 Resume reuses persisted plans and completed session records. A completed lock remains fixed.
 The report describes empirical agreement; an agent's explanation is not treated as a formal proof.
+
+## Final lead synthesis
+
+After the controller locks candidates and completes their final checks, the lead receives a fixed
+evidence packet containing the selected programs, their receipts, scopes and workload conventions,
+the final audits, supplied comparison measurements, and earlier researchers' notes. Notes are explicitly
+unverified evidence. The summary uses the same configured model and account as the research roles.
+
+The requested synthesis explains:
+
+- The best global program found under the declared reward, its computation and source of savings.
+- Useful regional interpretations, including findings that did not improve global composition.
+- Each material region's scope probability, conditional coverage, fidelity, cost and workload.
+- Supporting measurements, recorded failures, assumptions, unresolved hypotheses and proof status.
+- Which arguments appear valid for general parameters and which depend on particular parameter values.
+- Available comparisons and missing control experiments, without inventing a control result.
+
+"Best" means the recorded selection among evaluated candidates under the fixed policy. The summary
+does not claim a global optimum or choose a new winner using final-audit results. A supplied comparison
+program is not automatically a verified arbitrary-weight method, and agreement on another checkpoint
+does not by itself identify a learned mechanism.
+
+The synthesis session exposes no tools or MCP servers. It cannot execute code, submit entries, assign
+regions or change the archive. Its output is commentary with evidence references, not a certificate.
+`report.md` links the narrative, and `report.json` records its status and completed text.
+
+The summary plan, evidence and response checkpoints are persisted. A completed summary is reused on
+resume; interrupted synthesis can continue without reopening research. A missing backend, exhausted
+allowance, empty answer or incomplete response is reported explicitly, while the frozen scientific
+results remain available. Old saved configurations without `final_summary` do not silently acquire
+an additional model call on resume. No real model call is made by the fake-backend tests.
 
 ## Validate without model calls
 
