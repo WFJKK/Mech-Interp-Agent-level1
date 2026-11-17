@@ -92,54 +92,10 @@ measured parts, so a finished run can be scored again under another reward
 
 ## Results
 
-Two experiments, on small networks whose task we know and the agent is never told. In Experiment 1 a
-network is asked only about the inputs it was trained on. In Experiment 2, which was run first, six
-networks are asked about more inputs than they were trained on.
+### Experiment 1
 
-### Experiment 1: a network asked only about its training inputs
-
-#### Setup
-
-- **The network**: linear max4. Each of 64 tokens has an embedding column of 8 numbers. The columns
-  of an input's four tokens are added up and multiplied by a hidden 8 x 8 matrix and an unembedding
-  to 64 logits, and the output is the argmax. There is no nonlinearity and no position. It was
-  trained to output the largest of exactly four tokens. There are two networks, trained by the same
-  recipe from two seeds; they give the largest token on 99.83% and 99.78% of all their training
-  inputs. One forward pass is 671 operations.
-- **The data set**: every input of four tokens, each token equally likely: 64^4 = 16,777,216
-  inputs, exactly what the network was trained on. The agent is told the data set in full, and
-  never the task.
-- **The run** (16 November 2026): the agent works on the first network for at most 5 rounds of at
-  most 4 submissions (`claude-fable-5-1` at effort high). Every submission is scored on a fresh
-  sample of 16,384 inputs with the reward above, alpha = 10. The best submission is locked, scored
-  again on a fresh sample, and run unchanged on the second network, which the agent never sees.
-- **The baseline**: a second agent makes the same run on networks of the same shape with nothing
-  learned in them, with one more paragraph in its prompt that asks for an entry exact for any
-  weights. Its best exact entry is frozen and scored on the very inputs of the run's two scorings.
-  It measures what computing alone achieves, with nothing of what the network learned.
-
-In the repository the model is `lin-b-4` (the two networks of `lin-b`, in 4 slots) and its baseline
-model is `lin-f-4`; the run configs are `config/pilot/lin-b-4.yaml` and `config/pilot/lin-f-4.yaml`.
-The run cost 4.31 dollars at API prices and the baseline run 34.89.
-
-#### Results
-
-**What the agent found.** In its first round it wrote "The network computes the maximum of the four
-tokens", with the reason from the weights: the logits are the sum of four columns of the product
-of the three matrices, and almost every column is largest at its own token. Its locked entry is
-the largest token, floored at a value it computes from the weights: the smallest output that any
-of the tokens 0 to 7 would give alone (10 on the first network, 11 on the second). The networks
-almost never answer below that value, however small the four tokens are (never on the first
-network, on 28 inputs on the second). The entry spends 4 operations per input and 5,119 once.
-
-**What the baseline found.** A faster exact computation, for any weights: the three matrices
-multiplied once and the sums of every pair of the product's columns, each sorted (1,000,992
-operations once). Per input the four tokens are split into two pairs, the best few rows of each
-pair's sorted sums are looked at, and the search stops as soon as the best row found beats a bound
-on all the others (about 55 operations on these networks).
-
-The three metrics and the reward, each entry on the same inputs: on the first network the fresh
-sample of the locked entry, on the second the seed check's sample.
+Linear max4 asked only about its training inputs, every input of four tokens. The three metrics and
+the reward, on 16,384 sampled inputs of each network:
 
 | Entry | Network | Coverage | Fidelity | Wrong of 16,384 | Cost | Operations per input | Reward |
 | --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
@@ -149,35 +105,7 @@ sample of the locked entry, on the second the seed check's sample.
 | The baseline's frozen entry | first | 1 | 1 | 0 | 0.1737 | 116.6 | 0.8239 |
 | The baseline's frozen entry | second, held out | 1 | 1 | 0 | 0.1705 | 114.4 | 0.8272 |
 
-The operations per input include what an entry computes once, spread over the 16,384 inputs. The
-network itself scores just below 0 because the reward uses the lower end of the fidelity's interval.
-
-The run read against its baseline: R0 is the locked entry on its fresh sample, R1 on the second
-network, and B0 and B1 the baseline's entry on the same inputs. In brackets, the range when each
-fidelity moves across its 95% interval.
-
-| R0 | Baseline B0 | Kept on the held-out network, R1 - B1 | Gap, (R0 - B0) - (R1 - B1) |
-| ---: | ---: | --- | --- |
-| 0.9740 | 0.8239 | +0.153 (+0.150 to +0.162) | -0.003 (-0.014 to +0.011) |
-
-- **The lead** over the baseline is +0.150 on the run's own network and +0.153 on the held-out one,
-  and the gap between the two is within sampling noise: nothing was fitted to the first network.
-- **As speed-ups**, 1/(1 - R): 38 for the locked entry against 5.7 for the baseline's on the first
-  network, and 50 against 5.8 on the second.
-- **A check on where the lead comes from**: the locked entry, unchanged, on the six networks of the
-  baseline model is wrong on 97.5% to 99.3% of inputs, and the baseline's entry on none. So the
-  locked entry holds only where a network has learned the task, and the baseline's entry holds
-  anywhere.
-
-#### The Pareto frontier
-
-Every interpretation we have of this network, on the same inputs as above. One is on the frontier
-when no other is at least as good in right share, wrong share and cost, and better in one of them.
-All of them cover the whole data set, so the right share is one less the wrong share. The largest
-token alone and plain algebra are written by hand and withheld from the agent
-(`withheld/lin-b-4/references.py`).
-
-First network, the run's own:
+The Pareto frontier of right share, wrong share and cost, on the same inputs. First network:
 
 | Interpretation | Right share | Wrong share | Cost | Reward | On the frontier |
 | --- | ---: | ---: | ---: | ---: | --- |
@@ -199,34 +127,7 @@ Second network, held out:
 | The largest token, floored at 10 (the run, round 1) | 99.847% | 0.153% | 0.0060 | 0.9715 | no |
 | The largest token, floored from the weights (the run, locked) | 99.921% | 0.079% | 0.0064 | 0.9800 | yes |
 
-- The frontier has two kinds of points: exact at about a sixth of a forward pass (the baseline's
-  entry), or nearly free and wrong on about 1 input in 1,000 (the rules). Alpha decides between
-  them: at alpha = 10 the rules win by 0.15, and the baseline's entry would catch the locked one
-  only at an alpha of about 100.
-- The constant floor of 10 is on the first network's frontier and not on the second's, where the
-  floor is 11: it was read off the first network. The floor computed from the weights is the other
-  way round. It costs 0.3 operations more for nothing on the first network, and removes 12 wrong
-  answers on the second.
-
-#### What it shows
-
-- On its training inputs the network's behaviour has a description of 4 operations, the agent found
-  it in its first round, and its lead over the baseline holds in full on a network it never saw. In
-  Experiment 2 the same two networks, asked about 1 to 8 tokens, kept +0.11 and lost as much
-  between the two networks.
-- The lead is all cost. The locked entry does about 27 times fewer operations than the baseline's,
-  and gives up 13 to 21 wrong answers in 16,384 for it. In coverage and fidelity nothing can beat
-  an exact entry.
-- What is still wrong: on all 16,777,216 inputs the locked entry is wrong on 0.111% (first network)
-  and 0.128% (second), against 0.170% and 0.215% for the largest token alone. On these inputs the
-  sum of the four columns is largest at another row than the largest token's, most often the row
-  just below it (57% of them on the first network). The agent described them and left them out of
-  its entry: every test it found for them cost more operations than the wrong answers it would
-  remove are worth at alpha = 10.
-- From round 2 on the agent submitted one entry 16 times to draw luckier samples (0.9718 to
-  0.9808). It was locked at 0.9808, and the fresh sample gives 0.9740, the number to compare.
-
-### Experiment 2: networks asked about more than their training inputs
+### Experiment 2
 
 #### The models and what we did
 
@@ -501,9 +402,8 @@ weights remove that on any network of the design. The baseline measures that par
 be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
 
 - **Baseline models.** `lin-e`, `lin-f` and `att-e` have the design, sizes and data set of linear
-  min2, linear min4 and att max4 (and so also serve linear max2, linear max4 and att min4), `lin-f-4`
-  those of Experiment 1's linear max4 on four tokens, and `rnn-d`, `rnn-e` and `rnn-f` those of
-  rnn-a, rnn-b and rnn-c. Their networks have nothing in them for an agent to find; what
+  min2, linear min4 and att max4 (and so also serve linear max2, linear max4 and att min4), and `rnn-d`, `rnn-e` and `rnn-f`
+  those of rnn-a, rnn-b and rnn-c. Their networks have nothing in them for an agent to find; what
   they are is in `withheld/<name>/`. The first network is for the rounds, the second for the seed
   check, the others for freezing.
 - **A baseline run** is a usual run on a baseline model, under the same conditions as the runs it
@@ -674,11 +574,9 @@ Everything is written as it happens, so a run can stop and resume, and can be re
     models/lin-a/           linear max2, asked only about pairs of tokens
     models/lin-a-1to4/      linear max2: the same two networks, asked about inputs of 1 to 4 tokens
     models/lin-b/           linear max4, asked about inputs of 1 to 8 tokens
-    models/lin-b-4/         linear max4: the same two networks, asked only about inputs of 4 tokens
     models/lin-c/, lin-d/   linear min2 and linear min4
     models/att-a/ .. att-d/   att max2, att min2 (2 slots), att max4, att min4 (4 slots)
     models/lin-e/, lin-f/, att-e/   baseline models of the shapes of linear min2, linear min4 and att max4
-    models/lin-f-4/         the baseline model of lin-b-4
     models/rnn-a/ .. rnn-c/   one-layer ReLU recurrent networks on 2, 3 and 10 real numbers, five seeds each
     models/rnn-d/ .. rnn-f/   their baseline models
     withheld/<model>/       what it was trained to do, and reference entries (never shown to the agent)
