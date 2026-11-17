@@ -474,10 +474,14 @@ class ClaudeCodeBackend:
             r, timed_out = None, False
             with tempfile.TemporaryDirectory(prefix="lv1-claude-code-") as cwd:
                 try:
+                    # The MCP server runs in another process. Persist this attempt's deadline before
+                    # launching the CLI so every tool reply can report its actual remaining wall time.
+                    # Retries retain the existing policy: each try receives the configured timeout.
+                    session.begin_attempt(timeout)
                     r = self.run(this_try, request_text, self.env, cwd, timeout)
                     stdout = r.stdout or ""
                 except subprocess.TimeoutExpired as exc:
-                    # the session's wall clock ran out: what it submitted stands; there is no closing text
+                    # The current attempt ran out of time. Its completed tools and partial stream stand.
                     timed_out, stdout = True, as_text(exc.stdout)
                 except OSError as exc:
                     if self.auth == "api_key":
@@ -506,12 +510,21 @@ class ClaudeCodeBackend:
             swap = swapped(events, data, self.cfg["agent_model"])
             if swap:
                 raise StopRun(f"{swap}; the run stops rather than record another model's work as {self.cfg['agent_model']}'s")
+            declined = refused(events)
             if timed_out:
                 failures.append(f"the session did not finish within {timeout:g} s")
-                data, messages, text = {"timed_out": True}, [], "(the session ran out of time)"
+                # Do not discard a reported cost, usage, refusal or text merely because the CLI failed
+                # to exit in time. None of that makes the response complete.
+                data = {**(data if isinstance(data, dict) else {}), "timed_out": True}
+                partial = join(messages) if messages else data.get("result")
+                text = ("(the session ran out of time; partial response follows)\n\n" + partial
+                        if isinstance(partial, str) and partial else "(the session ran out of time)")
+                if declined is not None:
+                    self.log(f"  Claude Code: the model declined to go on ({declined or 'no category given'})")
+                else:
+                    self.log(f"  the session reached its time limit ({timeout:g} s); what it submitted stands")
                 break
             text = join(messages) if messages else (data or {}).get("result")
-            declined = refused(events)
             if declined is not None:  # what the session submitted before it stands; the loop counts refusals
                 data, text = data if isinstance(data, dict) else {}, join(messages) if messages else ""
                 self.log(f"  Claude Code: the model declined to go on ({declined or 'no category given'})")
@@ -545,13 +558,24 @@ class ClaudeCodeBackend:
         last_stop = messages[-1].get("stop_reason") if messages else None
         session.reload()  # the tools ran in the tool server's process; the counters are in the saved session
         billed = self.auth == "api_key" or any(src in BILLED_SOURCES for src in sources)
+        if declined is not None:
+            stop_reason, stop_details = "refusal", {"category": declined}
+        elif data.get("timed_out"):
+            stop_reason, stop_details = "timeout", {"timeout_s": timeout}
+        elif ended:
+            stop_reason, stop_details = "budget", {"budget": ended}
+        elif data.get("subtype") == "error_max_turns":
+            stop_reason, stop_details = "turn_limit", {"max_turns": int(self.cfg["session"]["max_turns"])}
+        else:
+            stop_reason = last_stop or data.get("stop_reason") or ("end_turn" if not data.get("is_error") else "error")
+            stop_details = None
         meta = {
             "backend": self.name,
             "source": data.get("session_id"),
             "model": self.cfg["agent_model"],
-            "stop_reason": "refusal" if declined is not None else "budget" if ended else
-                           (last_stop or data.get("stop_reason") or ("end_turn" if not data.get("is_error") else "error")),
-            "stop_details": {"category": declined} if declined is not None else {"budget": ended} if ended else None,
+            "stop_reason": stop_reason,
+            "stop_details": stop_details,
+            "timed_out": bool(data.get("timed_out")),
             "models_used": models_used(data),
             "safety_stops": data.get("safety_stops"),
             "model_events": events,

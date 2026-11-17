@@ -151,8 +151,68 @@ def test_a_session_out_of_time_or_turns_keeps_what_it_did(setup):
     b, calls, _ = backend(cfg, [subprocess.TimeoutExpired("claude", 1)])
     r = b.respond("p", 0, where, session)
     assert r.text == "(the session ran out of time)" and len(calls) == 1
+    assert r.meta["stop_reason"] == "timeout" and r.meta["timed_out"] is True
+    assert r.meta["stop_details"] == {"timeout_s": cfg["session"]["seconds"]}
     b, _, _ = backend(cfg, [([assistant("so far"), result(is_error=True, subtype="error_max_turns", result=None)], 1)])
-    assert b.respond("p", 0, where, session).text == "so far"
+    r = b.respond("p", 0, where, session)
+    assert r.text == "so far" and r.meta["stop_reason"] == "turn_limit"
+    assert r.meta["stop_details"] == {"max_turns": cfg["session"]["max_turns"]}
+
+
+def test_timeout_preserves_partial_evidence_without_claiming_completion(setup):
+    cfg, session, where = setup
+    partial = "\n".join(json.dumps(event) for event in (
+        assistant("Measured one candidate.", "end_turn"), result(total_cost_usd=0.4),
+    ))
+    b, calls, sleeps = backend(cfg, [subprocess.TimeoutExpired("claude", 1, output=partial.encode())])
+    response = b.respond("p", 0, where, session)
+    assert len(calls) == 1 and not sleeps
+    assert response.meta["stop_reason"] == "timeout"  # even when the last parsed message said end_turn
+    assert response.meta["assistant_messages"] == 1 and response.meta["output_tokens"] == 50
+    assert response.meta["api_equivalent_usd"] == 0.4
+    assert response.text == "(the session ran out of time; partial response follows)\n\nMeasured one candidate."
+    raw = json.loads((where / "response_raw.json").read_text())
+    assert raw["timed_out"] is True and raw["session_id"] == "abc"
+    assert raw["assistant_messages"] == [{"text": "Measured one candidate.", "stop_reason": "end_turn"}]
+    assert (where / "stream_01.jsonl").read_text() == partial
+
+
+@pytest.mark.parametrize("refusal", [
+    {"type": "system", "subtype": "model_refusal_no_fallback", "api_refusal_category": "bounded"},
+    assistant("Cannot continue.", "refusal"),
+])
+def test_timeout_cannot_hide_a_provider_refusal(setup, refusal):
+    cfg, session, where = setup
+    b, calls, sleeps = backend(cfg, [subprocess.TimeoutExpired("claude", 1, output=json.dumps(refusal))])
+    response = b.respond("p", 0, where, session)
+    assert response.meta["stop_reason"] == "refusal" and response.meta["timed_out"] is True
+    assert response.meta["stop_details"] == {"category": refusal.get("api_refusal_category", "")}
+    assert len(calls) == 1 and not sleeps
+
+
+def test_each_started_attempt_persists_its_own_deadline_before_the_cli(setup, monkeypatch):
+    cfg, session, where = setup
+    clock = [1000.0]
+    monkeypatch.setattr("level1.session.time.time", lambda: clock[0])
+    limited = [result(is_error=True, result="overloaded")]
+    b, calls, _ = backend(cfg, [(limited, 1), [assistant("done"), result()]])
+    original_runner = b.run
+    observed = []
+
+    def runner(*args):
+        # A fresh tool-server view sees the deadline before any CLI tools can run.
+        current = Session(session.path)
+        observed.append((current.state["attempt_started_at"], current.state["attempt_deadline"],
+                         current.remaining()["wall_seconds_remaining"], args[-1]))
+        return original_runner(*args)
+
+    b.run = runner
+    b.sleep = lambda _: clock.__setitem__(0, clock[0] + 30)
+    response = b.respond("p", 0, where, session)
+    timeout = cfg["session"]["seconds"]
+    assert observed == [(1000, 1000 + timeout, timeout, timeout),
+                        (1030, 1030 + timeout, timeout, timeout)]
+    assert len(calls) == 2 and response.meta["stop_reason"] == "end_turn"
 
 
 def test_parse_and_join():
@@ -339,7 +399,8 @@ def test_the_budget_holds_across_tries_rounds_and_resumes(tmp_path):
     b, calls, _ = backend(cfg, [subprocess.TimeoutExpired("claude", 1, output=partial)], environ=dict(ENV))
     r = b.respond("p", 1, where, session)
     assert calls[0]["cmd"][calls[0]["cmd"].index("--max-budget-usd") + 1] == "2.50"  # what is left of the run's $5
-    assert r.text == "(the session ran out of time)" and r.meta["budget"]["unreported_tries"] == 1
+    assert r.text == "(the session ran out of time; partial response follows)\n\nhalf"
+    assert r.meta["stop_reason"] == "timeout" and r.meta["budget"]["unreported_tries"] == 1
     assert (where / "stream_01.jsonl").read_text().startswith('{"type": "system"')  # what it printed until then is kept
     assert b.exhausted(run) == "the run's API budget is spent: $5.00 counted of $5.00"
 
@@ -348,6 +409,7 @@ def test_the_budget_holds_across_tries_rounds_and_resumes(tmp_path):
     b, calls, _ = backend(cfg, [[result()]], environ=dict(ENV))
     r = b.respond("p", 2, where, session)
     assert not calls and r.meta["stop_reason"] == "budget" and r.text.startswith("(the run's API budget is spent")
+    assert "attempt_deadline" not in session.state  # no CLI attempt started
 
     budget.set_run_budget(run, 9)
     assert b.exhausted(run) is None and budget.cap(budget.state(run, cfg["budget"]), 3) == 3.0
