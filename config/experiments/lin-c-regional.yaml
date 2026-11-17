@@ -1,13 +1,9 @@
-# Regional research and global integration on the original distribution.
-# Initial investigations are input-defined tasks, with no assumed interpretation.
-extends: ../pilot/lin-c.yaml
+# One model selection for the shared research profile. No region split or
+# expected behavior is supplied; the lead chooses investigations from evidence.
+extends: research.yaml
 run_id: experiment-lin-c-regional
+model: models/lin-c
+network: lin-c-s0
+seed_check: {network: lin-c-s1}
 verifier:
-  check: auto
-orchestration:
-  enabled: true
-  initial_regions:
-    - scope: {kind: lengths, lengths: [2]}
-      task: Investigate simple interpretations and exceptions within this input domain.
-    - scope: {kind: lengths, lengths: [1, 3, 4]}
-      task: Independently investigate this input domain and computations a global interpretation could share.
+  sample_size: 16384

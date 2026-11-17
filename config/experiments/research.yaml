@@ -1,0 +1,12 @@
+# Shared research profile. An experiment extending this file supplies its model,
+# network, run_id and any workload or sampling policy required by that model.
+verifier:
+  check: auto
+orchestration:
+  enabled: true
+  final_summary: true
+  initial_regions:
+    - scope: {kind: all}
+      task: Investigate simple computational structure and identify input regions with useful special explanations.
+    - scope: {kind: all}
+      task: Independently test competing explanations, exceptions, and computations that several interpretations could share.

@@ -66,9 +66,15 @@ from ..util import REPO_ROOT, atomic_write
 from . import BackendError, Response, StopRun
 
 SYSTEM_PROMPT = (
-    "You are working on a research task with two tools (run_python and submit_entry) and no others; you have no "
+    "You are working on a research task with only the tools listed in the task message; you have no "
     "files of your own. Use the tools as the message says, submit what you find, and end with the notes the "
     "message asks for, in exactly that format."
+)
+SUMMARY_SYSTEM_PROMPT = (
+    "You are writing the final research synthesis from the supplied frozen evidence. You have no tools "
+    "or files of your own. Explain the recorded selections and regional findings, distinguish measurements "
+    "from hypotheses, and follow the requested report format. Do not propose new submissions or change "
+    "the frozen selection."
 )
 KEY_VARIABLES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")
 AUTH_MODES = ("login", "api_key")
@@ -380,12 +386,16 @@ class ClaudeCodeBackend:
         names = TOOLS if tool_names is None else tool_names
         cmd += ["--mcp-config", str(mcp_config), "--allowedTools", ",".join(f"mcp__{SERVER_NAME}__{t}" for t in names)]
         cmd += ["--max-turns", str(int(self.cfg["session"]["max_turns"]))]
-        cmd += ["--system-prompt", SYSTEM_PROMPT, "--model", self.cfg["agent_model"]]
+        cmd += ["--system-prompt", SYSTEM_PROMPT if names else SUMMARY_SYSTEM_PROMPT, "--model", self.cfg["agent_model"]]
         if self.cfg.get("effort") is not None:
             cmd += ["--effort", self.cfg["effort"]]
         return cmd
 
     def mcp_config(self, session, where: Path) -> Path:
+        if not session.TOOLS:
+            path = Path(where) / "mcp.json"
+            atomic_write(path, json.dumps({"mcpServers": {}}, indent=1))
+            return path
         # The CLI hands its own environment to the tool server; the server needs no key, so it drops them first.
         forget = sorted({*KEY_VARIABLES, "ANTHROPIC_CUSTOM_HEADERS", *(v for v in (self.key_var, self.workspace_var) if v)})
         code = (f"import os, sys; [os.environ.pop(v, None) for v in {forget!r}]; sys.path.insert(0, {str(REPO_ROOT)!r}); "

@@ -86,8 +86,8 @@ def check_orchestration(cfg: dict) -> None:
     unknown = sorted(set(options) - set(defaults))
     if unknown:
         raise ConfigError(f"unknown orchestration options: {unknown}")
-    for key in ("enabled", "parallel"):
-        if not isinstance(options.get(key), bool):
+    for key in ("enabled", "parallel", "final_summary"):
+        if not isinstance(options.get(key, False), bool):
             raise ConfigError(f"orchestration.{key} must be true or false")
     if not options.get("enabled"):
         return
@@ -102,6 +102,13 @@ def check_orchestration(cfg: dict) -> None:
         fractions.append(value)
     if sum(fractions) >= 1:
         raise ConfigError("planning_fraction + regional_fraction must leave a positive share for global integration")
+    summary = options.get("summary_fraction", 0.0)
+    if isinstance(summary, bool) or not isinstance(summary, (int, float)) or not math.isfinite(summary) or not 0 <= summary < 1:
+        raise ConfigError("orchestration.summary_fraction must be a finite number from 0 up to but not including 1")
+    if options.get("final_summary", False) and summary <= 0:
+        raise ConfigError("final_summary needs a positive summary_fraction reserved within the run budget")
+    summary = summary if options.get("final_summary", False) else 0.0
+    research_share = 1.0 - summary
     for key in ("python_calls", "submissions", "max_turns"):
         value = cfg["session"][key]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -112,11 +119,13 @@ def check_orchestration(cfg: dict) -> None:
     planning, regional = fractions
     global_fraction = 1 - planning - regional
     for key in ("python_calls", "max_turns"):
-        amount = cfg["session"][key]
+        amount = cfg["session"][key] * (research_share if key == "max_turns" else 1.0)
         if math.floor(amount * regional) // workers < 1 or math.floor(amount * global_fraction) < 1:
             raise ConfigError(f"session.{key} is too small after sharing its allocation between regional and global integration roles")
-    if math.floor(cfg["session"]["max_turns"] * cfg["rounds_max"] * planning) < 1:
+    if math.floor(cfg["session"]["max_turns"] * cfg["rounds_max"] * planning * research_share) < 1:
         raise ConfigError("the planning allocation must allow at least one turn")
+    if summary and math.floor(cfg["session"]["max_turns"] * cfg["rounds_max"] * summary) < 1:
+        raise ConfigError("the final summary allocation must allow at least one turn")
     for key in ("development_seed", "archive_per_scope"):
         value = options.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key == "archive_per_scope" else 0):

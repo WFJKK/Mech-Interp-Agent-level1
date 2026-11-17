@@ -72,6 +72,20 @@ def test_a_round_through_the_cli(setup):
     assert [e["type"] for e in stream] == ["assistant", "assistant", "assistant", "result"]
 
 
+def test_tool_free_summary_has_no_servers_or_research_system_instructions(setup):
+    cfg, _, where = setup
+    b, calls, _ = backend(cfg, [])
+    configuration = b.mcp_config(SimpleNamespace(TOOLS={}), where)
+    cmd = b.command_line(configuration, {})
+    assert json.loads(configuration.read_text()) == {"mcpServers": {}}
+    assert cmd[cmd.index("--tools") + 1] == ""
+    assert cmd[cmd.index("--allowedTools") + 1] == ""
+    system = cmd[cmd.index("--system-prompt") + 1]
+    assert "final research synthesis" in system and "no tools" in system
+    assert "submit what you find" not in system
+    assert not calls
+
+
 def test_another_model_answering_stops_the_run(setup):
     cfg, session, where = setup
     b, _, _ = backend(cfg, [[assistant("x"), result(modelUsage={MODEL: {"outputTokens": 1}, "claude-opus-5-5": {"outputTokens": 9}})]])

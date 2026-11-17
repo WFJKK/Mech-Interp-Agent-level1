@@ -33,6 +33,8 @@ orchestration:
   parallel: true
   planning_fraction: 0.1
   regional_fraction: 0.6             # the rest is reserved for global integration
+  final_summary: true                # a tool-free lead synthesis after selection and final checks
+  summary_fraction: 0.1              # reserved first from API, turn and time allowances; no extra run budget
   development_seed: 0                # fixed development inputs; final evaluation is separate
   archive_per_scope: 8               # entries shown in summaries; all records are retained
   initial_regions: []                # optional [{scope: {...}, task: "..."}] if the lead proposes none
