@@ -92,7 +92,30 @@ measured parts, so a finished run can be scored again under another reward
 
 ## Results
 
-### Experiment 1
+### Overall
+
+In the following experiments we will now use the agentic setup from above to analyse different
+models. While our goal is "heuristic understanding", naturally the "reward function" merely evaluates
+how well the agent can "predict" the output. Hence, we expect that part of the hill-climbing will
+amount to inference optimisation in a sense. For that reason we always compare to a baseline of the
+agent working on the same architecture with nothing learned in it, i.e. a random baseline: networks
+drawn the way training starts (the same distribution of starting weights, other seeds) and kept as
+drawn. Its agent is asked for an interpretation exact for any weights, which counts only if it is
+exact on four more such networks, so it cannot rely on the particular draw; only its cost depends on
+the weights.
+
+### Experiment 1: evaluation on training inputs only
+
+#### Model
+
+Linear max4. Each of the 64 tokens has an embedding column of 8 numbers; the columns of an input's
+four tokens are added up and multiplied by a hidden 8 x 8 matrix and an unembedding to 64 logits, and
+the output is the argmax. There is no nonlinearity and no position. It was trained to output the
+largest of the four tokens, on fresh uniformly random inputs of exactly four tokens at every step
+(cross-entropy, AdamW, batch 1,024), until its accuracy stopped rising. There are two networks, from
+two seeds; they give the largest token on about 99.8% of all 64^4 inputs.
+
+#### Results
 
 Linear max4 asked only about its training inputs, every input of four tokens. The three metrics and
 the reward, on 16,384 sampled inputs of each network:
