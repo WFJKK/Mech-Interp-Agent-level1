@@ -171,7 +171,9 @@ RESEARCH_ROLES = {
         "Investigate the proposed question, but test competing explanations and refine an entry's region "
         "when needed. Return executable candidates, the evidence for their behavior, failure cases and "
         "ideas that the global integrator can reuse. You can submit directly to the evaluator; your "
-        "results are retained independently of the global score."),
+        "results are retained independently of the global score. When a simpler explanation works on "
+        "a narrower domain, submit it with an explicit scope so its evidence is retained separately. "
+        "Use the remaining submission allowance for a broader candidate or a competing explanation."),
 }
 
 ASSIGNMENT_NOTE = """
@@ -197,6 +199,8 @@ def research_allocation(cfg: dict) -> str:
         api = "This session does not enforce an API dollar cap; its tool, turn and time allocations still apply."
     return (api + f" Each backend attempt has at most {int(session['max_turns'])} turns and "
             f"{float(session['seconds']):g} seconds. Retries do not refresh the tool or submission quotas. "
+            "Tool replies report wall_seconds_remaining for the current attempt. This is a deadline, "
+            "not a live dollar balance; reported API cost is reconciled when the attempt ends. "
             "Complete a useful deliverable early; "
             "a budget limit can end the session before closing notes are written.")
 
@@ -207,6 +211,18 @@ def research_deliverable(cfg: dict) -> str:
               "Use `reference_entry()` as a clearly labeled starting point if needed. A program described "
               "only in prose or printed to the console is not a saved artifact.")
     submissions = int(cfg["session"]["submissions"])
+    checkpoint = (cfg.get("research_task") or {}).get("checkpoint_python_calls")
+    if checkpoint is not None:
+        saving += (f" This integration session permits {int(checkpoint)} initial run_python calls. "
+                   "Before further Python exploration, the controller requires a completed scored "
+                   "submit_entry receipt on the assigned domain. A promising carried draft can be used "
+                   "for this checkpoint, but the controller does not choose or submit one for you. A refused "
+                   "same-domain submission permits one additional repair call while a submission slot "
+                   "remains. If the initial window produced no saved entry, one bounded construction "
+                   "repair call is available within the original Python quota. Child-domain claims do "
+                   "not satisfy the checkpoint, and the last submission "
+                   "slot is reserved for it until it succeeds. Check remaining.checkpoint in tool replies. "
+                   "This is an operational checkpoint; the ordinary score determines the program's quality.")
     if submissions > 0:
         quota = ("You have one formal submission; keep a starting reference as a draft and spend the "
                  "submission on a promising candidate." if submissions == 1 else

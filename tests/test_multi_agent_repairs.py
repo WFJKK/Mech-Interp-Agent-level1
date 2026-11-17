@@ -63,6 +63,24 @@ def record(path, p, reason="end_turn", notes="A bounded observation.", **fields)
     return value
 
 
+@pytest.mark.parametrize("reason", ["timeout", "turn_limit", "budget"])
+def test_partial_notes_remain_labeled_in_history_without_rewriting_evidence(tmp_path, reason):
+    path, _ = prepare(tmp_path)
+    st = state()
+    p = plan(st)
+    notes = "## What the network does\nA partial observation that must not look complete."
+    record(path, p, reason=reason, notes=notes)
+    source = path / p["directory"] / "record.json"
+    before = source.read_bytes()
+    history = multi_agent._history(path, st, p["index"] + 1)
+    assert history[0]["notes"].startswith(f"Partial research notes: this session ended with {reason}.")
+    assert notes in history[0]["notes"]
+    frozen = [{"session_id": p["id"], "notes": notes}]
+    safe = multi_agent._safe_history(path, st, frozen)
+    assert safe[0]["notes"] == history[0]["notes"]
+    assert frozen[0]["notes"] == notes and source.read_bytes() == before
+
+
 def entry(index=0):
     g = lang.Graph({}, 4)
     return g.entry(predict=g.token(index))

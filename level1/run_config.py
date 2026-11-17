@@ -94,6 +94,12 @@ def check_orchestration(cfg: dict) -> None:
     workers = options.get("workers")
     if isinstance(workers, bool) or not isinstance(workers, int) or workers not in (1, 2):
         raise ConfigError("orchestration.workers must be 1 or 2")
+    regional_submissions = options.get("regional_submissions", 1)
+    if isinstance(regional_submissions, bool) or not isinstance(regional_submissions, int) or regional_submissions < 1:
+        raise ConfigError("orchestration.regional_submissions must be a positive whole number")
+    checkpoint_calls = options.get("checkpoint_python_calls")
+    if checkpoint_calls is not None and (isinstance(checkpoint_calls, bool) or not isinstance(checkpoint_calls, int) or checkpoint_calls < 1):
+        raise ConfigError("orchestration.checkpoint_python_calls must be a positive whole number or null")
     fractions = []
     for key in ("planning_fraction", "regional_fraction"):
         value = options.get(key)
@@ -130,8 +136,9 @@ def check_orchestration(cfg: dict) -> None:
         value = options.get(key)
         if isinstance(value, bool) or not isinstance(value, int) or value < (1 if key == "archive_per_scope" else 0):
             raise ConfigError(f"orchestration.{key} must be a valid nonnegative integer (archive_per_scope must be positive)")
-    if int(cfg["session"]["submissions"]) <= workers:
-        raise ConfigError("session.submissions must leave a submission for global integration after the regional workers")
+    if int(cfg["session"]["submissions"]) <= workers * regional_submissions:
+        raise ConfigError("session.submissions must leave a submission for global integration after "
+                          "workers * regional_submissions; increase submissions or lower regional_submissions")
     if int(cfg["session"]["python_calls"]) <= workers:
         raise ConfigError("session.python_calls must leave exploration calls for global integration")
     initial = options.get("initial_regions")

@@ -49,7 +49,7 @@ from pathlib import Path
 from . import budget, hygiene, lang, prompt, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
-from .session import RESEARCH_TOOLS, Session, surface
+from .session import RESEARCH_SUBMIT_TOOL, RESEARCH_TOOLS, Session, surface
 from .util import REPO_ROOT, append_jsonl, atomic_write, git_state, now, read_json, read_jsonl, sha256_file, write_json
 from .verifier import Verifier, describe
 
@@ -202,16 +202,18 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
            "API attempt allowance": prompt.API_ATTEMPT_NOTE,
            "research system prompt": SYSTEM_PROMPT, "summary system prompt": SUMMARY_SYSTEM_PROMPT,
            "temporary folder's location": tempfile.gettempdir()}
-    if (cfg.get("orchestration") or {}).get("enabled"):
+    if ((cfg.get("orchestration") or {}).get("enabled")
+            or (cfg.get("research_task") or {}).get("role") in ("lead", "regional")):
         import json
 
         out.update({f"research tool {name}": json.dumps(spec) for name, spec in RESEARCH_TOOLS.items()})
+        out["research tool submit_entry"] = json.dumps(RESEARCH_SUBMIT_TOOL)
         out["research roles"] = json.dumps(prompt.RESEARCH_ROLES)
         out["research assignment instructions"] = prompt.ASSIGNMENT_NOTE
         out["research prompt template"] = (prompt.TEMPLATES / "research_v1.md").read_text()
         out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
         # These are operator-supplied tasks. Agent-generated discoveries are handled as history.
-        out["configured regional investigations"] = json.dumps(cfg["orchestration"].get("initial_regions", []))
+        out["configured regional investigations"] = json.dumps((cfg.get("orchestration") or {}).get("initial_regions", []))
     elif (cfg.get("research_task") or {}).get("role") == "summary":
         out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
     if sandbox_mode != "container":

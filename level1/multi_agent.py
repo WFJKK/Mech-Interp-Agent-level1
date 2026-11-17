@@ -102,7 +102,7 @@ def update_frontiers(archive: dict) -> dict:
     archive["global"] = {"best": best["id"] if best else None, "frontier": _frontier(global_candidates)}
     groups = {}
     for candidate in archive["candidates"]:
-        if candidate["role"] == "regional":
+        if candidate["role"] == "regional" or candidate["scope_id"] != "all":
             groups.setdefault(candidate["scope_id"], []).append(candidate)
     archive["regions"] = {
         key: {"scope": candidates[0]["scope"], "frontier": _frontier(candidates),
@@ -246,10 +246,10 @@ def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, in
     if role == "regional":
         calls = math.floor(session["python_calls"] * regional) // workers
         cap = cycle_cap * regional / (1.0 - planning) / workers
-        return calls, 1, cap, cycle_cap
+        return calls, int(opt.get("regional_submissions", 1)), cap, cycle_cap
     calls = math.floor(session["python_calls"] * global_fraction)
     cap = cycle_cap * global_fraction / (1.0 - planning)
-    return calls, session["submissions"] - workers, cap, cycle_cap
+    return calls, session["submissions"] - workers * int(opt.get("regional_submissions", 1)), cap, cycle_cap
 
 
 def _quota(cfg: dict, base: float, role: str, cycle: int, workers: int, integer: bool):
@@ -284,6 +284,9 @@ def role_config(cfg: dict, plan: dict) -> dict:
     max_assignments = (_options(cfg)["workers"] if plan["role"] == "lead" and plan["cycle"] < cfg["rounds_max"] else 0)
     out["research_task"] = {"role": plan["role"], "task": plan["task"], "cycle": plan["cycle"],
                             "session_id": plan["id"], "max_assignments": max_assignments}
+    checkpoint = _options(cfg).get("checkpoint_python_calls")
+    if plan["role"] == "lead" and plan["cycle"] > 0 and checkpoint is not None:
+        out["research_task"]["checkpoint_python_calls"] = min(int(checkpoint), calls)
     return out
 
 
@@ -324,7 +327,12 @@ def _research_notes(record: dict) -> str:
     if _is_refusal(meta) or meta.get("stop_reason") in ("error", "api_error", "backend_error"):
         return ("This session ended without a research explanation. Any saved programs and checked "
                 "submissions remain on record. Provider diagnostics are retained separately for the operator.")
-    return record.get("notes", "")
+    notes = record.get("notes", "")
+    reason = "timeout" if meta.get("timed_out") else meta.get("stop_reason")
+    if reason in ("timeout", "turn_limit", "budget"):
+        return (f"Partial research notes: this session ended with {reason}. Saved programs and checked "
+                f"submissions remain separately recorded.\n\n{notes}")
+    return notes
 
 
 def _safe_history(path: Path, state: dict, history: list[dict]) -> list[dict]:
@@ -334,8 +342,7 @@ def _safe_history(path: Path, state: dict, history: list[dict]) -> list[dict]:
         plan = state["sessions"].get(row.get("session_id"))
         source = Path(path) / plan["directory"] / "record.json" if plan else None
         record = read_json(source) if source and source.exists() else row
-        if _is_refusal(_metadata(record)) or _metadata(record).get("stop_reason") in ("error", "api_error", "backend_error"):
-            row["notes"] = _research_notes(record)
+        row["notes"] = _research_notes(record)
     return rows
 
 
@@ -438,13 +445,21 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
 
 def _ingest(path: Path, cfg: dict, model, archive: dict, plan: dict, record: dict) -> None:
     existing = {c["id"] for c in archive["candidates"]}
-    scope = plan["scope"]
-    _comparison(path, cfg, model, archive, scope)
-    verifier = None
+    _comparison(path, cfg, model, archive, plan["scope"])
+    verifiers = {}
     for receipt in record["submissions"]:
         cid = f"{plan['id']}s{receipt['submission']}"
         if cid in existing:
             continue
+        scope = regions.normalize_scope(receipt.get("claim_scope", plan["scope"]))
+        sid = regions.scope_id(scope)
+        if regions.scope_id(regions.intersect_scopes(plan["scope"], scope)) != sid:
+            raise RuntimeError(f"submission {cid} claims a domain outside its assignment")
+        if receipt.get("assigned_scope_id", regions.scope_id(plan["scope"])) != regions.scope_id(plan["scope"]):
+            raise RuntimeError(f"submission {cid} changed its assigned domain")
+        if receipt.get("scope") and receipt["scope"]["id"] != sid:
+            raise RuntimeError(f"submission {cid} has inconsistent claim and measured domains")
+        _comparison(path, cfg, model, archive, scope)
         entry_path = f"{plan['directory']}/session/submissions/{receipt['submission']:03d}/entry.json"
         entry = read_json(Path(path) / entry_path)
         digest = lang.entry_hash(entry)
@@ -452,10 +467,11 @@ def _ingest(path: Path, cfg: dict, model, archive: dict, plan: dict, record: dic
             raise RuntimeError(f"submission {cid} changed before it entered the archive")
         selection = receipt
         if receipt["status"] == "scored":
-            if verifier is None:
-                verifier = Verifier(model, cfg["network"], _scope_cfg(cfg, scope))
-            selection = verifier.score(entry, claimed=receipt.get("claimed_fidelity"),
-                                       seed=int(_options(cfg)["development_seed"]))
+            verifier_key = lang.canonical(scope)
+            if verifier_key not in verifiers:
+                verifiers[verifier_key] = Verifier(model, cfg["network"], _scope_cfg(cfg, scope))
+            selection = verifiers[verifier_key].score(entry, claimed=receipt.get("claimed_fidelity"),
+                                                     seed=int(_options(cfg)["development_seed"]))
         archive["candidates"].append({"id": cid, "role": plan["role"], "session_id": plan["id"],
                                       "cycle": plan["cycle"], "scope": scope, "scope_id": regions.scope_id(scope),
                                       "entry_path": entry_path, "entry_sha256": digest, "selection": selection,

@@ -12,7 +12,7 @@ from level1.util import read_json, write_json
 def config(tmp_path, **changes):
     cfg = run_config.load("config/experiments/lin-c-regional.yaml", {
         "runs_dir": str(tmp_path), "sandbox": "process", "backend": "fake",
-        "session": {"python_calls": 10, "submissions": 4},
+        "session": {"python_calls": 10, "submissions": 6},
     })
     cfg.update(changes)
     return cfg
@@ -43,6 +43,17 @@ def test_lead_assigns_a_frozen_scope_but_workers_cannot(tmp_path):
     lead.assign_region({"kind": "lengths", "lengths": [1]}, "An independent investigation")
     with pytest.raises(ToolError, match="already assigned"):
         lead.assign_region({"kind": "all"}, "One more")
+
+
+def test_expired_attempt_cannot_assign_a_new_investigation(tmp_path, monkeypatch):
+    cfg = config(tmp_path, research_task={"role": "lead", "max_assignments": 2, "cycle": 0})
+    lead = Session.create(tmp_path / "lead", cfg, cfg["network"], tmp_path / "run")
+    monkeypatch.setattr("level1.session.time.time", lambda: 100.0)
+    lead.begin_attempt(10)
+    monkeypatch.setattr("level1.session.time.time", lambda: 111.0)
+    with pytest.raises(ToolError, match="wall-clock deadline"):
+        lead.assign_region({"kind": "all"}, "Too late to start.")
+    assert lead.state["assignments"] == []
 
 
 def test_summary_session_has_no_tools_even_when_called_directly(tmp_path, monkeypatch):

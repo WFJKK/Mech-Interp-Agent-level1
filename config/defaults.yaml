@@ -33,6 +33,8 @@ orchestration:
   parallel: true
   planning_fraction: 0.1
   regional_fraction: 0.6             # the rest is reserved for global integration
+  regional_submissions: 1            # per worker per cycle, taken from session.submissions
+  checkpoint_python_calls: 2         # integrating leads must score a checkpoint before more Python; null disables
   final_summary: true                # a tool-free lead synthesis after selection and final checks
   summary_fraction: 0.1              # reserved first from API, turn and time allowances; no extra run budget
   development_seed: 0                # fixed development inputs; final evaluation is separate
@@ -68,7 +70,7 @@ verifier:
   reference_samples: 8                # when it samples, the report scores each reference entry on this many
                                       # fixed samples and gives the mean
   time_limit_s: 120                   # per entry
-  scope: null                        # null keeps original evaluation; all, lengths or predicate in regional mode
+  scope: null                        # null keeps original evaluation; all, lengths, predicate or intersection in regional mode
   workload_size: null                # scoped mode: finite support size, or an explicit workload when unknown
   sample_seed: null                  # null draws fresh development samples in the original mode
 

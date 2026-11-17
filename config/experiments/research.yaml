@@ -2,8 +2,12 @@
 # network, run_id and any workload or sampling policy required by that model.
 verifier:
   check: auto
+session:
+  submissions: 6                    # two per worker, two for integration; all are ordinary scored submissions
 orchestration:
   enabled: true
+  regional_submissions: 2
+  checkpoint_python_calls: 2
   final_summary: true
   initial_regions:
     - scope: {kind: all}
