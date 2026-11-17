@@ -27,6 +27,14 @@ charged as setup; runtime includes the region test and the prediction. Condition
 avoid unused branches. Interpret program details from the supplied graph and evidence, and identify
 any step that cannot be established from them.
 
+## Entry language reference
+
+The existing guide follows so that program operations, conditional execution and charges can be
+interpreted precisely. Its examples describe the research interface; they do not grant this session
+any tools or permission to change the frozen results.
+
+{{ENTRY_DOC}}
+
 ## The recorded evaluation
 
 The reward definition is:

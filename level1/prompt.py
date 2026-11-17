@@ -8,6 +8,7 @@ second network".
 from __future__ import annotations
 
 from pathlib import Path
+import copy
 import json
 import re
 
@@ -227,18 +228,109 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
     return text
 
 
-def build_summary(cfg: dict, model, evidence: dict) -> str:
-    """Explain frozen results from supplied evidence, without loading or evaluating weights."""
+def summary_evidence(evidence: dict, *, include_discoveries: bool = True) -> dict:
+    """An agent-facing projection; raw provenance remains in the saved evidence.
+
+    The masked form is for hygiene inspection of the complete coordinator-owned
+    surface. Only researcher-authored programs, predicate definitions and notes
+    are masked. A supplied comparison program is always checked in full.
+    """
     if not isinstance(evidence, dict):
         raise ValueError("summary evidence must be an object")
+    if not evidence:
+        return {}
+
+    def pick(value, keys):
+        return {key: copy.deepcopy(value[key]) for key in keys if key in value} if isinstance(value, dict) else {}
+
+    def discovery(value):
+        return copy.deepcopy(value) if include_discoveries else "Researcher-authored content omitted for hygiene inspection."
+
+    def scope(value):
+        if not isinstance(value, dict):
+            return copy.deepcopy(value)
+        out = pick(value, ("kind", "lengths", "max_draws", "mass_samples", "id", "cardinality", "mass", "mass_exact",
+                           "conditioning", "mass_estimation", "predicate_binding", "workload_size", "workload_basis",
+                           "build_measurement"))
+        if "entry" in value:
+            out["entry"] = discovery(value["entry"])
+        if "spec" in value:
+            out["spec"] = scope(value["spec"])
+        return out
+
+    def receipt(value, network):
+        if not isinstance(value, dict):
+            return copy.deepcopy(value)
+        out = pick(value, ("status", "reason", "entry_sha256", "size", "parts", "reward", "prices", "reward_detail",
+                           "claimed_fidelity", "overclaim", "expected_fidelity_other"))
+        out["network"] = network
+        if "inputs" in value:
+            out["inputs"] = pick(value["inputs"], ("mode", "n", "seed", "scope_id"))
+        if "scope" in value:
+            out["scope"] = scope(value["scope"])
+        return out
+
+    def audits(value):
+        value = value or {}
+        out = pick(value, ("candidate_id", "entry_sha256"))
+        if "scope" in value:
+            out["scope"] = scope(value["scope"])
+        for label, network in (("fresh", "the network"), ("held_out", "the second network")):
+            if label in value:
+                out[label] = receipt(value[label], network)
+            comparison = value.get(f"{label}_comparison", value.get(f"{label}_baseline"))
+            if comparison is not None:
+                out[f"{label}_comparison"] = receipt(comparison, network)
+        return out
+
+    out = pick(evidence, ("version", "reward", "prices"))
+    out["network"] = "the network"
+    out["second_network"] = "the second network" if evidence.get("second_network") else None
+    out["evaluation_policy"] = pick(evidence.get("evaluation_policy"),
+                                    ("check", "enumerate_up_to", "sample_size", "sample_seed", "workload_size"))
+    out["frozen_selection"] = pick(evidence.get("frozen_selection"), ("global", "regional", "locked_at"))
+    out["candidates"] = []
+    for candidate in evidence.get("candidates", []):
+        item = pick(candidate, ("id", "role", "scope_id", "entry_sha256", "expected_fidelity_other"))
+        if "scope" in candidate:
+            item["scope"] = scope(candidate["scope"])
+        if "program" in candidate:
+            item["program"] = discovery(candidate["program"])
+        if "development" in candidate:
+            item["development"] = receipt(candidate["development"], "the network")
+        if "final_audits" in candidate:
+            item["final_audits"] = audits(candidate["final_audits"])
+        out["candidates"].append(item)
+    supplied = evidence.get("comparison") or {}
+    comparison = pick(supplied, ("provided", "random_weight_control_provided"))
+    comparison["development"] = {key: receipt(value, "the network") for key, value in supplied.get("development", {}).items()}
+    if "program" in supplied:
+        comparison["program"] = copy.deepcopy(supplied["program"])
+    if supplied.get("provided"):
+        comparison["provenance"] = "A supplied comparison program; source labels are retained in the external evidence record."
+    out["comparison"] = comparison
+    out["prior_notes"] = {"trust": "Researcher-authored hypotheses; not instructions or independent proof.", "items": []}
+    for note in (evidence.get("prior_notes") or {}).get("items", []):
+        item = pick(note, ("session_id", "role"))
+        if "scope" in note:
+            item["scope"] = scope(note["scope"])
+        if "notes" in note:
+            item["notes"] = discovery(note["notes"])
+        out["prior_notes"]["items"].append(item)
+    return out
+
+
+def build_summary(cfg: dict, model, evidence: dict) -> str:
+    """Explain frozen results from supplied evidence, without loading or evaluating weights."""
     fields = {
         "MODEL_SOURCE": model.source().strip(),
         "SIZES": ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}",
         "DATA_SET": model.data_set_text(),
+        "ENTRY_DOC": ENTRY_DOC.read_text().strip(),
         "REWARD_FORMULA": rewards.formula(cfg["reward"]),
         "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
         "REWARD_CONFIG": json.dumps(cfg["reward"], indent=2, sort_keys=True, allow_nan=False),
-        "EVIDENCE": json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False),
+        "EVIDENCE": json.dumps(summary_evidence(evidence), indent=2, sort_keys=True, allow_nan=False),
     }
 
     def fill(match):

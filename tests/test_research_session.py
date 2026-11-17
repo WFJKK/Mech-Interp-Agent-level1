@@ -112,13 +112,17 @@ def test_summary_prompt_is_generic_and_uses_only_supplied_evidence(tmp_path, mon
     monkeypatch.setattr(model, "load_weights", not_a_summary_input)
     monkeypatch.setattr(model, "task", not_a_summary_input)
     monkeypatch.setattr(model, "withheld", not_a_summary_input)
-    evidence = {"locked_global": "g01s1", "candidates": [{"id": "g01s1", "selection": {"reward": 0.7}}],
-                "audits": {"g01s1": {"fresh": {"reward": 0.6}}},
-                "notes": ["An unresolved observation with literal {{braces}}."], "comparisons": {}}
+    evidence = {"frozen_selection": {"global": "g01s1", "regional": {}},
+                "candidates": [{"id": "g01s1", "development": {"reward": 0.7},
+                                "final_audits": {"fresh": {"reward": 0.6}}}],
+                "prior_notes": {"items": [{"notes": "An unresolved observation with literal {{braces}}."}]},
+                "comparison": {"provided": False}}
     before = copy.deepcopy(evidence)
     text = prompt.build_summary(cfg, model, evidence)
-    assert json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False) in text
+    assert json.dumps(prompt.summary_evidence(evidence), indent=2, sort_keys=True, allow_nan=False) in text
     assert evidence == before
+    assert "literal {{braces}}" in text
+    assert prompt.ENTRY_DOC.read_text().strip() in text
     assert "best found" in text
     assert "formal proof" in text
     assert "No tools are available" in text
@@ -127,6 +131,62 @@ def test_summary_prompt_is_generic_and_uses_only_supplied_evidence(tmp_path, mon
     surface = loop.agent_surface(cfg, model)
     assert "summary prompt template" in surface
     hygiene.check({"prompt": prompt.build_summary(cfg, model, {}), **surface}, forbidden)
+
+
+@pytest.mark.parametrize("model_path", ["models/lin-c", "models/rnn-d"])
+def test_summary_view_hides_operator_provenance_but_preserves_discoveries(tmp_path, model_path):
+    from level1 import lang
+    from level1.networks import load_model
+
+    cfg = config(tmp_path, research_task={"role": "summary", "max_assignments": 0})
+    model = load_model(model_path)
+    g = lang.Graph({}, model.n_ctx, real=model.real)
+    program = g.entry(predict=g.const(0))
+    operator_label = "OPERATOR minimum of random weights"
+    discovery = "DISCOVERY minimum of random weights"
+    receipt = {"status": "scored", "network": operator_label, "reward": 0.7,
+               "parts": {"coverage": 1.0, "fidelity": 1.0, "cost": 0.3},
+               "verifier_error": "PRIVATE_ERROR minimum of random weights"}
+    raw = {"version": 1, "run_id": operator_label, "network": operator_label,
+           "second_network": operator_label, "research_stop_reason": operator_label,
+           "prices": lang.PRICES, "frozen_selection": {"global": "g01s1", "regional": {}},
+           "candidates": [{"id": "g01s1", "role": "lead", "scope_id": "all", "scope": {"kind": "all"},
+                           "program": program, "development": receipt,
+                           "final_audits": {"fresh": receipt, "held_out": receipt,
+                                            "fresh_baseline": receipt, "held_out_baseline": receipt}}],
+           "comparison": {"provided": True, "program": program, "provenance": operator_label,
+                          "development": {"all": receipt}, "random_weight_control_provided": False},
+           "prior_notes": {"items": [{"role": "regional", "notes": discovery}]}}
+    before = copy.deepcopy(raw)
+    view = prompt.summary_evidence(raw)
+    assert prompt.summary_evidence(view) == view
+    text = prompt.build_summary(cfg, model, raw)
+    assert operator_label not in text
+    assert "PRIVATE_ERROR" not in text
+    assert "_baseline" not in text
+    assert discovery in text
+    assert "fresh_comparison" in text and "held_out_comparison" in text
+    assert view["candidates"][0]["program"] == program
+    assert view["comparison"]["program"] == program
+    assert view["comparison"]["random_weight_control_provided"] is False
+    assert raw == before
+    masked = prompt.summary_evidence(raw, include_discoveries=False)
+    assert discovery not in str(masked)
+    assert masked["comparison"]["program"] == program
+    hygiene.check({"prompt": prompt.build_summary(cfg, model, masked)}, loop.forbidden_strings(cfg, model))
+
+    # Retained controller fields and the supplied comparison program are checked,
+    # rather than exempted along with researcher-authored findings.
+    unsafe = copy.deepcopy(raw)
+    unsafe["prices"] = operator_label
+    with pytest.raises(hygiene.HygieneError):
+        hygiene.check({"prompt": prompt.build_summary(cfg, model, prompt.summary_evidence(unsafe, include_discoveries=False))},
+                      loop.forbidden_strings(cfg, model))
+    unsafe = copy.deepcopy(raw)
+    unsafe["comparison"]["program"]["nodes"].append({"op": "weight", "name": operator_label})
+    with pytest.raises(hygiene.HygieneError):
+        hygiene.check({"prompt": prompt.build_summary(cfg, model, prompt.summary_evidence(unsafe, include_discoveries=False))},
+                      loop.forbidden_strings(cfg, model))
 
 
 def test_sandbox_and_verifier_use_the_same_assigned_domain(tmp_path):
