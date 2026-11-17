@@ -90,8 +90,9 @@ an evaluation barrier and a lead session that integrates the findings and plans 
 
 The lead can call `assign_region(scope, task, entry_name=None)`. Each assignment contains an
 immutable scope and a bounded question. Workers can explore and submit programs directly to the
-same verifier used by the lead. They cannot change their own assigned scope, the reward, prices or
-workload size. They may still submit an entry claiming a subset of that scope.
+same verifier used by the lead. They cannot broaden their assigned scope or change the reward,
+prices or workload policy. They can submit an entry within that assignment or make a separately
+evaluated claim on a narrower domain. The controller retains each actual evaluation domain.
 
 With two workers, the lead is encouraged to use one for a directed investigation and the other for
 an alternative hypothesis or underexplored domain. Worker contexts and archive snapshots are fixed
@@ -125,10 +126,67 @@ On resume, completed sessions can contribute saved drafts that older code did no
 phase snapshots remain fixed for reproducibility; recovered drafts enter newly created snapshots.
 Applying a code repair does not retroactively change the inputs of a research session already planned.
 
-## The same reward on each assigned domain
+### Required integration checkpoint
+
+New research runs give each integrating lead a short initial exploration window, controlled by
+`orchestration.checkpoint_python_calls` and set to two Python calls by default. After that window,
+`run_python` refuses further calls until the lead has a completed, scored submission on its assigned
+global domain. The refusal does not spend a Python call. The initial window permits inspecting
+carried drafts or constructing a first candidate when no draft is available.
+
+The checkpoint uses an ordinary `submit_entry` call and consumes an ordinary submission slot.
+Saving an entry, measuring it locally or describing it in notes does not satisfy the requirement.
+A narrower claim also does not satisfy it. Until the global checkpoint is scored, the lead's final
+remaining submission slot is reserved for that global domain; a child claim cannot consume it.
+Once the checkpoint is scored, the lead can continue improving programs or examining regional
+claims with its remaining allowances.
+
+If the verifier refuses a global submission, that attempt still consumes a submission slot. While
+another slot remains, each completed refusal allows one additional repair Python call before
+resubmission is required. A failed child claim does not grant this global repair allowance, and an
+interrupted evaluation without a receipt does not count as a checkpoint. These rules survive a
+backend retry and reopening the session.
+
+The controller does not choose the latest draft, submit programs implicitly or add a reference
+fallback. The researcher chooses which saved program to submit. A scored checkpoint establishes
+that an artifact was evaluated, not that its explanation is good: a reference implementation or
+weak predictor retains its ordinary measured cost and reward. The protocol cannot guarantee that
+an agent discovers a useful mechanism or succeeds before a provider or resource limit ends it.
+
+Tool responses expose checkpoint status and remaining calls in `remaining.checkpoint`. The
+session's persisted policy is authoritative. Older saved sessions without that policy retain
+their original behavior; setting the new option to `null` disables it for a new configuration.
+
+### Independently evaluated narrower claims
+
+Both workers and integrating leads can supply an optional `scope` to `submit_entry`. The controller
+intersects it with the assigned domain, so requesting `{"kind": "all"}` cannot broaden a worker's
+assignment. For a saved predicate entry, use the separate `scope_entry_name` argument:
+
+```python
+submit_entry(name="candidate", claimed_fidelity=0.99,
+             scope={"kind": "predicate"}, scope_entry_name="identified_domain")
+```
+
+This is a formal tool call. Inside `run_python`, `measure(entry, scope=...)` and
+`network_outputs(scope=...)` support the same conditioned investigation. An inline predicate
+contains the saved entry itself, for example
+`scope={"kind": "predicate", "entry": entries["identified_domain"]}`. Local measurements remain
+unscored drafts until an ordinary submission is made.
+
+Every narrower claim consumes its own submission slot. Its receipt freezes the actual scope, its
+probability or estimated probability under the original distribution and the workload convention. Its candidate competes
+only with other candidates evaluated on that same domain, and its regional frontier survives
+even if no global program improves. This also applies to regional claims submitted by the lead.
+The scope is reused for comparison programs and final audits. Overlapping regional results are
+retained as separate claims; their rewards or probability masses are not added.
+
+## The same reward on each evaluation domain
 
 For a task domain S, evaluate the original distribution conditioned on S. If the candidate claims
-only T within S, its coverage is P(T given S). It does not get coverage 1 by narrowing T.
+only T within S through its entry's region test, its coverage is P(T given S). Narrowing that test
+does not give it coverage 1 on S. An explicitly submitted child scope creates a different evaluation
+domain with its own conditional coverage and reward; that score cannot replace the score on S.
 
 ```math
 R_S = \mu_S [(1-c_S)-\alpha(1-q_S)]
@@ -138,11 +196,12 @@ The existing `r_alpha` implementation and the configured alpha are unchanged. Ex
 uses exact fidelity. Sampled evaluation uses the existing lower confidence bound. The archive also
 records the domain's mass under the original distribution, when available, and its support size.
 
-Compare programs within the same assigned domain and cost policy. Conditional rewards on unrelated
+Compare programs within the same actual evaluation domain and cost policy. Conditional rewards on unrelated
 domains do not rank the importance of those domains. The final global winner is selected only among
 submissions evaluated on the full domain; the code never promotes a conditional regional score into
-a global score. A worker explicitly assigned the full domain can contribute a global candidate
-without requiring the lead to resubmit the same program.
+a global score. A worker assigned the full domain can contribute a global candidate by submitting
+on that full domain, without requiring the lead to resubmit the same program. Its narrower claims
+remain regional candidates.
 
 A composed program must implement its routing, prediction and shared preprocessing in the entry
 language. It is evaluated as a whole. Regional rewards are not added to estimate its score.
@@ -156,10 +215,17 @@ The region machinery is independent of the model's architecture and its training
 | `{"kind": "all"}` | The original input distribution |
 | `{"kind": "lengths", "lengths": [...]}` | An allowed subset of token lengths, retaining the conditional distribution |
 | `{"kind": "predicate", "entry": ...}` | The region test of an ordinary entry |
+| `{"kind": "intersection", "scopes": [...]}` | Inputs satisfying every component restriction |
 
 For a predicate, the lead can save an ordinary entry with that test as its region and pass its
 name through `entry_name`. No new executable language is introduced. Conditional sampling has a
 bounded draw budget and time limit; an empty or infeasibly rare domain is refused clearly.
+Narrower claims can combine length restrictions and predicates through intersection. The resulting
+domain keeps the original distribution conditioned on all its restrictions, rather than treating
+their individual probabilities as independent. Intersections flatten and deduplicate their
+restrictions, have a bounded component count, and share the existing node and constant limits
+across predicate components. When a predicate's mass must be sampled inside a length-restricted
+domain, its estimate and confidence interval are scaled back to the original distribution.
 
 Scopes with a known finite support default to a workload whose size equals that support. For a
 uniform exhaustively checked domain, this is one evaluation per member. For a nonuniform domain,
@@ -190,9 +256,18 @@ under matching workload conventions, rather than comparing raw scores from diffe
 
 The original `rounds_max` now counts research cycles. Tool quotas are divided across roles from
 the original overall allowance, rather than copied to each agent. Planning receives 10 percent of
-exploration calls, regional work 60 percent, and integration the remaining 30 percent. Each worker
-receives one submission per cycle; the lead receives the remaining submissions in that cycle.
-The planning session receives no submissions, and the final summary has no tools.
+exploration calls, regional work 60 percent, and integration the remaining 30 percent.
+`orchestration.regional_submissions` sets each worker's formal submission allowance per cycle;
+the integrating lead receives the remaining `session.submissions` after all workers' shares.
+The configuration must leave at least one submission for integration. The planning session
+receives no submissions, and the final summary has no tools.
+
+The shared `research.yaml` profile now explicitly allows six submissions per cycle: two for each
+of two workers and two for integration. This lets a worker retain both a broader candidate and
+a special regional explanation without forcing them to share one score. It is an increase in the
+declared verification allowance, not a set of uncounted evaluations. The profile does not raise the
+API budget. Other configurations retain the default of one submission per worker unless they
+override it; saved configurations without the new option keep that original allocation.
 
 For new research runs, `orchestration.final_summary: true` reserves `summary_fraction: 0.1` of the
 API, turn and time allowances for final synthesis. Planning, regional work and integration divide the
@@ -201,7 +276,8 @@ up to $6 for synthesis and up to $54 for research; it does not add another $6. D
 restores the original allocation. Python-call and submission totals are unchanged because synthesis
 cannot use those tools.
 
-The default five cycles and four submissions per cycle therefore allow twenty submissions in total.
+At five cycles, the shared research profile therefore allows thirty submissions in total; a
+configuration with four submissions per cycle still allows twenty.
 One shared API spending log covers every role, retry and resume. Session identifiers are unique.
 Atomic reservations enforce the parent run, cycle and role caps when workers run simultaneously.
 Unreported spending is conservatively counted at the reserved cap. As in the original backend,
@@ -211,9 +287,12 @@ or an exact billing guarantee.
 Research prompts state their tool, turn, time and nominal API allowances. After the controller
 reserves an API attempt, the request also states its actual dollar allowance, which may be smaller
 because of earlier costs or outstanding reservations. A redacted copy of the complete task prompt
-sent to the CLI is saved as `request_NN.md` beside its stream log. The backend cannot supply a live
-balance during an attempt; it reconciles the reported cost when that attempt ends. Researchers are asked to save
-usable work promptly and budget for a formal submission when their role permits one.
+sent to the CLI is saved as `request_NN.md` beside its stream log. Before each CLI attempt, the
+backend also records that attempt's wall-clock deadline. Tool responses include
+`remaining.wall_seconds_remaining`, so a researcher can distinguish remaining time from unused
+tool calls. A retry gets a new attempt deadline while retaining the session's tool, submission
+and checkpoint counters. This is a deadline for the current backend attempt, not a live estimate
+of dollar spend. The backend reconciles reported cost when the attempt ends.
 
 Spending messages distinguish open reservations from completed attempts without a usable reported
 cost. An open record may belong to a worker still running or to an interrupted attempt. Both kinds
@@ -223,6 +302,19 @@ worker to have failed.
 Under login authentication, the API-dollar cap is not a billing mechanism. Compare research
 procedures using the same declared tool, turn and time allowances, and use API-key accounting when
 matching dollar spend matters.
+
+### Deadline and execution failures
+
+A backend wall-clock timeout is recorded as `timeout`, not `end_turn`. Turn-limit and backend-error
+stops are also distinct from a completed response. A partial or failed final summary is reported as
+incomplete and does not become a completed lead synthesis merely because text was returned.
+Completed submission receipts remain valid evidence when a later session limit is reached.
+
+An exception in sandboxed Python returns an error status as well as its traceback. Any entries
+successfully saved before that exception are retained when the wrapper returns them. A hard process
+termination may prevent the wrapper from returning, so an in-memory `save_entry` call is not itself
+a guarantee that the draft reached disk. Existing completed draft and submission artifacts remain
+available. Failed tool calls do not silently become successful measurements.
 
 ### Provider refusals
 
@@ -330,7 +422,7 @@ the assignment tool.
 
 ```bash
 python -m pytest tests/test_regions.py tests/test_multi_agent.py tests/test_multi_budget.py tests/test_research_session.py
-python -m pytest tests/test_multi_agent_repairs.py tests/test_prompt_repair.py tests/test_backend.py
+python -m pytest tests/test_checkpoints.py tests/test_multi_agent_repairs.py tests/test_prompt_repair.py tests/test_backend.py
 ```
 
 To attribute gains to delegation, compare with a single researcher given the same regional
