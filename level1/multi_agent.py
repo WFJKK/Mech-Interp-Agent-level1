@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import budget, hygiene, lang, prompt, regions, report, rewards
+from . import budget, hygiene, lang, prompt, regions, report, rewards, synthesis
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session
@@ -230,6 +230,11 @@ def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, in
     planning, regional = float(opt["planning_fraction"]), float(opt["regional_fraction"])
     global_fraction = 1.0 - planning - regional
     total_api, per_session = float(cfg["budget"]["run_usd"]), float(cfg["budget"]["round_usd"])
+    summary = synthesis.fraction(cfg)
+    if role == "summary":
+        cap = min(per_session, total_api * summary)
+        return 0, 0, cap, cap
+    total_api *= 1.0 - summary
     if cycle == 0:
         cap = min(per_session, total_api * planning)
         return math.floor(session["python_calls"] * cfg["rounds_max"] * planning), 0, cap, cap
@@ -245,6 +250,11 @@ def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, in
 
 def _quota(cfg: dict, base: float, role: str, cycle: int, workers: int, integer: bool):
     opt = _options(cfg)
+    summary = synthesis.fraction(cfg)
+    if role == "summary":
+        value = base * cfg["rounds_max"] * summary
+        return math.floor(value) if integer else value
+    base *= 1.0 - summary
     if cycle == 0:
         value = base * cfg["rounds_max"] * opt["planning_fraction"]
     elif role == "regional":
@@ -265,7 +275,8 @@ def role_config(cfg: dict, plan: dict) -> dict:
     if out["session"]["max_turns"] < 1 and cfg["backend"] != "fake":
         raise RuntimeError("the turn budget is too small for the configured research-role allocation")
     out["budget"].update(round_usd=cap, cycle_usd=cycle_cap,
-                         cycle_id="planning" if plan["cycle"] == 0 else f"cycle-{plan['cycle']:03d}")
+                         cycle_id="summary" if plan["role"] == "summary" else
+                         "planning" if plan["cycle"] == 0 else f"cycle-{plan['cycle']:03d}")
     max_assignments = (_options(cfg)["workers"] if plan["role"] == "lead" and plan["cycle"] < cfg["rounds_max"] else 0)
     out["research_task"] = {"role": plan["role"], "task": plan["task"], "cycle": plan["cycle"],
                             "session_id": plan["id"], "max_assignments": max_assignments}
@@ -288,7 +299,7 @@ def _history(path: Path, state: dict, before_index: int) -> list[dict]:
     rows = []
     for plan in state["sessions"].values():
         record_path = Path(path) / plan["directory"] / "record.json"
-        if plan["index"] < before_index and record_path.exists():
+        if plan["role"] != "summary" and plan["index"] < before_index and record_path.exists():
             record = read_json(record_path)
             rows.append({"session_id": plan["id"], "role": plan["role"], "scope": plan["scope"],
                          "notes": record["notes"], "submissions": record["submissions"]})
@@ -431,7 +442,7 @@ def drive(path, fake_scripts=None, out=print, budget_usd=None) -> str:
 def _drive(path, fake_scripts=None, out=print) -> str:
     path = Path(path)
     if (path / ROOT / "lock.json").exists():
-        _finish(path, out=out)
+        _finish(path, out=out, fake_scripts=fake_scripts)
         return "finished"
     run = read_json(path / "run.json")
     cfg, model = run["config"], load_model(run["config"]["model"])
@@ -529,7 +540,7 @@ def _drive(path, fake_scripts=None, out=print) -> str:
         write_report(path)
         return "stopped"
     write_json(_state_path(path), state)
-    _finish(path, out=out)
+    _finish(path, out=out, fake_scripts=fake_scripts)
     return "finished"
 
 
@@ -561,12 +572,12 @@ def _audit_candidate(path: Path, cfg: dict, model, candidate: dict) -> dict:
     return audit
 
 
-def finish(path, out=print) -> dict:
+def finish(path, out=print, fake_scripts=None) -> dict:
     with _controller_lock(Path(path)):
-        return _finish(Path(path), out=out)
+        return _finish(Path(path), out=out, fake_scripts=fake_scripts)
 
 
-def _finish(path, out=print) -> dict:
+def _finish(path, out=print, fake_scripts=None) -> dict:
     """Freeze the whole selection before evaluating either final input sample."""
     path = Path(path)
     run = read_json(path / "run.json")
@@ -606,9 +617,29 @@ def _finish(path, out=print) -> dict:
             write_json(path / "lock.json", lock)
             if "held_out" in audit:
                 write_json(path / "seed_check.json", audit["held_out"])
+    _synthesize(path, cfg, model, frozen, archive, fake_scripts, out)
     write_report(path)
     out(f"locked {len(frozen['candidates'])} candidates; global choice: {global_id or 'none'}")
     return lock
+
+
+def _synthesize(path: Path, cfg: dict, model, frozen: dict, archive: dict, fake_scripts, out) -> dict:
+    """The sole post-lock agent has no research tools and cannot enter the archive."""
+    if not synthesis.enabled(cfg):
+        return {"status": "disabled"}
+    state = read_json(_state_path(path))
+    if "summary" not in state:
+        plan = _new_plan(state, "summary", cfg["rounds_max"] + 1, ALL,
+                         "Explain the frozen global result and regional findings from the recorded evidence.", 1)
+        plan["directory"] = f"{ROOT}/summary"
+        state["summary"] = plan["id"]
+        write_json(_state_path(path), state)
+    plan = state["sessions"][state["summary"]]
+    result = synthesis.run(path, cfg, model, plan, role_config(cfg, plan), frozen, archive,
+                           _history(path, state, plan["index"]), fake_scripts=fake_scripts, out=out)
+    plan["status"] = result["status"]
+    write_json(_state_path(path), state)
+    return result
 
 
 def write_report(path) -> None:
@@ -627,6 +658,8 @@ def write_report(path) -> None:
     api_budget = budget.state(path, run["config"]["budget"]) if run["config"]["auth"] == "api_key" else None
     result = {"orchestration": "regional_global", "network": run["config"]["network"],
               "archive": archive, "state": state, "sessions": records, "audits": audits}
+    summary = synthesis.report(path, run["config"])
+    result["lead_summary"] = summary
     if api_budget is not None:
         result["api_budget"] = api_budget
     write_json(path / "report.json", result)
@@ -663,7 +696,12 @@ def write_report(path) -> None:
                 lines.append(f"| {cid} | {label} | {receipt['network']} | {receipt['parts']['fidelity']} | {receipt['reward']:.6f} |")
     lines += ["", "## Execution", "", f"Completed cycles: {sum(c['status'] == 'completed' for c in state.get('cycles', []))}.",
               f"Stop reason: {state.get('stop_reason') or 'research is in progress'}.", "",
-              "The raw session receipts, fixed-development comparisons and frozen final checks are kept separately. Final checks never feed the agents or the archive selection.", ""]
+              "The raw session receipts, fixed-development comparisons and frozen final checks are kept separately. Final checks never feed research sessions or archive selection. A separate tool-less lead synthesis may describe them after locking.", ""]
+    lines += ["## Final lead synthesis", "", f"Status: {summary['status']}.", ""]
+    if summary.get("markdown"):
+        lines += ["[Read the final lead synthesis](lead_summary.md).", ""]
+    elif summary.get("reason"):
+        lines += [summary["reason"], ""]
     if api_budget is not None:
         lines += [f"Counted API spending: ${api_budget['spent']:.2f} of the experiment's ${api_budget['run_usd']:.2f} budget, "
                   f"from the shared spending ledger ({api_budget['unreported']} attempts without a reported cost).", ""]

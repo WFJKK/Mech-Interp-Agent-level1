@@ -12,7 +12,7 @@ def config(tmp_path, **overrides):
     base = {"run_id": "research-test", "runs_dir": str(tmp_path), "backend": "fake", "sandbox": "process",
             "rounds_max": 1, "patience": 2, "session": {"python_calls": 20, "submissions": 4},
             "verifier": {"check": "sample", "sample_size": 128, "reference_samples": 1},
-            "orchestration": {"enabled": True, "parallel": True, "development_seed": 73}}
+            "orchestration": {"enabled": True, "parallel": True, "development_seed": 73, "final_summary": False}}
     return run_config.load("config/pilot/lin-a-1to4.yaml", run_config.merge(base, overrides))
 
 
