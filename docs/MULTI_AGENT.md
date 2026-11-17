@@ -130,9 +130,18 @@ Applying a code repair does not retroactively change the inputs of a research se
 
 New research runs give each integrating lead a short initial exploration window, controlled by
 `orchestration.checkpoint_python_calls` and set to two Python calls by default. After that window,
-`run_python` refuses further calls until the lead has a completed, scored submission on its assigned
-global domain. The refusal does not spend a Python call. The initial window permits inspecting
-carried drafts or constructing a first candidate when no draft is available.
+if a saved draft exists, `run_python` refuses further calls until the lead has a completed, scored
+submission on its assigned global domain. The refusal does not spend a Python call. The initial
+window permits inspecting carried drafts or constructing a first candidate when no draft is available.
+
+If the initial window ends with no saved entry, the controller allows one additional construction
+repair call within the original Python quota. Once that call saves an entry, the lead must submit
+it before further exploration. If the repair also returns no draft, further Python calls remain
+blocked and the session has no checkpoint. Reopening the session or retrying the backend does not
+refresh this one-call exception. Its granted or consumed allowance remains visible as
+`bootstrap_repair_calls` in checkpoint status. If the resulting draft is formally refused, the
+separate one-call refusal repair still applies while a submission slot remains. Neither allowance
+adds a formal submission or evaluates a fallback program automatically.
 
 The checkpoint uses an ordinary `submit_entry` call and consumes an ordinary submission slot.
 Saving an entry, measuring it locally or describing it in notes does not satisfy the requirement.

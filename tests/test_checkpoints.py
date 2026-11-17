@@ -181,6 +181,61 @@ def test_initial_window_can_build_a_checkpoint_without_inherited_drafts(tmp_path
     assert session.run_python("print(sorted(entries))")["status"] == "ok"
 
 
+def test_no_saved_draft_gets_one_construction_repair_before_checkpoint(tmp_path):
+    session, _ = make_session(tmp_path, carried=False)
+    for _ in range(2):
+        failed = session.run_python("raise RuntimeError('candidate construction failed')")
+        assert failed["status"] == "error" and failed["saved_entries"] == []
+    checkpoint = session.remaining()["checkpoint"]
+    assert checkpoint["bootstrap_repair_calls"] == 1
+    assert checkpoint["python_calls_until_checkpoint"] == 1
+    repaired = session.run_python("g = graph()\nsave_entry('repaired', g.entry(predict=g.const(0)))")
+    assert repaired["saved_entries"] == ["repaired"]
+    assert session.remaining()["checkpoint"]["bootstrap_repair_calls"] == 1
+    assert session.remaining()["checkpoint"]["status"] == "blocked"
+    with pytest.raises(ToolError, match="checkpoint"):
+        session.run_python("print('a saved repair now requires evaluation')")
+    assert session.state["used"]["run_python"] == 3
+    assert session.submit_entry("repaired", 0.0)["status"] == "scored"
+    assert session.remaining()["checkpoint"]["status"] == "scored"
+
+
+def test_failed_construction_repair_does_not_refresh_on_reopen_or_retry(tmp_path):
+    session, cfg = make_session(tmp_path, carried=False)
+    for _ in range(2):
+        assert session.run_python("raise RuntimeError('no usable draft')")["status"] == "error"
+    reopened = Session.create(session.path, cfg, cfg["network"], tmp_path / "run")
+    assert reopened.run_python("raise RuntimeError('repair also failed')")["status"] == "error"
+    retried = Session(session.path)
+    retried.begin_attempt(60)
+    assert retried.entries() == {} and retried.receipts() == []
+    checkpoint = retried.remaining()["checkpoint"]
+    assert checkpoint["bootstrap_repair_calls"] == 1
+    assert checkpoint["python_calls_until_checkpoint"] == 0
+    assert checkpoint["status"] == "blocked"
+    with pytest.raises(ToolError, match="checkpoint"):
+        retried.run_python("print('there is no second construction repair')")
+    assert retried.state["used"] == {"run_python": 3, "submit_entry": 0}
+
+
+def test_a_refusal_after_construction_repair_still_grants_its_own_repair_call(tmp_path):
+    session, _ = make_session(tmp_path, carried=False)
+    for _ in range(2):
+        assert session.run_python("raise RuntimeError('no draft yet')")["status"] == "error"
+    saved = session.run_python("g = graph()\nsave_entry('candidate', g.entry(predict=g.const([0])[g.token(0)]))")
+    assert saved["saved_entries"] == ["candidate"]
+    assert session.submit_entry("candidate", 1.0)["status"] == "refused"
+    reopened = Session(session.path)
+    checkpoint = reopened.remaining()["checkpoint"]
+    assert checkpoint["repair_calls"] == 1
+    assert checkpoint["python_calls_until_checkpoint"] == 1
+    assert reopened.run_python("g = graph()\nsave_entry('candidate', g.entry(predict=g.const(0)))")["status"] == "ok"
+    with pytest.raises(ToolError, match="checkpoint"):
+        reopened.run_python("print('the refusal granted only one repair')")
+    assert reopened.state["used"]["run_python"] == 4
+    assert reopened.submit_entry("candidate", 0.0)["status"] == "scored"
+
+
 def test_legacy_same_scope_receipt_remains_a_checkpoint_after_upgrade(tmp_path):
     session, _ = make_session(tmp_path)
     assert session.submit_entry("reference", 1.0)["status"] == "scored"
