@@ -59,7 +59,7 @@ find it. A single winning run is not a reliable estimate of either.
 
 Random checkpoints need not be hard to describe. They may produce nearly constant outputs or other
 simple behavior. Such an outcome should be reported as part of the control distribution. Random controls
-must be specified by an initialization or randomization procedure; "random" is not a universal null
+must be specified by a weight-sampling or parameter-randomization procedure; "random" is not a universal null
 model independent of architecture and scale.
 
 The existing automatic baseline runner does not implement this matched multi-agent experiment. In
