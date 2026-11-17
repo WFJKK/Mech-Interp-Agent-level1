@@ -71,6 +71,23 @@ saved entries are still in `entries`: {saved}.
 {submitted}"""
 
 
+API_ATTEMPT_NOTE = """
+
+## This attempt's API allowance
+
+The controller has allocated ${cap_usd:.2f} for this API attempt after accounting for earlier costs and
+open reservations. This is the limit passed to the CLI for this attempt; it may be less than the
+session's nominal allocation. Keep the remaining work and final deliverable within this allowance.
+The CLI checks spending after an answer, so it can stop without a final-turn warning and the last
+answer can exceed the limit.
+"""
+
+
+def api_attempt_note(cap_usd: float) -> str:
+    """The actual claimed allowance, also valid for a tool-free synthesis session."""
+    return API_ATTEMPT_NOTE.format(cap_usd=cap_usd)
+
+
 def restart_note(session) -> str:
     """What a session that was cut off is told when it starts again: its budgets as they stand, the entries
     it saved and the submissions it already made. Empty for a session that has used nothing."""
@@ -145,7 +162,10 @@ RESEARCH_ROLES = {
         "results to identify useful combinations, shared computations, counterexamples and missing "
         "investigations. Submit global candidates for evaluation; conditional regional rewards are never "
         "a substitute for measuring the composed program. Preserve useful regional findings even when "
-        "their integration does not improve the global score."),
+        "their integration does not improve the global score. Investigate simple explanations on subdomains "
+        "where measurements show strong agreement, and examine their failure cases separately. Regional "
+        "questions should use the configured fidelity and cost tradeoff; require exact agreement only "
+        "when it is an explicit, bounded hypothesis or a requirement of this task."),
     "regional": (
         "You are a regional investigator. Optimize the ordinary reward within the assigned domain. "
         "Investigate the proposed question, but test competing explanations and refine an entry's region "
@@ -164,6 +184,40 @@ operation prices or workload policy. Distinct hypotheses can run independently i
 When assigning more than one investigation, leave one room to pursue an alternative explanation or an
 underexplored domain instead of making every worker follow the same hypothesis.
 """
+
+
+def research_allocation(cfg: dict) -> str:
+    """Describe the configured session quota without treating a login as dollar-capped."""
+    session = cfg["session"]
+    if cfg.get("auth") == "api_key":
+        api = (f"The nominal API allowance for this session is ${float(cfg['budget']['round_usd']):.2f}. "
+               "It shares the experiment's budget with other sessions. The actual allowance for each "
+               "attempt is supplied with that request and may be below the nominal amount.")
+    else:
+        api = "This session does not enforce an API dollar cap; its tool, turn and time allocations still apply."
+    return (api + f" Each backend attempt has at most {int(session['max_turns'])} turns and "
+            f"{float(session['seconds']):g} seconds. Retries do not refresh the tool or submission quotas. "
+            "Complete a useful deliverable early; "
+            "a budget limit can end the session before closing notes are written.")
+
+
+def research_deliverable(cfg: dict) -> str:
+    """Saving a draft and submitting a scored candidate are distinct operations."""
+    saving = ("Save a usable executable entry with `save_entry(name, entry)` before extended optimization. "
+              "Use `reference_entry()` as a clearly labeled starting point if needed. A program described "
+              "only in prose or printed to the console is not a saved artifact.")
+    submissions = int(cfg["session"]["submissions"])
+    if submissions > 0:
+        quota = ("You have one formal submission; keep a starting reference as a draft and spend the "
+                 "submission on a promising candidate." if submissions == 1 else
+                 f"You have {submissions} formal submissions; account for that limit when deciding which candidates to submit.")
+        return (saving + " " + quota + " Submit a promising candidate with `submit_entry` while enough "
+                "API, time and tool allowance remains to finish reliably. A promising carried draft can "
+                "be a useful first candidate. If the submission allowance is exhausted, save further "
+                "improvements for a later session. Saving or locally measuring an entry does not submit "
+                "it and does not give it a formal score.")
+    return (saving + " This session has no formal submission allowance. Hand off saved drafts, concise "
+            "experimental results and concrete assignments so a later investigator can test and submit them.")
 
 
 def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
@@ -217,6 +271,7 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
         "PYTHON_CALLS": cfg["session"]["python_calls"], "PYTHON_SECONDS": cfg["python"]["time_limit_s"],
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
         "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
+        "API_ALLOCATION": research_allocation(cfg), "DELIVERABLE_NOTE": research_deliverable(cfg),
         "ASSIGNMENT_NOTE": ASSIGNMENT_NOTE.format(count=count) if role == "lead" and count else "No further investigations can be scheduled in this session.",
         "ARCHIVE": archive_summary or "No checked submissions yet.", "HISTORY": notes or "No earlier research notes.",
     }

@@ -8,11 +8,11 @@ gives the cost the CLI reported:
     {"event": "end", "round": 2, "try": 1, "cost_usd": 4.31, "ended": "success", "at": ...}
     {"event": "budget", "run_usd": 80.0, "at": ...}        the run's budget changed (resume --budget-usd)
 
-A try counts at the cost the CLI reported. A try with no reported cost (the CLI was stopped at the session's
-time limit, or the loop itself was stopped or killed) counts at its cap in the run's total: the CLI checks its
-spending after every answer and stops at the cap, so the cap is what it can have spent, give or take its last
-answer. The run's count therefore never falls short of the bill by more than that, and a resumed run goes on
-counting where it was.
+A try counts at the cost the CLI reported. An open try reserves its cap while it is running or until an
+interruption is reconciled; an open record alone does not distinguish those cases. A completed try with
+no reported cost also counts at its cap in the run's total: the CLI checks its
+spending after every answer and stops at the cap. Such a reservation is an estimate, and each unreported
+attempt may exceed it by its last answer. A resumed run goes on counting where it was.
 
 A round's own count holds the tries that ended while the loop ran: their reported costs, and the caps of those
 stopped at the time limit. A try the loop never saw end (it was stopped with Ctrl-C, or killed) stays out of
@@ -70,8 +70,9 @@ def _append_locked(run_path: Path, event: dict) -> None:
 
 def state(run_path: Path, budget: dict) -> dict:
     """The budgets and what the log counts as spent: the run's total, and each round's own count (which leaves
-    out legacy tries the loop never saw end; grouped tries keep their reservations). "unreported" is the
-    number of tries counted at their caps, "stopped" those of them that the loop never saw end."""
+    out legacy tries the loop never saw end; grouped tries keep their reservations). The historical
+    "unreported" count includes every try counted at its cap, and "stopped" counts open records, which
+    may still be running. Explicit fields distinguish open reservations from completed unreported costs."""
     if "cycle_id" in budget:
         with _locked(run_path):
             return _state(run_path, budget)
@@ -100,9 +101,11 @@ def _state(run_path: Path, budget: dict) -> dict:
             if i is not None:
                 tries[i][2], tries[i][3] = True, e.get("cost_usd")
     rounds, cycles, spent, unreported, stopped = {}, {}, 0.0, 0, 0
+    open_reserved_usd, completed_unreported_usd = 0.0, 0.0
     for k, cap, ended, cost, cycle_id in tries:
         if not ended:  # no closing record yet: reserve its cap
             spent, unreported, stopped = spent + cap, unreported + 1, stopped + 1
+            open_reserved_usd += cap
             if cycle_id is not None:  # grouped sessions retain all their reservations on resume
                 rounds[k] = rounds.get(k, 0.0) + cap
                 cycles[cycle_id] = cycles.get(cycle_id, 0.0) + cap
@@ -110,17 +113,39 @@ def _state(run_path: Path, budget: dict) -> dict:
         if (not isinstance(cost, (int, float)) or isinstance(cost, bool)
                 or (cycle_id is not None and (not math.isfinite(cost) or cost < 0))):
             cost, unreported = cap, unreported + 1
+            completed_unreported_usd += cap
         spent += float(cost)
         rounds[k] = rounds.get(k, 0.0) + float(cost)
         if cycle_id is not None:
             cycles[cycle_id] = cycles.get(cycle_id, 0.0) + float(cost)
     out = {"run_usd": run_usd, "round_usd": round_usd, "spent": spent, "rounds": rounds,
-           "cycles": cycles, "unreported": unreported, "stopped": stopped}
+           "cycles": cycles, "unreported": unreported, "stopped": stopped,
+           "open_tries": stopped, "open_reserved_usd": open_reserved_usd,
+           "completed_unreported_tries": unreported - stopped,
+           "completed_unreported_usd": completed_unreported_usd}
     if "cycle_id" in budget:
         cycle_id, limit = budget["cycle_id"], float(budget["cycle_usd"])
         # Once a cycle has reserved money, another worker or a resume cannot silently enlarge its cap.
         out.update(cycle_id=cycle_id, cycle_usd=min(limit, cycle_limits.get(cycle_id, limit)))
     return out
+
+
+def accounting_note(st: dict) -> str:
+    """Describe counted estimates without interpreting an open attempt as a failure."""
+    parts = []
+    opened = st.get("open_tries", st.get("stopped", 0))
+    completed = st.get("completed_unreported_tries", st.get("unreported", 0) - opened)
+    if opened:
+        tries = "attempt" if opened == 1 else "attempts"
+        caps = "its cap" if opened == 1 else "their caps"
+        amount = f" (${st['open_reserved_usd']:.2f})" if "open_reserved_usd" in st else ""
+        parts.append(f"{opened} open {tries} reserved at {caps}{amount}; may still be running or interrupted")
+    if completed:
+        tries = "attempt" if completed == 1 else "attempts"
+        caps = "its cap" if completed == 1 else "their caps"
+        amount = f" (${st['completed_unreported_usd']:.2f})" if "completed_unreported_usd" in st else ""
+        parts.append(f"{completed} completed {tries} without a usable reported cost counted at {caps}{amount}")
+    return "; ".join(parts)
 
 
 def left(st: dict, k: int | None = None) -> float:

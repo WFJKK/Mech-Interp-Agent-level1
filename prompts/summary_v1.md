@@ -5,6 +5,11 @@ has already been locked. This is an explanation session after research and evalu
 No tools are available. Do not execute code, obtain new observations, submit programs, assign work or
 change the selected candidates. Your only output is the final Markdown synthesis.
 
+The object of this report is the supplied numerical target network, separate from the assistant
+writing the report. Explain its programs using recorded measurements, reproducible experiments and
+independently checkable mathematical justifications. Give concise explanations supported by evidence;
+do not reproduce or request private internal reasoning from any researcher assistant.
+
 The frozen selection is authoritative. Final audits are available to discuss the strength and limits
 of the evidence; they must not select a different winner or feed back into research. If a record is
 missing or inconsistent, say so. Do not silently reconstruct a different selection.

@@ -196,7 +196,11 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
     surface (session.py), the note a restarted session gets, and the paths that can show from inside: the
     temporary folder the CLI is started in and, unless the agent's code runs in a container (which has its
     own paths), the sandbox folder's location and this Python's (a traceback prints it)."""
+    from .backends.claude_code import SUMMARY_SYSTEM_PROMPT, SYSTEM_PROMPT
+
     out = {**surface(model, cfg["verifier"]), "restart note": prompt.RESTART_NOTE,
+           "API attempt allowance": prompt.API_ATTEMPT_NOTE,
+           "research system prompt": SYSTEM_PROMPT, "summary system prompt": SUMMARY_SYSTEM_PROMPT,
            "temporary folder's location": tempfile.gettempdir()}
     if (cfg.get("orchestration") or {}).get("enabled"):
         import json

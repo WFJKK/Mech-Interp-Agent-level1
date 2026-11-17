@@ -217,6 +217,8 @@ def test_api_key_mode_bills_the_key_and_reads_no_login(tmp_path):
     assert cmd[:3] == ["claude", "-p", "--bare"]  # --bare reads no login: the key is the only way to pay
     assert json.loads(cmd[cmd.index("--settings") + 1]) == {"apiKeyHelper": "printenv CPL_ANTHROPIC_KEY"}
     assert cmd[cmd.index("--max-budget-usd") + 1] == "3.00" and cmd[cmd.index("--tools") + 1] == ""
+    assert calls[0]["prompt"] == "the prompt" + prompt.api_attempt_note(3.0)
+    assert (where / "request_01.md").read_text() == calls[0]["prompt"]
     assert "ANTHROPIC_API_KEY" not in env and "ANTHROPIC_AUTH_TOKEN" not in env and env["CPL_ANTHROPIC_KEY"] == KEY
     assert KEY not in " ".join(cmd)
     code = json.loads((where / "mcp.json").read_text())["mcpServers"]["lv1"]["args"][1]
@@ -224,6 +226,7 @@ def test_api_key_mode_bills_the_key_and_reads_no_login(tmp_path):
     m = r.meta
     assert m["auth"] == "api_key" and m["billed_to"] == "apiKeyHelper" and m["cost_usd"] == 1.25 and m["claude_code_version"] == "2.1.322"
     assert m["budget"]["caps_usd"] == [3.0] and m["budget"]["run_counted_usd"] == 1.25 and m["budget"]["unreported_tries"] == 0
+    assert m["request"]["prompt_files"] == ["request_01.md"]
     spend = [json.loads(line) for line in (run / "spend.jsonl").read_text().splitlines()]
     assert [(e["event"], e["round"], e["try"], e.get("cap_usd"), e.get("cost_usd")) for e in spend] == \
         [("start", 1, 1, 3.0, None), ("end", 1, 1, None, 1.25)]
@@ -237,6 +240,7 @@ def test_a_login_run_keeps_the_key_out_and_bills_nothing(setup):
     r = b.respond("p", 0, where, session)
     cmd, env = calls[0]["cmd"], calls[0]["env"]
     assert "--bare" not in cmd and "--max-budget-usd" not in cmd and "--settings" not in cmd
+    assert calls[0]["prompt"] == "p" and (where / "request_01.md").read_text() == "p"
     assert not {"ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN", "CPL_ANTHROPIC_KEY"} & set(env)
     assert r.meta["auth"] == "login" and r.meta["billed_to"] == "none" and r.meta["cost_usd"] == 0.0 and "budget" not in r.meta
     assert not (where.parent / "spend.jsonl").exists()
@@ -323,6 +327,9 @@ def test_the_budget_holds_across_tries_rounds_and_resumes(tmp_path):
                                environ=dict(ENV))
     r = b.respond("p", 0, where, session)
     assert [c["cmd"][c["cmd"].index("--max-budget-usd") + 1] for c in calls] == ["3.00", "2.50"]  # the round's $3 less the failed try
+    assert [c["prompt"] for c in calls] == ["p" + prompt.api_attempt_note(3.0), "p" + prompt.api_attempt_note(2.5)]
+    assert r.meta["request"]["prompt_files"] == ["request_01.md", "request_02.md"]
+    assert (where / "request_02.md").read_text() == calls[1]["prompt"]
     assert r.meta["cost_usd"] == 2.5 and r.meta["budget"]["round_counted_usd"] == 2.5 and len(sleeps) == 1
     assert b.exhausted(run) is None
 
@@ -356,6 +363,52 @@ def test_a_session_at_its_spending_cap_keeps_what_it_did(tmp_path):
     r = b.respond("p", 0, where, session)
     assert len(calls) == 1 and r.text == "so far" and r.meta["stop_reason"] == "budget" and r.meta["cost_usd"] == 3.4
     assert r.meta["stop_details"] == {"budget": "the session reached its spending cap ($3.00)"}
+
+
+def test_prompt_uses_the_actual_remaining_cycle_allowance_not_its_nominal_cap(tmp_path):
+    from level1 import budget
+
+    cfg, run = billed(tmp_path, budget={"run_usd": 60, "round_usd": 3.24,
+                                      "cycle_id": "cycle-001", "cycle_usd": 9.72})
+    for k, cost in ((1, 3.357694), (2, 4.514583)):
+        assert budget.claim(run, k, 1, cfg["budget"]) == 3.24
+        budget.end(run, k, 1, cost, "finished", atomic=True)
+    session, where = round_of(cfg, run, 3)
+    b, calls, _ = backend(cfg, [[init("apiKeyHelper"), assistant("done"), result(total_cost_usd=0.5)]],
+                          environ=dict(ENV))
+    response = b.respond("nominal allocation: $3.24", 2, where, session)
+    assert response.meta["budget"]["caps_usd"] == [1.84]
+    assert calls[0]["cmd"][calls[0]["cmd"].index("--max-budget-usd") + 1] == "1.84"
+    assert calls[0]["prompt"] == "nominal allocation: $3.24" + prompt.api_attempt_note(1.84)
+    assert (where / "request_01.md").read_text() == calls[0]["prompt"]
+
+
+def test_tool_free_summary_receives_its_actual_allowance_without_submission_instructions(tmp_path):
+    cfg, run = billed(tmp_path)
+    cfg["research_task"] = {"role": "summary", "max_assignments": 0}
+    session, where = round_of(cfg, run, 1)
+    b, calls, _ = backend(cfg, [[init("apiKeyHelper"), assistant("Final evidence."), result(total_cost_usd=0.1)]],
+                          environ=dict(ENV))
+    b.respond("Summarize the frozen evidence.", 0, where, session)
+    cmd = calls[0]["cmd"]
+    assert session.TOOLS == {}
+    assert cmd[cmd.index("--allowedTools") + 1] == ""
+    assert json.loads((where / "mcp.json").read_text()) == {"mcpServers": {}}
+    assert calls[0]["prompt"].endswith(prompt.api_attempt_note(3.0))
+    assert "submit" not in calls[0]["prompt"]
+    assert "submit when allowed" not in cmd[cmd.index("--system-prompt") + 1]
+
+
+def test_a_request_interrupted_before_its_stream_is_not_overwritten_on_resume(setup):
+    cfg, session, where = setup
+    previous = where / "request_01.md"
+    previous.write_text("The previous request, interrupted before a stream was saved.")
+    b, calls, _ = backend(cfg, [[assistant("done"), result()]])
+    response = b.respond("resumed request", 0, where, session)
+    assert previous.read_text() == "The previous request, interrupted before a stream was saved."
+    assert response.meta["request"]["prompt_files"] == ["request_02.md"]
+    assert (where / "request_02.md").read_text() == calls[0]["prompt"] == "resumed request"
+    assert (where / "stream_02.jsonl").exists()
 
 
 def test_the_key_never_reaches_a_record(tmp_path):

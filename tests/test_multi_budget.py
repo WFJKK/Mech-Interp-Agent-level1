@@ -191,3 +191,32 @@ def test_backend_allows_only_the_tools_available_to_that_session(tmp_path):
     backend.respond("work", 0, where, session)
     allowed = calls[0][calls[0].index("--allowedTools") + 1]
     assert allowed == "mcp__lv1__run_python,mcp__lv1__submit_entry,mcp__lv1__assign_region"
+
+
+def test_open_reservations_and_finished_unreported_costs_are_distinct_in_logs(tmp_path):
+    cfg = grouped(round_usd=1.25, cycle_usd=5)
+    backend, session, where, _ = _fake_role(tmp_path, 0, [0.5], cfg_over={"budget": cfg})
+    run = tmp_path / "run"
+    assert budget.claim(run, 99, 1, cfg) == 1.25
+    logs = []
+    backend.log = logs.append
+    response = backend.respond("work", 0, where, session)
+    st = budget.state(run, cfg)
+    assert st["spent"] == 1.75
+    assert st["unreported"] == st["stopped"] == st["open_tries"] == 1
+    assert st["open_reserved_usd"] == 1.25 and st["completed_unreported_tries"] == 0
+    assert "1 open attempt reserved at its cap ($1.25)" in logs[-1]
+    assert "may still be running or interrupted" in logs[-1]
+    assert "CLI reported no cost" not in logs[-1] and "completed attempt" not in logs[-1]
+    assert response.meta["budget"]["open_tries"] == 1
+
+    budget.end(run, 99, 1, None, "timed out", atomic=True)
+    st = budget.state(run, cfg)
+    assert st["spent"] == 1.75  # presentation changes do not alter what is counted
+    assert st["unreported"] == st["completed_unreported_tries"] == 1
+    assert st["stopped"] == st["open_tries"] == 0
+    assert st["completed_unreported_usd"] == 1.25
+    note = budget.accounting_note(st)
+    assert "1 completed attempt without a usable reported cost counted at its cap ($1.25)" == note
+    assert "open attempt" not in note
+    assert budget.accounting_note({"unreported": 2, "stopped": 1}).startswith("1 open attempt")

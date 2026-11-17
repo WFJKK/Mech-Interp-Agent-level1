@@ -66,9 +66,11 @@ from ..util import REPO_ROOT, atomic_write
 from . import BackendError, Response, StopRun
 
 SYSTEM_PROMPT = (
-    "You are working on a research task with only the tools listed in the task message; you have no "
-    "files of your own. Use the tools as the message says, submit what you find, and end with the notes the "
-    "message asks for, in exactly that format."
+    "You are analyzing the supplied numerical target network with only the tools listed in the task "
+    "message; you have no files of your own. Report executable programs, measurements, concise experiment "
+    "summaries and independently checkable mathematical justifications. Use the tools as the message "
+    "says, save usable work early, submit when allowed, and follow the requested report format. "
+    "Do not provide private internal reasoning."
 )
 SUMMARY_SYSTEM_PROMPT = (
     "You are writing the final research synthesis from the supplied frozen evidence. You have no tools "
@@ -228,8 +230,9 @@ def as_text(output) -> str:
 
 
 def next_stream(where: Path) -> int:
-    """The number of the next stream_NN.jsonl in a round's folder: one past the highest there."""
-    numbers = [int(m.group(1)) for p in Path(where).glob("stream_*.jsonl") if (m := re.fullmatch(r"stream_(\d+)\.jsonl", p.name))]
+    """One past every recorded attempt, including a request interrupted before its stream was saved."""
+    numbers = [int(m.group(1) or m.group(2)) for p in Path(where).glob("*")
+               if (m := re.fullmatch(r"(?:stream_(\d+)\.jsonl|request_(\d+)\.md)", p.name))]
     return max(numbers, default=0) + 1
 
 
@@ -437,6 +440,7 @@ class ClaudeCodeBackend:
         timeout = float(self.cfg["session"]["seconds"])
         data, messages, text, events, declined = {}, [], "", [], None
         restarts, caps, costs, sources, version, ended = [], [], [], [], None, None
+        request_prompts = []
         for attempt in range(tries):
             session.reload()  # the tools run in the tool server's process; an earlier try may have used some
             note = prompt.restart_note(session)
@@ -444,6 +448,7 @@ class ClaudeCodeBackend:
                 restarts.append(dict(session.state["used"]))
             n = next_stream(where)
             this_try = list(cmd)
+            allowance_note = ""
             if self.auth == "api_key":
                 if grouped:
                     cap = budget.claim(run_path, k, n, self.cfg["budget"])
@@ -461,10 +466,15 @@ class ClaudeCodeBackend:
                     budget.start(run_path, k, n, cap)
                 caps.append(cap)
                 this_try += ["--max-budget-usd", f"{cap:.2f}"]
+                allowance_note = prompt.api_attempt_note(cap)
+            request_text = prompt_text + note + allowance_note
+            request_file = f"request_{n:02d}.md"
+            atomic_write(where / request_file, self.scrub(request_text))
+            request_prompts.append(request_file)
             r, timed_out = None, False
             with tempfile.TemporaryDirectory(prefix="lv1-claude-code-") as cwd:
                 try:
-                    r = self.run(this_try, prompt_text + note, self.env, cwd, timeout)
+                    r = self.run(this_try, request_text, self.env, cwd, timeout)
                     stdout = r.stdout or ""
                 except subprocess.TimeoutExpired as exc:
                     # the session's wall clock ran out: what it submitted stands; there is no closing text
@@ -473,8 +483,8 @@ class ClaudeCodeBackend:
                     if self.auth == "api_key":
                         budget.end(run_path, k, n, 0.0, "not started", atomic=grouped)
                     raise StopRun(f"could not run the Claude Code CLI: {exc}") from exc
-            # Everything the CLI emitted on this try, as it came: the messages, the tool calls and as much of the
-            # model's reasoning as the CLI shows (a try stopped at the time limit: what it emitted until then).
+            # Everything the CLI emitted on this try, as it came: the messages, tool calls and diagnostics
+            # (a try stopped at the time limit: what it emitted until then).
             # response.md keeps only the text; this keeps all.
             stdout = self.scrub(stdout)
             atomic_write(where / f"stream_{n:02d}.jsonl", stdout)
@@ -555,7 +565,7 @@ class ClaudeCodeBackend:
             "assistant_messages": len(messages),
             "tools_used": dict(session.state["used"]),
             "submissions": len(session.receipts()),
-            "request": {"command": cmd[:1] + cmd[1:10]},
+            "request": {"command": cmd[:1] + cmd[1:10], "prompt_files": request_prompts},
             "failed_tries": failures,
             "restarted_with_used": restarts,  # one item per try that began with a used session: what was used
             "seconds": round(time.monotonic() - t0, 1),
@@ -564,13 +574,14 @@ class ClaudeCodeBackend:
             st = budget.state(run_path, self.cfg["budget"])
             meta["budget"] = {"caps_usd": caps, "round_counted_usd": round(st["rounds"].get(k, 0.0), 6),
                               "run_counted_usd": round(st["spent"], 6), "round_usd": st["round_usd"], "run_usd": st["run_usd"],
-                              "unreported_tries": st["unreported"], "stopped_tries": st["stopped"]}
+                              "unreported_tries": st["unreported"], "stopped_tries": st["stopped"],
+                              "open_tries": st["open_tries"], "open_reserved_usd": round(st["open_reserved_usd"], 6),
+                              "completed_unreported_tries": st["completed_unreported_tries"],
+                              "completed_unreported_usd": round(st["completed_unreported_usd"], 6)}
             if grouped:
                 meta["budget"].update(cycle_id=st["cycle_id"], cycle_usd=st["cycle_usd"],
                                       cycle_counted_usd=round(st["cycles"].get(st["cycle_id"], 0.0), 6))
-            stopped_text = "have no closing record" if grouped else "stopped with the loop, counted in the run's total only"
-            self.log(f"  API: round {k} ${st['rounds'].get(k, 0.0):.2f}; the run ${st['spent']:.2f} of ${st['run_usd']:.2f}"
-                     + (f" ({st['unreported']} tries counted at their caps: the CLI reported no cost"
-                        + (f"; {st['stopped']} of them {stopped_text}" if st.get("stopped") else "")
-                        + ")" if st["unreported"] else ""))
+            details = budget.accounting_note(st)
+            self.log(f"  API: round {k} ${st['rounds'].get(k, 0.0):.2f}; the run ${st['spent']:.2f} of ${st['run_usd']:.2f} counted"
+                     + (f" ({details})" if details else ""))
         return Response(text=str(text or ""), meta=meta)
