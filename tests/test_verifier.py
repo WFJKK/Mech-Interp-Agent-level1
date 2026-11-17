@@ -1,9 +1,12 @@
 """The verifier on the pilot's two networks: the reference, the parts, the reward, what is refused."""
 
+import copy
+import time
+
 import numpy as np
 import pytest
 
-from level1 import lang, rewards
+from level1 import lang, regions, rewards
 from level1.lang import Graph
 from level1.verifier import Verifier, wilson_lower
 
@@ -122,6 +125,106 @@ def test_how_the_verifier_checks_is_a_setting(model, model4, nets):
         Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"check": "all"}})
     with pytest.raises(RuntimeError, match="verifier.check must be one of"):
         Verifier(model, "lin-a-s0", {**CFG, "verifier": {"check": "some"}})
+
+
+def test_explicit_expired_deadline_stops_before_loading_or_using_cached_inputs(model, monkeypatch):
+    v = Verifier(model, "lin-a-s0", CFG)
+    cached = v.inputs()
+    expired = time.monotonic() - 1
+    with pytest.raises(lang.EntryError, match="out of time"):
+        v.inputs(deadline=expired)
+    receipt = v.score(v.reference, deadline=expired)
+    assert receipt["status"] == "refused" and "out of time" in receipt["reason"]
+    assert receipt["inputs"] is None and receipt["parts"] is None
+    assert v.inputs() is cached  # an expired call does not invalidate sound cached evidence
+    monkeypatch.setattr(model, "load_weights", lambda _: pytest.fail("expired construction must not load weights"))
+    with pytest.raises(lang.EntryError, match="out of time"):
+        Verifier(model, "lin-a-s0", CFG, deadline=expired)
+
+
+def test_scope_preparation_honors_the_attempt_deadline(model, nets, monkeypatch):
+    g = Graph(nets["lin-a-s0"][0], model.n_ctx)
+    predicate = g.entry(predict=g.token(0), rule=g.token(0) >= 0)
+    cfg = {**CFG, "verifier": {"scope": {"kind": "predicate", "entry": predicate}}}
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    original = lang.Evaluator.run
+
+    def slower(self, x):
+        value = original(self, x)
+        clock[0] += 0.1
+        return value
+
+    monkeypatch.setattr(lang.Evaluator, "run", slower)
+    with pytest.raises(lang.EntryError, match="out of time"):
+        Verifier(model, "lin-a-s0", cfg, deadline=100.25)
+    assert clock[0] < 101  # conditioning stops early rather than traversing the full finite support
+
+
+def test_reference_deadline_and_cached_scope_refresh_between_attempts(model, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    cfg = {**CFG, "verifier": {"scope": {"kind": "all"}, "check": "sample", "sample_size": 8, "time_limit_s": 4}}
+    v = Verifier(model, "lin-a-s0", cfg, deadline=101)
+    policy = copy.deepcopy(v.cfg)
+    original = lang.Evaluator.run
+    calls = []
+
+    def slower(self, x):
+        value = original(self, x)
+        calls.append(x)
+        clock[0] += 0.1
+        return value
+
+    monkeypatch.setattr(lang.Evaluator, "run", slower)
+    receipt = v.score(v.reference, seed=7, deadline=100.25)
+    assert receipt["status"] == "refused" and "out of time" in receipt["reason"]
+    assert len(calls) < cfg["verifier"]["sample_size"]
+    assert receipt["inputs"] is None  # reference outputs were not completed
+
+    monkeypatch.setattr(lang.Evaluator, "run", original)
+    clock[0] = 200
+    assert v.score(v.reference, seed=7, deadline=202)["status"] == "scored"
+    assert v.scope.deadline == 202
+    clock[0] = 300
+    assert v.score(v.reference, seed=7)["status"] == "scored"
+    assert v.scope.deadline == 304
+    assert v.cfg == policy
+
+
+def test_later_attempt_deadline_cannot_extend_the_configured_measurement_limit(model, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    cfg = {**CFG, "verifier": {"check": "sample", "sample_size": 8, "time_limit_s": 1}}
+    v = Verifier(model, "lin-a-s0", cfg)
+    original = regions.measure
+
+    def delayed(*args, **kwargs):
+        clock[0] = 102
+        return original(*args, **kwargs)
+
+    monkeypatch.setattr(regions, "measure", delayed)
+    receipt = v.score(v.reference, deadline=500)
+    assert receipt["status"] == "refused" and "out of time" in receipt["reason"]
+    assert receipt["inputs"]["n"] == 8 and receipt["parts"] is None
+    assert v.cfg["time_limit_s"] == 1
+
+
+def test_a_completed_measurement_after_the_deadline_cannot_be_reported_as_scored(model, monkeypatch):
+    clock = [100.0]
+    monkeypatch.setattr(time, "monotonic", lambda: clock[0])
+    v = Verifier(model, "lin-a-s0", {**CFG, "verifier": {"check": "sample", "sample_size": 8}})
+    original = regions.measure
+
+    def late_result(*args, **kwargs):
+        value = original(*args, **kwargs)
+        clock[0] = 101
+        return value
+
+    monkeypatch.setattr(regions, "measure", late_result)
+    receipt = v.score(v.reference, deadline=100.5)
+    assert receipt["status"] == "refused" and "out of time" in receipt["reason"]
+    assert receipt["reward"] is None and receipt["parts"] is None
 
 
 def test_one_cost_and_the_reward_written_with_it(model, nets):

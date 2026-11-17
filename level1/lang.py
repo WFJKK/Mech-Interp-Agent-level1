@@ -586,17 +586,21 @@ def wilson_lower(k: int, n: int, z: float = 1.96) -> float:
     return max(0.0, (centre - spread) / (1 + z * z / n))
 
 
-def run_reference(reference: dict, weights: dict, n_ctx: int, inputs) -> tuple:
+def run_reference(reference: dict, weights: dict, n_ctx: int, inputs, *, deadline: float | None = None) -> tuple:
     """The network's own outputs on these inputs and what one forward pass costs: the network written as an
     entry, interpreted like any other. Its cost may not depend on the input, and it has no build."""
-    ev = Evaluator(reference, weights, n_ctx)
+    ev = Evaluator(reference, weights, n_ctx, deadline)
     answers, costs = [], set()
     for x in inputs:
+        if deadline is not None and time.monotonic() >= deadline:
+            raise EntryError("the reference ran out of time")
         inside, answer, c_rule, c_pred = ev.run(x)
         if not inside or c_rule:
             raise EntryError("the reference must answer every input, with no rule")
         answers.append(answer)
         costs.add(c_pred)
+    if deadline is not None and time.monotonic() >= deadline:
+        raise EntryError("the reference ran out of time")
     if len(costs) != 1 or ev.build_cost:
         raise EntryError("the reference must cost the same on every input and compute nothing ahead")
     return np.array(answers, dtype=np.int64), costs.pop()

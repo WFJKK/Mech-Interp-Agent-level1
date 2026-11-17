@@ -35,6 +35,11 @@ ENTRY_DEFAULTS = {"max_nodes": 400, "max_const_scalars": 256}
 CHECKS = ("auto", "all", "sample")
 
 
+def _check_deadline(deadline: float | None) -> None:
+    if deadline is not None and time.monotonic() >= deadline:
+        raise lang.EntryError("the verifier ran out of time")
+
+
 def resolve_check(model: Model, verifier_cfg: dict | None) -> str:
     """all or sample: how this run's verifier checks this model's data set."""
     cfg = {**DEFAULTS, **(verifier_cfg or {})}
@@ -50,26 +55,33 @@ def resolve_check(model: Model, verifier_cfg: dict | None) -> str:
 
 
 class Verifier:
-    def __init__(self, model: Model, network_id: str, cfg: dict | None = None):
+    def __init__(self, model: Model, network_id: str, cfg: dict | None = None, *, deadline: float | None = None):
         cfg = cfg or {}
         self.model, self.network_id = model, network_id
         self.cfg = {**DEFAULTS, **(cfg.get("verifier") or {})}
         self.limits = {**ENTRY_DEFAULTS, **(cfg.get("entry") or {})}
         self.reward_cfg = dict(cfg.get("reward") or {"name": "r_alpha", "alpha": 10.0})
+        _check_deadline(deadline)
         self.weights = model.load_weights(network_id)
         self.reference = model.reference_entry(self.weights)
+        _check_deadline(deadline)
         self.scope = None
         self._scope_meta = None
         if self.cfg.get("scope") is not None:
             self.scope = regions.Scope(model.input_space, model.info()["data_set"], self.weights, model.n_ctx,
                                        self.cfg["scope"], limits=self.limits,
                                        enumerate_up_to=int(self.cfg["enumerate_up_to"]),
-                                       deadline=time.monotonic() + float(self.cfg["time_limit_s"]))
+                                       deadline=self._capped_deadline(deadline))
             self.check = self.scope.resolve_check(self.cfg)
         else:
             self.check = resolve_check(model, self.cfg)
         self.enumerated = self.check == "all"
         self._all = None  # (inputs, the network's outputs, operations of one forward pass), when every input is checked
+        _check_deadline(deadline)
+
+    def _capped_deadline(self, deadline: float | None) -> float:
+        configured = time.monotonic() + float(self.cfg["time_limit_s"])
+        return configured if deadline is None else min(configured, deadline)
 
     def n_inputs(self) -> int:
         """How many inputs one scoring uses."""
@@ -77,32 +89,40 @@ class Verifier:
             return self.scope.cardinality if self.scope is not None else self.model.n_total
         return int(self.cfg["sample_size"])
 
-    def inputs(self, seed: int | None = None) -> tuple:
+    def inputs(self, seed: int | None = None, *, deadline: float | None = None) -> tuple:
         """(inputs, the network's outputs on them, operations of a forward pass, how they were chosen)"""
+        # An attempt deadline is local to this call, never retained as a verifier-wide policy.
+        deadline = self._capped_deadline(deadline) if deadline is not None else None
+        _check_deadline(deadline)
         if self.enumerated and self._all is not None:
             return self._all
         x, how, self._scope_meta = regions.prepare_inputs(self.model.info(), self.weights, self.cfg,
-                                                         seed=seed, limits=self.limits, scope=self.scope)
-        answers, ops = lang.run_reference(self.reference, self.weights, self.model.n_ctx, x)
+                                                         seed=seed, limits=self.limits, scope=self.scope, deadline=deadline)
+        _check_deadline(deadline)
+        answers, ops = lang.run_reference(self.reference, self.weights, self.model.n_ctx, x, deadline=deadline)
+        _check_deadline(deadline)
         result = (x, answers, ops, how)
         if self.enumerated:
             self._all = result
         return result
 
-    def score(self, entry, claimed: float | None = None, seed: int | None = None) -> dict:
+    def score(self, entry, claimed: float | None = None, seed: int | None = None, *, deadline: float | None = None) -> dict:
         t0 = time.monotonic()
+        deadline = self._capped_deadline(deadline) if deadline is not None else None
         receipt = {"status": "refused", "reason": None, "network": self.network_id, "entry_sha256": None, "size": None,
                    "inputs": None, "parts": None, "reward": None, "prices": lang.PRICES}
         try:
+            _check_deadline(deadline)
             receipt["size"] = lang.check_structure(entry, self.limits["max_nodes"], self.limits["max_const_scalars"])
             receipt["entry_sha256"] = lang.entry_hash(entry)
-            x, answers, ops, how = self.inputs(seed)
+            x, answers, ops, how = self.inputs(seed, deadline=deadline) if deadline is not None else self.inputs(seed)
             receipt["inputs"] = how
             if self._scope_meta is not None:
                 receipt["scope"] = self._scope_meta
             parts = regions.measure(entry, self.weights, self.model.n_ctx, x, answers, ops, how=how,
                                     scope=self._scope_meta, verifier_cfg=self.cfg, limits=self.limits,
-                                    deadline=time.monotonic() + float(self.cfg["time_limit_s"]))
+                                    deadline=self._capped_deadline(deadline))
+            _check_deadline(deadline)
         except lang.EntryError as exc:
             receipt["reason"] = str(exc)[:1000]
             receipt["seconds"] = round(time.monotonic() - t0, 3)
