@@ -27,6 +27,7 @@ MAX_DRAWS = 1_000_000
 DEFAULT_DRAWS = 200_000
 DEFAULT_MASS_SAMPLES = 1000
 DEFAULT_LIMITS = {"max_nodes": 400, "max_const_scalars": 256}
+MAX_SCOPE_COMPONENTS = 8
 
 
 def _positive_int(value, name, maximum=None):
@@ -68,12 +69,15 @@ def normalize_scope(spec=None):
         raise lang.EntryError("scope must be an object")
     kind = spec.get("kind")
     keys = {"all": {"kind"}, "lengths": {"kind", "lengths"},
-            "predicate": {"kind", "entry", "max_draws", "mass_samples"}}
+            "predicate": {"kind", "entry", "max_draws", "mass_samples"},
+            "intersection": {"kind", "scopes"}}
     if not isinstance(kind, str) or kind not in keys:
-        raise lang.EntryError("scope.kind must be all, lengths or predicate")
+        raise lang.EntryError("scope.kind must be all, lengths, predicate or intersection")
     extra = set(spec) - keys[kind]
     if extra:
         raise lang.EntryError(f"scope {kind} does not take {sorted(extra)}")
+    if kind == "intersection":
+        return _normalize_intersection(spec.get("scopes"))
     out = {"kind": kind}
     if kind == "lengths":
         lengths = spec.get("lengths")
@@ -88,12 +92,100 @@ def normalize_scope(spec=None):
     return out
 
 
+def _scope_identity(spec):
+    if spec["kind"] == "intersection":
+        return {"kind": "intersection", "scopes": [_scope_identity(item) for item in spec["scopes"]]}
+    return {k: v for k, v in spec.items() if k not in ("max_draws", "mass_samples")}
+
+
+def _normalize_intersection(scopes):
+    """Flatten conjunctions and retain the strictest requested rejection cap."""
+    if not isinstance(scopes, list) or not scopes:
+        raise lang.EntryError("scope.scopes must be a nonempty list")
+    pending = list(scopes)
+    seen = 0
+    lengths = None
+    predicates = {}
+    while pending:
+        seen += 1
+        # Bound raw nesting as well as the number of distinct predicates.
+        if seen > MAX_SCOPE_COMPONENTS ** 2 or len(pending) > MAX_SCOPE_COMPONENTS ** 2:
+            raise lang.EntryError("scope intersection is too large")
+        item = pending.pop()
+        if isinstance(item, dict) and item.get("kind") == "intersection":
+            if set(item) != {"kind", "scopes"}:
+                raise lang.EntryError("scope intersection takes only kind and scopes")
+            children = item["scopes"]
+            if not isinstance(children, list) or not children:
+                raise lang.EntryError("scope.scopes must be a nonempty list")
+            pending.extend(children)
+            continue
+        item = normalize_scope(item)
+        if item["kind"] == "lengths":
+            values = set(item["lengths"])
+            lengths = values if lengths is None else lengths & values
+            if not lengths:
+                raise lang.EntryError("the assigned scope is empty")
+        elif item["kind"] == "predicate":
+            key = lang.canonical(_scope_identity(item))
+            if key in predicates:
+                prior = predicates[key]
+                for option, default, combine in (("max_draws", DEFAULT_DRAWS, min),
+                                                  ("mass_samples", DEFAULT_MASS_SAMPLES, max)):
+                    if option in item or option in prior:
+                        prior[option] = combine(prior.get(option, default), item.get(option, default))
+            else:
+                predicates[key] = item
+            if len(predicates) > MAX_SCOPE_COMPONENTS:
+                raise lang.EntryError(f"a scope intersection has at most {MAX_SCOPE_COMPONENTS} components")
+    components = list(predicates.values())
+    if lengths is not None:
+        components.append({"kind": "lengths", "lengths": sorted(lengths)})
+    if len(components) > MAX_SCOPE_COMPONENTS:
+        raise lang.EntryError(f"a scope intersection has at most {MAX_SCOPE_COMPONENTS} components")
+    if not components:
+        return {"kind": "all"}
+    if len(components) == 1:
+        return components[0]
+    components.sort(key=lambda item: lang.canonical(_scope_identity(item)))
+    return {"kind": "intersection", "scopes": components}
+
+
+def intersect_scopes(parent, child):
+    """Condition a claim on both its assignment and its requested narrower scope."""
+    return normalize_scope({"kind": "intersection", "scopes": [parent, child]})
+
+
+def _combined_predicate(specs, limits):
+    """Conjoin predicates without granting each component a fresh entry allowance."""
+    nodes, rules = [], []
+    for spec in specs:
+        entry = spec["entry"]
+        lang.check_structure(entry, limits["max_nodes"], limits["max_const_scalars"])
+        offset = len(nodes)
+        # The normalized entry's last node is its unused constant prediction.
+        for node in entry["nodes"][:-1]:
+            node = copy.deepcopy(node)
+            if "args" in node:
+                node["args"] = [i + offset for i in node["args"]]
+            nodes.append(node)
+        rules.append(entry["rule"] + offset)
+    rule = rules[0]
+    for following in rules[1:]:
+        nodes.append({"op": "and", "args": [rule, following]})
+        rule = len(nodes) - 1
+    nodes.append({"op": "const", "dtype": "int", "value": 0})
+    entry = {"format": lang.FORMAT, "nodes": nodes, "rule": rule, "predict": len(nodes) - 1}
+    lang.check_structure(entry, limits["max_nodes"], limits["max_const_scalars"])
+    return entry
+
+
 def scope_id(spec=None):
     """Stable scope identity, independent of rejection and diagnostic settings."""
     spec = normalize_scope(spec)
     if spec["kind"] == "all":
         return "all"
-    identity = {k: v for k, v in spec.items() if k not in ("max_draws", "mass_samples")}
+    identity = _scope_identity(spec)
     return "scope-" + hashlib.sha256(lang.canonical(identity).encode()).hexdigest()[:20]
 
 
@@ -127,6 +219,10 @@ class Scope:
         self.can_enumerate = False
         self._points = self._probabilities = None
         self._predicate = None
+        self._predicate_entry = None
+        self._base_mass = 1.0
+        self._max_draws = DEFAULT_DRAWS
+        self._mass_samples = DEFAULT_MASS_SAMPLES
         self._conditioning = {"rule_ops": 0, "build_ops": 0, "n_evaluated": 0}
         self._mass_estimation = None
         self._draw_set = self.data_set
@@ -144,37 +240,49 @@ class Scope:
         else:
             parent_count = lang.count_inputs(self.data_set, self.input_space)
 
-        if self.spec["kind"] == "lengths":
+        components = self.spec["scopes"] if self.spec["kind"] == "intersection" else [self.spec]
+        length_spec = next((item for item in components if item["kind"] == "lengths"), None)
+        predicates = [item for item in components if item["kind"] == "predicate"]
+        base_count = parent_count
+        if length_spec is not None:
             if self.kind != "lengths":
                 raise lang.EntryError("a lengths scope needs a data set declaring lengths")
-            selected = self.spec["lengths"]
+            selected = length_spec["lengths"]
             if not set(selected) <= set(self._length_counts):
                 raise lang.EntryError("scope.lengths must be a subset of the data set's lengths")
             selected_draws = [n for n in self.data_set["lengths"] if n in selected]
             self._draw_set = {**self.data_set, "lengths": selected_draws}
             self.cardinality = sum(vocab ** n for n in selected)
+            base_count = self.cardinality
             self.mass = len(selected_draws) / len(self.data_set["lengths"])
+            self._base_mass = self.mass
             self.can_enumerate = self._uniform_lengths(Counter(selected_draws))
-        elif self.spec["kind"] == "all":
+        else:
             self.cardinality = parent_count
             self.can_enumerate = self.kind == "all" or (self.kind == "lengths" and self._uniform_lengths(self._length_counts))
-        else:
-            entry = self.spec["entry"]
+        if predicates:
+            entry = predicates[0]["entry"] if len(predicates) == 1 else _combined_predicate(predicates, self.limits)
             lang.check_structure(entry, self.limits["max_nodes"], self.limits["max_const_scalars"])
+            self._predicate_entry = entry
             self._predicate = lang.Evaluator(entry, weights, self.n_ctx, self.deadline)
+            self._max_draws = min(item.get("max_draws", DEFAULT_DRAWS) for item in predicates)
+            self._mass_samples = max(item.get("mass_samples", DEFAULT_MASS_SAMPLES) for item in predicates)
+            self.cardinality = None
+            self.can_enumerate = False
             self.mass = None
             self.mass_exact = False
-            if parent_count is not None and parent_count <= self.enumerate_up_to and parent_count * self.n_ctx <= lang.MAX_ELEMENTS:
-                points, probabilities = self._support(self.data_set)
+            if base_count is not None and base_count <= self.enumerate_up_to and base_count * self.n_ctx <= lang.MAX_ELEMENTS:
+                points, probabilities = self._support(self._draw_set)
                 accepted = self._filter(points)
                 self._points = points[accepted]
                 self.cardinality = int(accepted.sum())
                 if not self.cardinality:
                     raise lang.EntryError("the assigned scope is empty")
                 probability = probabilities[accepted]
-                self.mass = self.cardinality / parent_count if self.kind == "all" else math.fsum(probability.tolist())
+                conditional_mass = self.cardinality / base_count if self.kind == "all" else math.fsum(probability.tolist())
+                self.mass = self._base_mass * conditional_mass
                 self.mass_exact = True
-                self._probabilities = probability / self.mass
+                self._probabilities = probability / conditional_mass
                 self.can_enumerate = bool(np.all(probability == probability[0]))
 
     def _uniform_lengths(self, counts):
@@ -242,32 +350,37 @@ class Scope:
             return lang.draw_inputs(self._draw_set, self.input_space, n, rng)
         if self._points is not None:
             return self._points[rng.choice(len(self._points), size=n, p=self._probabilities)]
-        self._predicate = lang.Evaluator(self.spec["entry"], self._predicate.weights, self.n_ctx, self.deadline)
+        self._predicate = lang.Evaluator(self._predicate_entry, self._predicate.weights, self.n_ctx, self.deadline)
         self._conditioning = {"rule_ops": 0, "build_ops": 0, "n_evaluated": 0}
         # A fixed-size independent probe estimates outer mass. The acceptance
         # ratio at a rejection stopping time is not used as a mass estimate.
         if mass_rng is None:
             encoded = lang.canonical(rng.bit_generator.state).encode()
             mass_rng = np.random.default_rng(int.from_bytes(hashlib.sha256(encoded).digest()[:8], "big"))
-        probe_n = self.spec.get("mass_samples", DEFAULT_MASS_SAMPLES)
+        probe_n = self._mass_samples
         successes = 0
         batch_limit = max(1, min(4096, lang.MAX_ELEMENTS // self.n_ctx))
         for start in range(0, probe_n, batch_limit):
-            probe = lang.draw_inputs(self.data_set, self.input_space, min(batch_limit, probe_n - start), mass_rng)
+            probe = lang.draw_inputs(self._draw_set, self.input_space, min(batch_limit, probe_n - start), mass_rng)
             successes += int(self._filter(probe).sum())
-        self.mass = successes / probe_n
+        self.mass = self._base_mass * successes / probe_n
         self._mass_estimation = {"n": probe_n, "accepted": successes,
-                                 "low": lang.wilson_lower(successes, probe_n),
-                                 "high": 1.0 - lang.wilson_lower(probe_n - successes, probe_n)}
+                                 "low": self._base_mass * lang.wilson_lower(successes, probe_n),
+                                 "high": self._base_mass * (1.0 - lang.wilson_lower(probe_n - successes, probe_n))}
+        if self._base_mass != 1.0:
+            # Probes are conditional on the length support, whose outer mass is
+            # known. Scale the estimate and interval back to the original input
+            # distribution; do not multiply two separately estimated masses.
+            self._mass_estimation["probe_base_mass"] = self._base_mass
         remaining = n
         drawn = 0
         chunks = []
-        cap = self.spec.get("max_draws", DEFAULT_DRAWS)
+        cap = self._max_draws
         while remaining and drawn < cap:
             amount = min(max(remaining * 2, 64), cap - drawn, batch_limit)
             # Draw one row at a time so changing the cap cannot change how a
             # column-wise data sampler groups random numbers into inputs.
-            proposals = np.concatenate([lang.draw_inputs(self.data_set, self.input_space, 1, rng) for _ in range(amount)])
+            proposals = np.concatenate([lang.draw_inputs(self._draw_set, self.input_space, 1, rng) for _ in range(amount)])
             keep = proposals[self._filter(proposals)][:remaining]
             chunks.append(keep)
             remaining -= len(keep)
@@ -282,7 +395,7 @@ class Scope:
                "conditioning": dict(self._conditioning)}
         if self._mass_estimation is not None:
             out["mass_estimation"] = dict(self._mass_estimation)
-        if self.spec["kind"] == "predicate":
+        if self._predicate is not None:
             out["predicate_binding"] = "current_weights"
         return out
 
