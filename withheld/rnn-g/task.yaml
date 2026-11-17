@@ -1,0 +1,66 @@
+# Withheld from the agent: no tool reaches this folder, and the strings under hygiene are what the hygiene
+# check looks for in everything the agent can reach (prompt, tool descriptions, sandbox files, names).
+task: >
+  The networks were trained to output the position of the second-largest of their ten numbers (2nd argmax,
+  x.argsort()[-2]), on inputs drawn exactly as the data set says, so the data set is what they were trained on.
+  They are rnn-c's design and sizes. The first, rnn-g-s0, is the network ARC's AlgZoo write-up analyses and sets
+  as its challenge: to design a method that estimates this 432-parameter network's accuracy mechanistically, as
+  well as random sampling does for the same compute. It is not one of the zoo's own networks; it is published
+  next to them. The write-up puts it at 95.3%, reads five of its sixteen units (1, 2, 4, 6 and 7, the ones with
+  sparse weights) as leave-one-out maxima, and leaves most of the other eleven unexplained. The second,
+  rnn-g-s1, is the zoo's own pick of this size (seed 2), the very weights of rnn-c-s2; the write-up says of it
+  that it has the same architecture, is probably fairly similar, and has not been analysed.
+provenance:
+  source: ARC's AlgZoo, github.com/alignment-research-center/alg-zoo (commit 4433f50, licence MIT-0), and its
+    write-up, alignment.org/blog/algzoo-uninterpreted-models-with-fewer-than-1-500-parameters
+  files:
+    rnn-g-s0: withheld/rnn/pth/one_layer_16_hidden_94_acc_2nd_argmax.pth, from gs://arc-ml-public/alg (not its zoo
+      folder; alg_zoo/loading.py, example_2nd_argmax), fetched on 17 November 2026
+    rnn-g-s1: withheld/rnn/pth/2nd_argmax_16_10_1073741824_2.pth, rnn-c-s2's file; models/rnn-g/zoo/rnn-g-s1.npz is a
+      copy of models/rnn-c/zoo/rnn-c-s2.npz, byte for byte
+  converted_by: withheld/rnn/convert.py (input = rnn.weight_ih_l0, recurrent = rnn.weight_hh_l0, readout = linear.weight;
+    float32 as published; read without torch, by an unpickler that runs nothing)
+  recipe: rnn-g-s1's is rnn-c's (withheld/rnn-c/task.yaml). rnn-g-s0's is not published with it. So the prompt's
+    words for the second network, the same training with another seed, are not known to hold exactly here. It is
+    the same design and sizes, trained for the same task on the same inputs.
+  sha256:
+    rnn-g-s0: 498bd9a87c469e18e824a78e55c22843c7595776f1bfc2dfe07c36e5616218bb
+    rnn-g-s1: 2da5093777d7943ed27e3df62c321eedb498e9d69a67a200b20a77361d0f997f
+how_often_the_output_is_the_second_largest:   # on 2^20 inputs, numpy.random.default_rng(0).standard_normal, in float64
+  rnn-g-s0: 0.95314
+  rnn-g-s1: 0.94882
+roles: s0 for the rounds, s1 for the seed check
+baseline: rnn-f, the baseline model of this shape, which serves rnn-c too. Its networks are where the zoo's five
+  networks of this size started; where rnn-g-s0 started is not published.
+hygiene:
+  - 2nd argmax
+  - second argmax
+  - 2nd_argmax
+  - 2nd-argmax
+  - second-largest
+  - second largest
+  - second biggest
+  - second highest
+  - second-highest
+  - runner-up
+  - runner up
+  - next largest
+  - largest
+  - larger
+  - biggest
+  - bigger
+  - smaller
+  - smallest
+  - lowest
+  - lesser
+  - median
+  - middle
+  - AlgZoo
+  - alg-zoo
+  - alg_zoo
+  - Alignment Research
+  - alignment.org
+  - arc-ml
+  - Gross
+  - compact proof
+  - trained on

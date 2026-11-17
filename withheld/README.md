@@ -18,9 +18,10 @@ they were trained, how often they follow the task, and the words the hygiene che
 | att-c | transformer, width 32 | max of 4 | exactly 4 tokens | 1 to 4 tokens |
 | att-d | transformer, width 32 | min of 4 | exactly 4 tokens | 1 to 4 tokens |
 | rnn-a, rnn-b, rnn-c | ReLU RNN, 2, 4 and 16 units | the position of the second-largest of 2, 3 and 10 numbers (2nd argmax) | standard normal numbers | the same: its training inputs |
+| rnn-g | ReLU RNN, 16 units: the network ARC's write-up analyses, with rnn-c-s2 as its second | the position of the second-largest of 10 numbers | standard normal numbers | the same: its training inputs |
 | lin-e, lin-f, att-e | the shapes of lin-c, lin-d and att-c | nothing: never trained | | as their twins |
 | lin-f-4 | lin-f's networks, in lin-b-4's design and data set | nothing: never trained | | as lin-b-4 |
-| rnn-d, rnn-e, rnn-f | the shapes of rnn-a, rnn-b and rnn-c | nothing: never trained | | as their twins |
+| rnn-d, rnn-e, rnn-f | the shapes of rnn-a, rnn-b and rnn-c (rnn-f is rnn-g's too) | nothing: never trained | | as their twins |
 
 - **Linear**: 64 tokens, each with an embedding column; the columns of an input's tokens are added up,
   passed through a hidden layer of width 8 and an unembedding, and the output is the argmax. Trained

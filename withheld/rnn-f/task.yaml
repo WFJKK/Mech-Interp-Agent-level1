@@ -8,7 +8,7 @@ task: >
   reward), with nothing learned to find, so what the agent achieves here is generic. Its networks behave like
   none of the trained ones, and their outputs are lopsided (how_often_each_output); whatever regularity a run
   finds in one of them is an accident of that network, which its other networks show up.
-baseline_of: [rnn-c]
+baseline_of: [rnn-c, rnn-g]   # rnn-g: the same shape and data set, other networks (withheld/rnn-g)
 initialization:
   how: PyTorch's default, set by AlgZoo's trainer (alg_zoo/training.py, train) under torch.manual_seed(seed) and saved
     before the first step as 2nd_argmax_16_10_0_<seed>.pth; every matrix uniform in +-1/sqrt(16) = +-0.25 (nn.RNN's reset_parameters,

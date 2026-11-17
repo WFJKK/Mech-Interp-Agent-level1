@@ -1,7 +1,9 @@
 """The recurrent models rnn-a to rnn-f, whose inputs are real numbers: ARC's AlgZoo 2nd argmax networks (one-layer ReLU
 RNNs without biases, trained to give the position of the second-largest of n standard normal numbers) at three of
 its sizes, and the same seeds before training as their baselines. What they are is in withheld/<name>/ and
-withheld/rnn/; the networks are converted from AlgZoo's own files (withheld/rnn/pth) by withheld/rnn/convert.py."""
+withheld/rnn/; the networks are converted from AlgZoo's own files (withheld/rnn/pth) by withheld/rnn/convert.py.
+rnn-g is rnn-c's design with two other networks: the one AlgZoo's write-up analyses and sets as its challenge, and
+the zoo's own pick of that size (rnn-c-s2's weights) for the seed check; its baseline model is rnn-f."""
 
 import hashlib
 import importlib.util
@@ -24,7 +26,11 @@ REPO = Path(__file__).resolve().parent.parent
 TRAINED = {"rnn-a": (2, 2), "rnn-b": (4, 3), "rnn-c": (16, 10)}   # name: (hidden units, numbers per input)
 BASELINES = {"rnn-d": "rnn-a", "rnn-e": "rnn-b", "rnn-f": "rnn-c"}
 SIZES = {**TRAINED, **{b: TRAINED[t] for b, t in BASELINES.items()}}
-PILOT = {"rnn-a": ("s2", "s1"), "rnn-b": ("s0", "s4"), "rnn-c": ("s2", "s3")}  # rounds, seed check: the two best seeds
+EXTRA = {"rnn-g": (16, 10)}   # not five seeds of the zoo: the write-up's network, then the zoo's pick of its size
+ALL = {**SIZES, **EXTRA}
+TWINS = {"rnn-d": ["rnn-a"], "rnn-e": ["rnn-b"], "rnn-f": ["rnn-c", "rnn-g"]}
+PILOT = {"rnn-a": ("s2", "s1"), "rnn-b": ("s0", "s4"), "rnn-c": ("s2", "s3"),  # rounds, seed check: the two best seeds
+         "rnn-g": ("s0", "s1")}                                                # the write-up's network, the zoo's pick
 ALGZOO_CHART = {"rnn-a": 1.000, "rnn-b": 0.985, "rnn-c": 0.948}  # AlgZoo's README chart: its best seed, per size
 ALGZOO_PICK = {"rnn-a": 2, "rnn-b": 0, "rnn-c": 2}                 # zoo.best_of_5_seed_2nd_argmax
 TASK_WORDS = ["2nd argmax", "second argmax", "2nd_argmax", "second-largest", "second largest", "runner-up", "AlgZoo",
@@ -232,7 +238,7 @@ def test_a_baseline_model_is_its_twins_design_sizes_and_data_set(name):
     assert m.source() == t.source()
     for key in ("sizes", "input_space", "n_outputs", "data_set", "weights"):
         assert m.config[key] == t.config[key], key
-    assert baseline.twins(m) == [t.name] and baseline.baseline_models(t) == [name]
+    assert baseline.twins(m) == TWINS[name] and baseline.baseline_models(t) == [name]
 
 
 @pytest.mark.parametrize("name", list(BASELINES))
@@ -269,7 +275,7 @@ def test_the_agent_is_given_what_a_run_on_the_twin_gives_it(name):
     assert loop.agent_surface(cfg, m) == loop.agent_surface(cfg_twin, t)
 
 
-@pytest.mark.parametrize("name", list(SIZES))
+@pytest.mark.parametrize("name", list(ALL))
 def test_the_agent_is_not_told_what_the_networks_are(name):
     m = load_model(f"models/{name}")
     cfg = run_config.load(f"config/pilot/{name}.yaml")
@@ -278,10 +284,10 @@ def test_the_agent_is_not_told_what_the_networks_are(name):
     if name in BASELINES:
         assert {"untrained", "initialization", "baseline"} <= set(forbidden)
     texts = loop.agent_surface(cfg, m)
-    texts["prompt"] = prompt.build(cfg, m, 1, [], ops(*SIZES[name]), False)
+    texts["prompt"] = prompt.build(cfg, m, 1, [], ops(*ALL[name]), False)
     texts.update({f"model folder {p.name}": p.read_text() for p in m.path.iterdir() if p.is_file()})
     hygiene.check(texts, forbidden)
-    d, n = SIZES[name]
+    d, n = ALL[name]
     assert f"n_ctx = {n}, d_hidden = {d}, outputs: {n}" in texts["prompt"] and "16,384 inputs drawn afresh" in texts["prompt"]
     assert "standard normal distribution" in texts["prompt"] and '"kind": "normal"' in texts["sandbox info"]
     assert '"n_total": null' in texts["sandbox info"] and '"says"' not in texts["sandbox info"]
@@ -301,12 +307,13 @@ def test_what_the_networks_are_is_said_in_withheld_and_the_tests_only():
             except UnicodeDecodeError:
                 pass
     assert "config/pilot/rnn-a.yaml" in texts and "models/rnn-c/config.yaml" in texts and "README.md" in texts
+    assert "config/pilot/rnn-g.yaml" in texts and "models/rnn-g/config.yaml" in texts
     words = TASK_WORDS + ["second biggest", "second highest", "next largest", "alignment.org"]
     assert hygiene.hits(texts, words) == []
     assert not any(rel.parts[0] not in ("withheld", "tests") and rel.suffix == ".pth" for rel in files)
 
 
-@pytest.mark.parametrize("name", list(SIZES))
+@pytest.mark.parametrize("name", list(ALL))
 def test_the_network_itself_and_the_reference_entries(name):
     m = load_model(f"models/{name}")
     nets = [n["id"] for n in m.config["networks"]]
@@ -321,15 +328,15 @@ def test_the_network_itself_and_the_reference_entries(name):
         assert r["status"] == "scored" and r["parts"]["fidelity"] == 1.0, (nid, r.get("reason"))
         seen.add(round(r["reward"], 6))
     assert len(seen) == 1 and 0.05 < seen.pop() < 0.25
-    if name in TRAINED:
+    if name in TRAINED or name in EXTRA:
         first = f"{name}-{PILOT[name][0]}"
         r = Verifier(m, first, CFG).score(m.reference_entries(m.load_weights(first))["target"], seed=5)
         assert r["status"] == "scored" and r["parts"]["cost"] < 0.11
-        low = {"rnn-a": 0.85, "rnn-b": 0.65, "rnn-c": 0.35}[name]  # the task's rule, wrong where the network is
+        low = {"rnn-a": 0.85, "rnn-b": 0.65, "rnn-c": 0.35, "rnn-g": 0.35}[name]  # the task's rule, wrong where the network is
         assert low < r["reward"] < low + 0.15, r["reward"]
 
 
-@pytest.mark.parametrize("name", list(SIZES))
+@pytest.mark.parametrize("name", list(ALL))
 def test_the_smoke_config_is_the_pilot_made_small(name):
     pilot, smoke = run_config.load(f"config/pilot/{name}.yaml"), run_config.load(f"config/pilot/{name}-smoke.yaml")
     assert smoke["rounds_max"] == 1 and smoke["session"] == {"python_calls": 8, "submissions": 2, "max_turns": 40, "seconds": 1200}
@@ -337,6 +344,56 @@ def test_the_smoke_config_is_the_pilot_made_small(name):
     first, second = PILOT[BASELINES.get(name, name)]
     assert (pilot["model"], pilot["network"], pilot["seed_check"]["network"]) == (f"models/{name}", f"{name}-{first}", f"{name}-{second}")
     assert pilot["verifier"]["check"] == "sample" and pilot["verifier"]["sample_size"] == 16384
+
+
+def test_rnn_g_is_the_write_ups_network_and_the_zoos_pick():
+    """rnn-g has rnn-c's design, sizes and data set and two networks: AlgZoo's example file, converted again here
+    and compared, and rnn-c-s2's file, whose stored network is a copy of rnn-c-s2's byte for byte."""
+    conv = _convert()
+    m, c = load_model("models/rnn-g"), load_model("models/rnn-c")
+    assert m.source() == c.source() and m.real and m.n_ctx == 10
+    for key in ("sizes", "input_space", "n_outputs", "data_set", "weights"):
+        assert m.config[key] == c.config[key], key
+    ids = [n["id"] for n in m.config["networks"]]
+    assert ids == ["rnn-g-s0", "rnn-g-s1"] and conv.numbers("rnn-g") == [0, 1] and conv.numbers("rnn-c") == list(range(5))
+    assert conv.source("rnn-g", 0).name == "one_layer_16_hidden_94_acc_2nd_argmax.pth" and conv.source("rnn-g", 1) == conv.source("rnn-c", 2)
+    task = m.task()
+    x = lang.draw_inputs(m.data_set, m.input_space, 2000, np.random.default_rng(4))
+    for k, nid in enumerate(ids):
+        assert hashlib.sha256(conv.source("rnn-g", k).read_bytes()).hexdigest() == task["provenance"]["sha256"][nid]
+        stored, again = m.load_weights(nid), conv.convert("rnn-g", k)  # the stored file's sha256 is checked against the config
+        assert {j: v.shape for j, v in stored.items()} == {"input": (16, 1), "recurrent": (16, 16), "readout": (10, 16)}
+        assert set(stored) == set(again) and all(np.array_equal(stored[j], again[j]) and stored[j].dtype == again[j].dtype == np.float32 for j in stored)
+        answers, n_ops = lang.run_reference(m.reference_entry(stored), stored, 10, x)
+        assert n_ops == ops(16, 10) == 2937 and (np.asarray(answers) == numpy_forward(stored, x)).all(), nid
+    assert (m.path / "zoo" / "rnn-g-s1.npz").read_bytes() == (c.path / "zoo" / "rnn-c-s2.npz").read_bytes()
+    first, zoo = m.load_weights("rnn-g-s0"), [c.load_weights(f"rnn-c-s{s}") for s in range(5)]
+    assert not any(np.array_equal(first[j], w[j]) for w in zoo for j in first)  # none of the zoo's five
+
+
+def test_rnn_g_s_networks_do_the_task_as_often_as_said():
+    """On the inputs task.yaml was measured on; the first comes out at the write-up's own figure for it, 95.3%."""
+    m = load_model("models/rnn-g")
+    said = m.task()["how_often_the_output_is_the_second_largest"]
+    x = np.random.default_rng(0).standard_normal((2**20, 10))
+    target = second_largest(x)
+    acc = {nid: float(np.mean(numpy_forward(m.load_weights(nid), x) == target)) for nid in ("rnn-g-s0", "rnn-g-s1")}
+    assert all(abs(acc[k] - float(said[k])) < 1e-4 for k in acc), acc
+    assert abs(acc["rnn-g-s0"] - 0.953) < 0.002
+    assert float(said["rnn-g-s1"]) == float(load_model("models/rnn-c").task()["how_often_the_output_is_the_second_largest"]["rnn-c-s2"])
+
+
+def test_rnn_g_is_read_against_the_baseline_of_its_shape():
+    """rnn-f is rnn-g's baseline model too. A run on rnn-g differs from a run on rnn-c in its networks only, so it
+    asks for the very baseline run a run on rnn-c asks for, and its agent is given the same prompt."""
+    g, c = run_config.load("config/pilot/rnn-g.yaml"), run_config.load("config/pilot/rnn-c.yaml")
+    assert {k for k in set(g) | set(c) if g.get(k) != c.get(k)} == {"run_id", "model", "network", "seed_check"}
+    mg, mc = load_model(g["model"]), load_model(c["model"])
+    assert baseline.baseline_models(mg) == ["rnn-f"] == baseline.baseline_models(mc) and not baseline.is_baseline(mg)
+    assert baseline.config_for(g) == baseline.config_for(c)
+    assert baseline.conditions(g, lang.PRICES) == baseline.conditions(c, lang.PRICES)
+    assert prompt.build(g, mg, 1, [], ops(16, 10), False) == prompt.build(c, mc, 1, [], ops(16, 10), False)
+    assert loop.forbidden_strings(g, mg) == loop.forbidden_strings(c, mc)
 
 
 def test_a_scripted_run_on_numbers(tmp_path):
