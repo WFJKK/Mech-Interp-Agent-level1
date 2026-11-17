@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from pathlib import Path
 import json
+import re
 
 from . import rewards
 from .util import REPO_ROOT
@@ -224,3 +225,28 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
     if "{{" in text:
         raise ValueError("the research prompt has an unfilled template field")
     return text
+
+
+def build_summary(cfg: dict, model, evidence: dict) -> str:
+    """Explain frozen results from supplied evidence, without loading or evaluating weights."""
+    if not isinstance(evidence, dict):
+        raise ValueError("summary evidence must be an object")
+    fields = {
+        "MODEL_SOURCE": model.source().strip(),
+        "SIZES": ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}",
+        "DATA_SET": model.data_set_text(),
+        "REWARD_FORMULA": rewards.formula(cfg["reward"]),
+        "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
+        "REWARD_CONFIG": json.dumps(cfg["reward"], indent=2, sort_keys=True, allow_nan=False),
+        "EVIDENCE": json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False),
+    }
+
+    def fill(match):
+        name = match.group(1)
+        if name not in fields:
+            raise ValueError(f"the summary prompt has an unfilled template field: {name}")
+        return str(fields[name])
+
+    # Substitute template fields only once. Literal braces in archived notes or
+    # programs remain evidence and cannot become another template instruction.
+    return re.sub(r"\{\{([^{}]+)\}\}", fill, (TEMPLATES / "summary_v1.md").read_text())

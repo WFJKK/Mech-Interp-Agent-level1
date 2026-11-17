@@ -205,8 +205,11 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
         out["research roles"] = json.dumps(prompt.RESEARCH_ROLES)
         out["research assignment instructions"] = prompt.ASSIGNMENT_NOTE
         out["research prompt template"] = (prompt.TEMPLATES / "research_v1.md").read_text()
+        out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
         # These are operator-supplied tasks. Agent-generated discoveries are handled as history.
         out["configured regional investigations"] = json.dumps(cfg["orchestration"].get("initial_regions", []))
+    elif (cfg.get("research_task") or {}).get("role") == "summary":
+        out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
     if sandbox_mode != "container":
         out["sandbox folder's location"] = str(cfg.get("sandbox_dir") or tempfile.gettempdir())
         out["python's location"] = " ".join(sorted({sys.prefix, sys.base_prefix, sys.executable,

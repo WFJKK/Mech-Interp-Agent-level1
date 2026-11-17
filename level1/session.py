@@ -212,10 +212,7 @@ class Session:
         self.path = Path(path)
         self.state_path = self.path / "session.json"
         self.state = read_json(self.state_path)
-        self.TOOLS = dict(TOOLS)
-        research = self.state.get("research_task") or {}
-        if research.get("role") == "lead" and int(research.get("max_assignments", 0)) > 0:
-            self.TOOLS.update(RESEARCH_TOOLS)
+        self._configure_tools()
         self.entries_dir = self.path / "workspace" / "entries"
         self.entries_dir.mkdir(parents=True, exist_ok=True)
         self._verifier = None
@@ -229,31 +226,50 @@ class Session:
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         state_path = path / "session.json"
+        research = dict(cfg.get("research_task") or {})
+        summary = research.get("role") == "summary"
+        if summary:
+            research["max_assignments"] = 0
         if not state_path.exists():
             s = cfg["session"]
             state = {
                 "model": str(cfg["model"]), "network": network_id, "run_path": str(Path(run_path).resolve()),
-                "budgets": {"run_python": int(s["python_calls"]), "submit_entry": int(s["submissions"])},
+                "budgets": {"run_python": 0 if summary else int(s["python_calls"]),
+                            "submit_entry": 0 if summary else int(s["submissions"])},
                 "used": {"run_python": 0, "submit_entry": 0},
                 "python": dict(cfg["python"]), "verifier": dict(cfg["verifier"]), "entry": dict(cfg["entry"]),
                 "reward": dict(cfg["reward"]), "sandbox": cfg["sandbox"], "sandbox_image": cfg.get("sandbox_image"),
                 "sandbox_dir": cfg.get("sandbox_dir"), "runs_dir": cfg.get("runs_dir"), "created": now(),
             }
-            if cfg.get("research_task"):
-                state["research_task"] = dict(cfg["research_task"])
+            if research:
+                state["research_task"] = research
                 state["assignments"] = []
             write_json(state_path, state)
             session = cls(path)
             for name, entry in (carried or {}).items():
                 write_json(session.entries_dir / f"{name}.json", entry)
             return session
-        return cls(path)
+        session = cls(path)
+        if summary != ((session.state.get("research_task") or {}).get("role") == "summary"):
+            raise ToolError("cannot change a persisted session's summary role")
+        return session
 
     def reload(self) -> None:
         """Re-read the saved state: the tools run in the tool server's process, which saves its counters here."""
         self.state = read_json(self.state_path)
+        self._configure_tools()
 
     # shared ----------------------------------------------------------------------------------
+    def _configure_tools(self) -> None:
+        research = self.state.get("research_task") or {}
+        self.TOOLS = {} if research.get("role") == "summary" else dict(TOOLS)
+        if research.get("role") == "lead" and int(research.get("max_assignments", 0)) > 0:
+            self.TOOLS.update(RESEARCH_TOOLS)
+
+    def _require_research(self) -> None:
+        if (self.state.get("research_task") or {}).get("role") == "summary":
+            raise ToolError("the final summary has no research tools")
+
     def _log(self, tool: str, args: dict, outcome: dict, seconds: float) -> None:
         short = {k: (v if not isinstance(v, str) or len(v) < 4000 else v[:4000] + f"... ({len(v)} chars)") for k, v in args.items()}
         append_jsonl(self.path / "tools.jsonl", {"at": now(), "tool": tool, "args": short, "outcome": outcome, "seconds": round(seconds, 2)})
@@ -302,6 +318,7 @@ class Session:
         t0 = time.monotonic()
         args = {"code": code}
         try:
+            self._require_research()
             if not isinstance(code, str) or len(code) > MAX_SOURCE:
                 raise ToolError("code must be a string of at most 200,000 characters")
             self._spend("run_python")
@@ -354,6 +371,7 @@ class Session:
         t0 = time.monotonic()
         args = {"name": name, "claimed_fidelity": claimed_fidelity, "expected_fidelity_other": expected_fidelity_other}
         try:
+            self._require_research()
             if not isinstance(name, str) or not ENTRY_NAME.match(name):
                 raise ToolError("name must be the name an entry was saved under")
             for label, v in (("claimed_fidelity", claimed_fidelity), ("expected_fidelity_other", expected_fidelity_other)):
@@ -404,6 +422,7 @@ class Session:
         t0 = time.monotonic()
         args = {"scope": scope, "task": task, "entry_name": entry_name}
         try:
+            self._require_research()
             research = self.state.get("research_task") or {}
             limit = int(research.get("max_assignments", 0))
             if research.get("role") != "lead" or limit <= 0:

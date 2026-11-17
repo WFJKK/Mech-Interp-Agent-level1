@@ -45,6 +45,90 @@ def test_lead_assigns_a_frozen_scope_but_workers_cannot(tmp_path):
         lead.assign_region({"kind": "all"}, "One more")
 
 
+def test_summary_session_has_no_tools_even_when_called_directly(tmp_path, monkeypatch):
+    from level1 import lang, mcp_server
+
+    cfg = config(tmp_path, research_task={"role": "summary", "max_assignments": 9})
+    g = lang.Graph({}, 4)
+    entry = g.entry(predict=g.const(0))
+    session = Session.create(tmp_path / "summary", cfg, cfg["network"], tmp_path / "run", {"saved": entry})
+    assert session.TOOLS == {}
+    assert session.state["budgets"] == {"run_python": 0, "submit_entry": 0}
+    assert session.state["research_task"]["max_assignments"] == 0
+    assert mcp_server.tool_list(session) == []
+
+    def cannot_spend(*_):
+        raise AssertionError("a final summary tried to spend a research tool allowance")
+
+    monkeypatch.setattr(session, "_spend", cannot_spend)
+    calls = {
+        "run_python": {"code": "print('new research')"},
+        "submit_entry": {"name": "saved", "claimed_fidelity": 1.0},
+        "assign_region": {"scope": {"kind": "all"}, "task": "Change the investigation"},
+    }
+    for name, arguments in calls.items():
+        with pytest.raises(ToolError, match="no tool"):
+            session.call(name, arguments)
+        with pytest.raises(ToolError, match="summary.*no research tools"):
+            getattr(session, name)(**arguments)
+        reply = mcp_server.handle(session, {"jsonrpc": "2.0", "id": 1, "method": "tools/call",
+                                            "params": {"name": name, "arguments": arguments}})
+        assert reply["result"]["isError"]
+    assert session.receipts() == []
+    assert session.state["used"] == {"run_python": 0, "submit_entry": 0}
+    assert session.state["assignments"] == []
+    assert not (session.path / "python").exists()
+    assert not (session.path / "submissions").exists()
+    assert session.entries() == {"saved": entry}
+    reopened = Session.create(session.path, cfg, cfg["network"], tmp_path / "run")
+    assert reopened.TOOLS == {}
+    assert reopened.remaining() == {"run_python": 0, "submit_entry": 0}
+
+
+def test_a_summary_cannot_reopen_a_research_session_with_tools(tmp_path):
+    cfg = config(tmp_path, research_task={"role": "regional", "max_assignments": 0})
+    session = Session.create(tmp_path / "existing", cfg, cfg["network"], tmp_path / "run")
+    summary_cfg = copy.deepcopy(cfg)
+    summary_cfg["research_task"]["role"] = "summary"
+    before = session.state_path.read_bytes()
+    with pytest.raises(ToolError, match="summary role"):
+        Session.create(session.path, summary_cfg, cfg["network"], tmp_path / "run")
+    assert session.state_path.read_bytes() == before
+
+
+@pytest.mark.parametrize("model_path", ["models/lin-c", "models/att-c", "models/rnn-a", "models/lin-e"])
+def test_summary_prompt_is_generic_and_uses_only_supplied_evidence(tmp_path, monkeypatch, model_path):
+    import json
+
+    from level1.networks import load_model
+
+    cfg = config(tmp_path, research_task={"role": "summary", "max_assignments": 0})
+    model = load_model(model_path)
+    forbidden = loop.forbidden_strings(cfg, model)
+
+    def not_a_summary_input(*_):
+        raise AssertionError("the summary attempted to obtain new or withheld evidence")
+
+    monkeypatch.setattr(model, "load_weights", not_a_summary_input)
+    monkeypatch.setattr(model, "task", not_a_summary_input)
+    monkeypatch.setattr(model, "withheld", not_a_summary_input)
+    evidence = {"locked_global": "g01s1", "candidates": [{"id": "g01s1", "selection": {"reward": 0.7}}],
+                "audits": {"g01s1": {"fresh": {"reward": 0.6}}},
+                "notes": ["An unresolved observation with literal {{braces}}."], "comparisons": {}}
+    before = copy.deepcopy(evidence)
+    text = prompt.build_summary(cfg, model, evidence)
+    assert json.dumps(evidence, indent=2, sort_keys=True, allow_nan=False) in text
+    assert evidence == before
+    assert "best found" in text
+    assert "formal proof" in text
+    assert "No tools are available" in text
+    assert "randomly generated parameter controls" in text
+    assert model.name not in text
+    surface = loop.agent_surface(cfg, model)
+    assert "summary prompt template" in surface
+    hygiene.check({"prompt": prompt.build_summary(cfg, model, {}), **surface}, forbidden)
+
+
 def test_sandbox_and_verifier_use_the_same_assigned_domain(tmp_path):
     cfg = config(tmp_path, research_task={"role": "regional", "max_assignments": 0, "cycle": 1})
     cfg["verifier"]["scope"] = {"kind": "lengths", "lengths": [2]}
