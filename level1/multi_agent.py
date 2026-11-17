@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import budget, hygiene, lang, prompt, regions, report, rewards, synthesis
+from . import artifacts, budget, hygiene, lang, prompt, regions, report, rewards, synthesis
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session
@@ -63,7 +63,7 @@ def _archive_path(path: Path) -> Path:
 
 def _empty_archive() -> dict:
     return {"version": 1, "candidates": [], "global": {"best": None, "frontier": []},
-            "regions": {}, "baseline_scores": {}}
+            "regions": {}, "baseline_scores": {}, "drafts": []}
 
 
 def read_archive(path: Path) -> dict:
@@ -206,6 +206,9 @@ def archive_summary(archive: dict, limit: int) -> str:
         if receipt["status"] == "scored":
             sections.append(f"Supplied comparison on {key}: reward {receipt['reward']:.6f}, "
                             f"fidelity {receipt['parts']['fidelity']}, cost {rewards.cost_of(receipt['parts'])}.")
+    drafts = artifacts.describe(archive)
+    if drafts:
+        sections.append(drafts)
     return "\n\n".join(sections) or "No measured candidates yet."
 
 
@@ -221,6 +224,7 @@ def _carried(path: Path, cfg: dict, archive: dict) -> dict:
     entry = _baselines(path, cfg)
     if entry is not None:
         out["comparison_entry"] = entry
+    out.update(artifacts.carried(path, archive, out))
     return out
 
 
@@ -295,15 +299,80 @@ def _new_plan(state: dict, role: str, cycle: int, scope: dict, task: str, worker
     return plan
 
 
+def _metadata(record: dict) -> dict:
+    if not isinstance(record, dict):
+        return {}
+    meta = record.get("meta")
+    meta = dict(meta) if isinstance(meta, dict) else {}
+    if "stop_reason" not in meta and record.get("stop_reason") is not None:
+        meta["stop_reason"] = record["stop_reason"]
+    return meta
+
+
+def _is_refusal(meta: dict) -> bool:
+    if not isinstance(meta, dict):
+        return False
+    if meta.get("stop_reason") == "refusal":
+        return True
+    events = meta.get("model_events")
+    return isinstance(events, list) and any(isinstance(event, dict) and event.get("subtype") in
+                                            ("model_refusal_no_fallback", "refusal") for event in events)
+
+
+def _research_notes(record: dict) -> str:
+    meta = _metadata(record)
+    if _is_refusal(meta) or meta.get("stop_reason") in ("error", "api_error", "backend_error"):
+        return ("This session ended without a research explanation. Any saved programs and checked "
+                "submissions remain on record. Provider diagnostics are retained separately for the operator.")
+    return record.get("notes", "")
+
+
+def _safe_history(path: Path, state: dict, history: list[dict]) -> list[dict]:
+    """Also sanitize frozen histories made by older code, without editing their raw records."""
+    rows = copy.deepcopy(history)
+    for row in rows:
+        plan = state["sessions"].get(row.get("session_id"))
+        source = Path(path) / plan["directory"] / "record.json" if plan else None
+        record = read_json(source) if source and source.exists() else row
+        if _is_refusal(_metadata(record)) or _metadata(record).get("stop_reason") in ("error", "api_error", "backend_error"):
+            row["notes"] = _research_notes(record)
+    return rows
+
+
 def _history(path: Path, state: dict, before_index: int) -> list[dict]:
     rows = []
-    for plan in state["sessions"].values():
+    for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
         record_path = Path(path) / plan["directory"] / "record.json"
         if plan["role"] != "summary" and plan["index"] < before_index and record_path.exists():
             record = read_json(record_path)
             rows.append({"session_id": plan["id"], "role": plan["role"], "scope": plan["scope"],
-                         "notes": record["notes"], "submissions": record["submissions"]})
+                         "notes": _research_notes(record), "submissions": record["submissions"]})
     return rows
+
+
+def _refusal_stop(path: Path, cfg: dict, state: dict) -> str | None:
+    """Latch the first threshold reached in session-index order, including legacy records."""
+    if state.get("refusal_stop"):
+        return state["refusal_stop"]["reason"]
+    limit = int(cfg["max_consecutive_refusals"])
+    streak = []
+    for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
+        if plan["role"] == "summary":
+            continue
+        directory = Path(path) / plan["directory"]
+        if (directory / "record.json").exists():
+            meta = _metadata(read_json(directory / "record.json"))
+        elif (directory / "meta.json").exists():
+            meta = read_json(directory / "meta.json")
+        else:
+            streak = []
+            continue
+        streak = [*streak, plan["id"]] if _is_refusal(meta) else []
+        if len(streak) >= limit:
+            reason = f"the model declined {len(streak)} consecutive research sessions; no new agent sessions will start"
+            state["refusal_stop"] = {"reason": reason, "session_ids": streak, "threshold": limit}
+            return reason
+    return None
 
 
 def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scripts, out) -> dict:
@@ -324,11 +393,12 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
                 raise StopRun(exhausted)
     archive = plan["snapshot"]
     session = Session.create(directory / "session", role_cfg, cfg["network"], path, _carried(path, cfg, archive))
-    prompt_path = directory / "prompt.md"
+    history = _safe_history(path, state, plan["history"] or [])
+    prompt_path = directory / ("prompt.history_safe.md" if history != (plan["history"] or []) else "prompt.md")
     if not prompt_path.exists():
         text = prompt.build_multi(cfg=role_cfg, model=model, session_index=plan["index"], role=plan["role"],
                                   task=plan["task"], archive_summary=archive_summary(archive, _options(cfg)["archive_per_scope"]),
-                                  history=plan["history"] or [])
+                                  history=history)
         # Generated notes and tasks are discoveries, as in the original loop. Check
         # the coordinator-authored prompt separately from those discoveries.
         ours = prompt.build_multi(cfg=role_cfg, model=model, session_index=plan["index"], role=plan["role"],
@@ -361,7 +431,7 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
     record = {"id": plan["id"], "index": plan["index"], "role": plan["role"], "cycle": plan["cycle"],
               "scope": plan["scope"], "notes": notes_of(response_text), "meta": meta,
               "submissions": session.receipts(), "assignments": session.state.get("assignments", []),
-              "tools_used": session.state["used"], "at": now()}
+              "tools_used": session.state["used"], "prompt_file": prompt_path.name, "at": now()}
     write_json(completed, record)
     return record
 
@@ -391,6 +461,7 @@ def _ingest(path: Path, cfg: dict, model, archive: dict, plan: dict, record: dic
                                       "entry_path": entry_path, "entry_sha256": digest, "selection": selection,
                                       "submitted": receipt,
                                       "expected_fidelity_other": receipt.get("expected_fidelity_other")})
+    artifacts.collect(path, cfg, archive, plan)
     update_frontiers(archive)
     write_json(_archive_path(path), archive)
 
@@ -468,10 +539,25 @@ def _drive(path, fake_scripts=None, out=print) -> str:
         write_json(_state_path(path), state)
         return record
 
+    def refusal_barrier():
+        reason = _refusal_stop(path, cfg, state)
+        if reason:
+            raise StopRun(reason)
+
     try:
+        # Recovery and draft backfill require no new backend call. In particular,
+        # an old planning session may have useful saved entries but no submissions.
+        for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
+            if plan["role"] == "summary":
+                continue
+            folder = path / plan["directory"]
+            if (folder / "record.json").exists() or ((folder / "meta.json").exists() and (folder / "response.md").exists()):
+                run_one(plan)
+        refusal_barrier()
         planning = state["sessions"][state["planning"]]
         last_lead = run_one(planning)
         while True:
+            refusal_barrier()
             stopped = _stop_cycles(state, cfg)
             if stopped:
                 state["stop_reason"] = stopped
@@ -518,11 +604,14 @@ def _drive(path, fake_scripts=None, out=print) -> str:
                             write_json(_state_path(path), state)
                         except Exception as exc:
                             errors.append(exc)
+                refusal_barrier()
                 if errors:
                     raise errors[0]
             else:
                 for plan in workers:
+                    refusal_barrier()
                     run_one(plan)
+            refusal_barrier()
             lead = state["sessions"][pending["lead"]]
             if lead["snapshot"] is None:
                 lead["snapshot"] = _snapshot(archive)
@@ -532,8 +621,15 @@ def _drive(path, fake_scripts=None, out=print) -> str:
             pending.update(status="completed", progress=progress(pending["before"], _signature(archive)), at=now())
             write_json(_state_path(path), state)
             append_jsonl(directory / "cycles.jsonl", {k: v for k, v in pending.items() if k != "before"})
+            refusal_barrier()
             write_report(path)
     except StopRun as exc:
+        # A budget interruption can occur after save_entry but before a response
+        # record exists. Preserve that work without promoting it to a submission.
+        for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
+            if plan["role"] != "summary":
+                artifacts.collect(path, cfg, archive, plan)
+        write_json(_archive_path(path), archive)
         state["stop_reason"] = str(exc)
         write_json(_state_path(path), state)
         out(f"multi-agent research stopped: {exc}; its session plans and submissions are saved")
@@ -628,6 +724,18 @@ def _synthesize(path: Path, cfg: dict, model, frozen: dict, archive: dict, fake_
     if not synthesis.enabled(cfg):
         return {"status": "disabled"}
     state = read_json(_state_path(path))
+    halted = _refusal_stop(path, cfg, state)
+    if halted:
+        state["stop_reason"] = halted
+        write_json(_state_path(path), state)
+        previous = synthesis.report(path, cfg)
+        if previous["status"] == "completed":
+            return previous
+        if not (path / "multi_agent/summary/response.json").exists():
+            result = {"status": "stopped", "reason": halted, "blocked_by_refusals": True}
+            write_json(path / "multi_agent/summary/status.json", result)
+            out(f"final lead synthesis stopped: {halted}")
+            return result
     if "summary" not in state:
         plan = _new_plan(state, "summary", cfg["rounds_max"] + 1, ALL,
                          "Explain the frozen global result and regional findings from the recorded evidence.", 1)
@@ -688,6 +796,8 @@ def write_report(path) -> None:
             mass_basis = "exact" if metadata.get("mass_exact") else "estimated"
             lines.append(f"  Outer probability ({mass_basis}): {metadata.get('mass')}; support size: {metadata.get('cardinality')}; "
                          f"declared workload: {metadata.get('workload_size')}.")
+    if archive.get("drafts"):
+        lines += ["", "## Saved draft artifacts", "", artifacts.describe(archive), ""]
     lines += ["", "## Final locked checks", "", "| Candidate | Check | Network | Fidelity | Reward |", "| --- | --- | --- | ---: | ---: |"]
     for cid, audit in audits.items():
         for label in ("fresh", "held_out"):
@@ -704,7 +814,7 @@ def write_report(path) -> None:
         lines += [summary["reason"], ""]
     if api_budget is not None:
         lines += [f"Counted API spending: ${api_budget['spent']:.2f} of the experiment's ${api_budget['run_usd']:.2f} budget, "
-                  f"from the shared spending ledger ({api_budget['unreported']} attempts without a reported cost).", ""]
+                  f"from the shared spending ledger. {budget.accounting_note(api_budget)}", ""]
     atomic_write(path / "report.md", "\n".join(lines))
 
 
