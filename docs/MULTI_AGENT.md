@@ -102,6 +102,29 @@ Progress is recorded separately for the global incumbent and regional frontiers.
 only when neither improves. All submissions are retained, including programs that are useful for
 shared computation but are not currently on a frontier.
 
+### Saved programs and checked submissions
+
+`save_entry` preserves an executable draft. `submit_entry` spends a submission allowance and produces
+a verifier receipt. These are separate operations. Planning has no submission allowance, but its
+saved programs must still be available to the researchers who receive its assignments.
+
+After each completed session, the controller snapshots new saved programs as immutable artifacts.
+Later sessions receive them through `entries`, with a stable `draft_...` name derived from the
+program's content hash and its source-session provenance. An original name is also available when
+it is unambiguous and does not conflict with another entry. Unchanged programs carried through
+several sessions are stored once. Parallel workers use the snapshot fixed before their phase;
+they cannot see a sibling's unfinished work.
+
+Drafts remain explicitly unscored. A local measurement or a claim in a research note does not make
+a draft eligible for selection. Only formally submitted, checked candidates can enter the global
+selection or regional frontiers. A later researcher can inspect, improve and submit a carried draft
+under its own assigned scope and allowance. Saved work can therefore survive a session limit
+without being mistaken for a validated result.
+
+On resume, completed sessions can contribute saved drafts that older code did not collect. Existing
+phase snapshots remain fixed for reproducibility; recovered drafts enter newly created snapshots.
+Applying a code repair does not retroactively change the inputs of a research session already planned.
+
 ## The same reward on each assigned domain
 
 For a task domain S, evaluate the original distribution conditioned on S. If the candidate claims
@@ -185,9 +208,38 @@ Unreported spending is conservatively counted at the reserved cap. As in the ori
 the provider's cap may be exceeded by the final answer that reaches it; this is not a prepayment
 or an exact billing guarantee.
 
+Research prompts state their tool, turn, time and nominal API allowances. After the controller
+reserves an API attempt, the request also states its actual dollar allowance, which may be smaller
+because of earlier costs or outstanding reservations. A redacted copy of the complete request is
+saved as `request_NN.md` beside its stream log. The backend cannot supply a live balance during an
+attempt; it reconciles the reported cost when that attempt ends. Researchers are asked to save
+usable work promptly and budget for a formal submission when their role permits one.
+
+Spending messages distinguish open reservations from completed attempts without a usable reported
+cost. An open record may belong to a worker still running or to an interrupted attempt. Both kinds
+of unreported cost retain their conservative accounting; the wording does not declare a running
+worker to have failed.
+
 Under login authentication, the API-dollar cap is not a billing mechanism. Compare research
 procedures using the same declared tool, turn and time allowances, and use API-key accounting when
 matching dollar spend matters.
+
+### Provider refusals
+
+The existing `max_consecutive_refusals` limit also applies to multi-agent research. Completed
+sessions are considered in their assigned order, so parallel completion order does not change the
+decision. Once the configured consecutive-refusal threshold is reached, it stays reached on resume.
+The controller retains work already produced by the current phase, but launches no later research
+sessions or new synthesis call. Previously saved synthesis output can still be recovered.
+Offline locking, checks and reports preserve the available scientific results.
+
+Raw responses and provider metadata remain in the session records for diagnosis. Subsequent
+research context includes a neutral status for a refused or failed session and any checked
+submissions, rather than replaying provider error prose as research notes. The research request
+identifies the supplied target network and asks for reproducible experiments and concise,
+checkable explanations. It does not ask the researcher assistant to expose private reasoning.
+These clarifications do not guarantee that a provider will accept a request. A refusal is not
+handled by silently changing the model or retrying the same blocked work indefinitely.
 
 ## Generic comparison program
 
@@ -226,7 +278,8 @@ The run folder contains:
 | --- | --- |
 | `multi_agent/state.json` | Persisted session plans, indices and cycle progress |
 | `multi_agent/sessions/` | Separate prompts, tool records, programs and responses |
-| `multi_agent/archive.json` | All submissions, per-domain selections and comparison scores |
+| `multi_agent/artifacts/` | Immutable saved drafts, addressed by content hash |
+| `multi_agent/archive.json` | Submissions, per-domain selections, comparison scores and separate draft provenance |
 | `multi_agent/lock.json` | Frozen global and regional portfolio |
 | `multi_agent/audits/` | Fresh-input and second-network measurements after locking |
 | `locked_entry.json` | The selected global program, if one was submitted successfully |
@@ -277,6 +330,7 @@ the assignment tool.
 
 ```bash
 python -m pytest tests/test_regions.py tests/test_multi_agent.py tests/test_multi_budget.py tests/test_research_session.py
+python -m pytest tests/test_multi_agent_repairs.py tests/test_prompt_repair.py tests/test_backend.py
 ```
 
 To attribute gains to delegation, compare with a single researcher given the same regional
