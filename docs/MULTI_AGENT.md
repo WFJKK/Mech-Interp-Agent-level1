@@ -210,9 +210,9 @@ or an exact billing guarantee.
 
 Research prompts state their tool, turn, time and nominal API allowances. After the controller
 reserves an API attempt, the request also states its actual dollar allowance, which may be smaller
-because of earlier costs or outstanding reservations. A redacted copy of the complete request is
-saved as `request_NN.md` beside its stream log. The backend cannot supply a live balance during an
-attempt; it reconciles the reported cost when that attempt ends. Researchers are asked to save
+because of earlier costs or outstanding reservations. A redacted copy of the complete task prompt
+sent to the CLI is saved as `request_NN.md` beside its stream log. The backend cannot supply a live
+balance during an attempt; it reconciles the reported cost when that attempt ends. Researchers are asked to save
 usable work promptly and budget for a formal submission when their role permits one.
 
 Spending messages distinguish open reservations from completed attempts without a usable reported

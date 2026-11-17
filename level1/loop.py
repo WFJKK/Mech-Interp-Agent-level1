@@ -276,8 +276,13 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         + (f"every one of {verifier.n_inputs():,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
     if cfg["backend"] == "claude_code" and cfg["auth"] == "api_key":
         b = cfg["budget"]
-        log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
-            f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
+        if (cfg.get("orchestration") or {}).get("enabled"):
+            log(f"billed to the API key in {cfg['api_key_env']}: ${float(b['run_usd']):.2f} shared run allowance; "
+                "cycles and role sessions receive portions of it, recorded in spend.jsonl. "
+                "A final response can exceed its attempt cap.")
+        else:
+            log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
+                f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
     elif cfg["backend"] == "claude_code":
         log("under your Claude Code login: no API key is used")
     drive(path, fake_scripts=fake_scripts, out=out)
