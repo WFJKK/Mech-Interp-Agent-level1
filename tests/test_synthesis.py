@@ -170,14 +170,23 @@ def test_saved_summary_response_recovers_before_spent_budget_check(tmp_path, mon
 
 
 @pytest.mark.parametrize("script,status", [({"response": ""}, "empty"),
-                                          ({"response": "Partial analysis", "stop_reason": "budget"}, "incomplete")])
-def test_noncompletion_is_never_presented_as_a_generated_summary(tmp_path, script, status):
+                                          ({"response": "Partial analysis", "stop_reason": "budget"}, "incomplete"),
+                                          ({"response": ANSWER, "stop_reason": "timeout"}, "incomplete"),
+                                          ({"response": ANSWER, "stop_reason": "turn_limit"}, "incomplete")])
+def test_noncompletion_is_never_presented_as_a_generated_summary(tmp_path, monkeypatch, script, status):
     path, _, scripts = prepare(tmp_path, script)
     assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
     assert read_json(path / "multi_agent/summary/status.json")["status"] == status
     assert read_json(path / "report.json")["lead_summary"]["status"] == status
     assert not (path / "lead_summary.md").exists()
     assert read_json(path / "lock.json")["locked"]
+    assert (path / "multi_agent/summary/response.md").read_text() == script["response"]
+    before = scientific_files(path)
+    monkeypatch.setattr(synthesis, "make", lambda *a, **k: pytest.fail("a stopped response must not trigger another summary call"))
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    assert read_json(path / "report.json")["lead_summary"]["status"] == status
+    assert not (path / "lead_summary.md").exists()
+    assert_unchanged(before)
 
 
 def test_old_saved_configuration_does_not_gain_a_summary_call(tmp_path, monkeypatch):
