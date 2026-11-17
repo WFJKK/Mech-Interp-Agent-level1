@@ -403,7 +403,8 @@ def test_a_round_stopped_with_the_loop_goes_on_when_resumed(tmp_path, monkeypatc
     assert len(rounds) == 2 and len(rounds[1]["submissions"]) == 1 and rounds[1]["stop_reason"] != "budget"
     st = budget.state(path, cfg["budget"])
     assert st["spent"] == 5.0 and st["rounds"] == {1: 1.5, 2: 1.5} and st["unreported"] == 1
-    assert any("1 of them stopped with the loop, counted in the run's total only" in line for line in lines)
+    assert any("1 open attempt reserved at its cap ($2.00); may still be running or interrupted" in line
+               for line in lines)
 
 
 def test_the_api_config_is_the_pilot_billed_to_a_key():
