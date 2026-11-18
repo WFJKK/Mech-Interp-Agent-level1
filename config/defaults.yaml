@@ -29,6 +29,7 @@ patience: 2                           # stop after this many rounds in a row tha
 # In this mode rounds_max counts research cycles; API, Python, turn and time allowances are shared across roles.
 orchestration:
   enabled: false
+  mode: null                        # trained, baseline or both; null preserves baseline_agent/baseline_entry selection
   workers: 2
   parallel: true
   planning_fraction: 0.1
@@ -41,9 +42,10 @@ orchestration:
   archive_per_scope: 8               # entries shown in summaries; all records are retained
   initial_regions: []                # optional [{scope: {...}, task: "..."}] if the lead proposes none
   baseline_agent: true               # new research runs first ask one agent for a global generic program
-  baseline_fraction: 0.2             # share of original API, Python, turn and time allowances; no extra dollars
+  baseline_fraction: 0.2             # both mode: share of original allowances; baseline mode uses the full share
   baseline_submissions: 2            # this one session's submission quota; research submission quotas stay unchanged
   baseline_entry: null               # a supplied frozen program overrides the baseline agent and its allocation
+  baseline_validation_version: 2     # new runs require the current global comparison validation policy
 
 # one session (one round)
 session:

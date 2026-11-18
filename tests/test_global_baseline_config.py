@@ -4,7 +4,7 @@ import copy
 
 import pytest
 
-from level1 import run_config
+from level1 import research_modes, run_config
 
 
 def config(tmp_path, **overrides):
@@ -26,18 +26,23 @@ def test_new_research_config_enables_one_global_baseline(tmp_path):
     assert options["baseline_fraction"] == 0.2
     assert options["baseline_submissions"] == 2
     assert options["baseline_entry"] is None
+    assert options["mode"] is None
+    assert research_modes.mode(cfg) == "both"
+    assert options["baseline_validation_version"] == 2
     assert cfg["session"]["submissions"] == 6
     assert cfg["budget"]["run_usd"] == 60
 
 
 def test_saved_config_without_baseline_keys_remains_unchanged(tmp_path):
     cfg = config(tmp_path)
-    for key in ("baseline_agent", "baseline_fraction", "baseline_submissions"):
+    for key in ("mode", "baseline_agent", "baseline_fraction", "baseline_submissions", "baseline_validation_version"):
         del cfg["orchestration"][key]
     original = copy.deepcopy(cfg)
     run_config.check_orchestration(cfg)
     assert cfg == original
     assert "baseline_agent" not in cfg["orchestration"]
+    assert research_modes.mode(cfg) == "trained"
+    assert research_modes.validation_version(cfg) == 1
 
 
 @pytest.mark.parametrize("value", [None, "true", 1, 0])
