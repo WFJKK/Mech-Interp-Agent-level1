@@ -178,3 +178,37 @@ def test_only_the_named_weights_and_operations_exist(model, nets):
     assert "no weights named" in v.score(raw)["reason"]
     raw["nodes"][0] = {"op": "load", "path": "/etc/passwd"}
     assert "unknown operation" in v.score(raw)["reason"]
+
+
+def test_an_entry_that_leans_on_small_weights_does_not_become_the_baseline(tmp_path):
+    """A baseline model's networks are all alike in ways a trained network is not: their weights are small. An entry
+    that keeps weights as whole numbers, times 2^64, is exact on every one of them, and a trained network's weights do
+    not fit: it is refused there, and a run read against it has no baseline (pilot-rnn-f-exact's last entries, 18
+    November 2026: times 2^60, on trained weights of 11 to 38). So freezing also runs a candidate on every network of
+    the twins, and goes down every entry until one passes: here four such entries, each ahead of the network itself
+    on the second network, fail one after the other, and the network itself is frozen."""
+    from pathlib import Path
+
+    from level1 import baseline, loop, run_config
+    from level1.util import read_json, read_jsonl
+
+    repo = Path(__file__).resolve().parent.parent
+    cfg = run_config.load("config/pilot/lin-a-1to4.yaml", {
+        "runs_dir": str(tmp_path), "backend": "fake", "sandbox": "process", "rounds_max": 1,
+        "verifier": {"sample_size": 1500, "reference_samples": 2}, "session": {"python_calls": 3, "submissions": 5}})
+    lines = []
+    path = loop.start(baseline.config_for(cfg), fake_scripts=repo / "tests" / "fake_baseline_packed", out=lines.append)
+    packed = {"packed_unembed", "packed_hidden", "packed_embed", "packed_two"}
+    on_second = {e["name"]: e for e in read_jsonl(path / "seed_scores.jsonl")}
+    assert set(on_second) == packed | {"itself"} and all(baseline.exact(e) for e in on_second.values())  # exact where the weights are small
+    assert all(on_second[k]["reward"] > on_second["itself"]["reward"] for k in packed)
+    f = read_json(path / baseline.FILE)
+    tried = f["tried"]
+    assert len(tried) == 5 and {x["name"] for x in tried[:4]} == packed and tried[4]["name"] == "itself"  # more than three, in that order
+    twin_ids = ["lin-a-1to4-s0", "lin-a-1to4-s1", "lin-c-s0", "lin-c-s1"]
+    for x in tried[:4]:
+        assert x["label"] == "fails" and x["why"] == "it was refused on " + ", ".join(sorted(twin_ids, key=x["why"].index)), x
+    assert any("no whole-number value" in line and "a network of lin-c" in line for line in lines)
+    assert (f["name"], f["label"], f["established"]) == ("itself", "passes", True) and f["rule"] == baseline.RULE
+    assert sorted(f["confirmation"]["twin_networks"]) == twin_ids and sorted(f["confirmation"]["networks"]) == [f"lin-e-s{k}" for k in (2, 3, 4, 5)]
+    assert all(baseline.exact(r) for r in {**f["confirmation"]["networks"], **f["confirmation"]["twin_networks"]}.values())

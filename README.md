@@ -439,10 +439,10 @@ be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
   for that paragraph.
 - **Freezing.** When the baseline run ends, its submissions that gave the second network's output on
   every input of their region are taken in the order of their reward there, one per different entry,
-  and each is scored on every other network of the baseline model, on one fresh sample. The first
-  that gives each of them the network's output on every input of its region is frozen
-  (`baseline.json`, `baseline_entry.json`), and the baseline is established. If none of the first
-  three does, it is not established, and no run is read against it.
+  and each is scored on every other network of the baseline model and on every network of its twins,
+  on one fresh sample. The first that gives each of them the network's output on every input of its
+  region is frozen (`baseline.json`, `baseline_entry.json`), and the baseline is established. If none
+  does, it is not established, and no run is read against it.
 - **Reading a run against it.** The frozen entry is scored on the run's network and on its second
   network, on the very inputs of the run's own scorings of its locked entry (the fresh sample and
   the seed check). With R0 and R1 the locked entry's rewards there and B0 and B1 the frozen

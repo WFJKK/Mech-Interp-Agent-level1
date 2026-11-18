@@ -93,15 +93,89 @@ def test_freezing_picks_the_best_exact_entry_on_the_second_network_and_checks_it
         assert lo == r["reward"] and hi >= lo and set(r["parts"]) >= {"coverage", "fidelity", "b", "r", "build_ops", "predict_ops"}
         assert baseline.exact(r)  # the network's output on every input of its region
     assert f["label"] == "passes" and f["established"] is True and f["asked_for_exactness"] is True and len(f["tried"]) == 1
-    assert f["label"] == baseline.verdict(nets)[0]
+    # and on every network of the twins, the trained networks a run is read on: the same sample, exact there too
+    on_twins = f["confirmation"]["twin_networks"]
+    assert f["twins"] == ["lin-c", "lin-a-1to4"] and sorted(on_twins) == ["lin-a-1to4-s0", "lin-a-1to4-s1", "lin-c-s0", "lin-c-s1"]
+    assert [nid for _, nid in baseline.twin_networks(load_model("models/lin-e"))] == ["lin-c-s0", "lin-c-s1", "lin-a-1to4-s0", "lin-a-1to4-s1"]
+    assert {r["inputs"]["seed"] for r in on_twins.values()} == {f["confirmation"]["inputs_seed"]} and all(baseline.exact(r) for r in on_twins.values())
+    assert f["rule"] == baseline.RULE and "twins" in f["rule"] and "record" not in f and "earlier" not in f
+    assert f["label"] == baseline.verdict({**nets, **on_twins})[0]
+    text = (pair["baseline"] / "report.md").read_text()
+    assert "And on every network of its twins (lin-c, lin-a-1to4), on the same sample:" in text and "| lin-c-s1 |" in text
     assert "## The baseline" in (pair["baseline"] / "report.md").read_text()
 
 
-def test_a_frozen_baseline_is_never_frozen_again(pair):
+def test_a_frozen_baseline_is_not_frozen_again_unless_asked(pair):
     before = (pair["baseline"] / baseline.FILE).read_text()
     assert baseline.freeze(pair["baseline"], lambda *a, **k: None)["frozen_at"] == read_json(pair["baseline"] / baseline.FILE)["frozen_at"]
     loop.finish(pair["baseline"], out=lambda *a: None)
     assert (pair["baseline"] / baseline.FILE).read_text() == before
+
+
+def test_frozen_again_when_asked_is_a_new_record_next_to_the_first(pair, tmp_path, monkeypatch):
+    """Only when asked: the first record and its entry stay as they are, byte for byte, the new one is written next
+    to them and counts from then on, and the runs the baseline serves are read against it."""
+    run, base = _copy_runs(pair, tmp_path)
+    baseline.compare(run, lambda *a: None)
+    first = {name: (base / name).read_bytes() for name in (baseline.FILE, baseline.ENTRY)}
+    one = read_json(base / baseline.FILE)
+    assert baseline.records(base) == 1 and baseline.latest(base) == one and baseline.record_names(2) == ("baseline.2.json", "baseline_entry.2.json")
+    # the same rule and the same entries: the same entry is frozen, in a second record
+    lines = []
+    two = loop.freeze_again(base, out=lines.append)
+    assert baseline.records(base) == 2 and baseline.latest(base) == two == read_json(base / "baseline.2.json")
+    assert (two["record"], two["earlier"]) == (2, ["baseline.json"]) and two["entry_sha256"] == one["entry_sha256"] and two["established"] is True
+    assert two["confirmation"]["inputs_seed"] != one["confirmation"]["inputs_seed"]  # scored again, on a fresh sample
+    assert {name: (base / name).read_bytes() for name in first} == first
+    assert read_json(base / "baseline_entry.2.json") == read_json(base / baseline.ENTRY) == baseline.frozen_entry(base)
+    assert any("is frozen again" in line and "kept in baseline.json" in line for line in lines)
+    assert "This run was frozen again, when asked: this is its record 2" in (base / "report.md").read_text()
+    assert baseline.reading(run)["state"] == "read" and len(read_jsonl(run / baseline.SCORES)) == 2  # the same entry: nothing scored twice
+    # never again unless asked: freezing, and finishing the run, return the newest record
+    assert baseline.freeze(base, lambda *a: None) == two
+    loop.finish(base, out=lambda *a: None)
+    assert baseline.records(base) == 2 and baseline.established(base) and baseline.state_of(base) == "frozen"
+    # a rule under which the first candidate no longer passes: the next is frozen, and the run is read against that one
+    verdicts = iter([("fails", "made up for the test"), ("passes", "made up for the test")])
+    monkeypatch.setattr(baseline, "verdict", lambda receipts: next(verdicts))
+    lines = []
+    assert loop.main(["baseline", "--again", str(base)]) == 0
+    three = baseline.latest(base)
+    assert baseline.records(base) == 3 and three["earlier"] == ["baseline.json", "baseline.2.json"] and three["name"] == "itself"
+    assert [x["label"] for x in three["tried"]] == ["fails", "passes"] and three["entry_sha256"] != one["entry_sha256"]
+    assert lang.entry_hash(baseline.frozen_entry(base)) == three["entry_sha256"]
+    assert {name: (base / name).read_bytes() for name in first} == first and read_json(base / "baseline.2.json") == two
+    scores = read_jsonl(run / baseline.SCORES)
+    assert [e["baseline_entry_sha256"] for e in scores] == [one["entry_sha256"]] * 2 + [three["entry_sha256"]] * 2  # appended
+    r = baseline.reading(run)
+    assert r["state"] == "read" and r["entry_sha256"] == three["entry_sha256"] and r["on_twins"] is True
+    assert r["split"]["baseline"][0] == scores[2]["reward"] != scores[0]["reward"]  # the split is against the newest record's entry
+    assert "its model's other networks and its twins' networks" in (run / "report.md").read_text()
+
+
+def test_a_run_that_was_never_frozen_cannot_be_frozen_again(two_entries, tmp_path):
+    copy = _unfrozen_copy(two_entries, tmp_path)
+    with pytest.raises(RuntimeError, match="has no frozen baseline"):
+        loop.freeze_again(copy, out=lambda *a: None)
+    with pytest.raises(RuntimeError, match="nothing to freeze again"):
+        baseline.freeze(copy, lambda *a: None, again=True)
+    assert baseline.records(copy) == 0 and baseline.latest(copy) is None and baseline.state_of(copy) == "finished"
+    assert loop.main(["baseline", "--again", str(copy)]) == 1
+
+
+def test_a_record_made_before_the_twins_were_checked_reads_as_before(pair, tmp_path):
+    """The baselines frozen until 17 November 2026 have no twin networks in their records."""
+    run, base = _copy_runs(pair, tmp_path)
+    f = read_json(base / baseline.FILE)
+    old = {**f, "rule": "the network's output on every input of its region, on every one of the model's other networks",
+           "confirmation": {k: v for k, v in f["confirmation"].items() if k != "twin_networks"}}
+    write_json(base / baseline.FILE, old)
+    assert baseline.compare(run, lambda *a: None)["state"] == "read"
+    r = baseline.reading(run)
+    assert r["state"] == "read" and r["on_twins"] is False
+    text = "\n".join(report.baseline_lines({"baseline": baseline.reading(base)}))
+    assert "And on every network of its twins" not in text and "on every input of its region on every other network): **passes**" in text
+    assert "the check on its model's other networks (" in "\n".join(report.baseline_lines({"baseline": r}))
 
 
 def test_the_run_is_read_against_it_on_its_own_inputs(pair):
