@@ -37,12 +37,12 @@ target's task or its own checkpoint's control status. It has no regional baselin
 
 Only formally submitted programs are considered for generated baselines. New runs use validation
 policy version 2, in which every eligible submitted program can compete. To pass, a program must have full coverage and
-match every evaluated output on all declared untrained checkpoints and all checkpoints of all
-declared compatible trained twins. This includes the discovery checkpoint, a separate untrained
-selection checkpoint and the other untrained controls. A cheap rule that matches the untrained
+match every evaluated output on all declared control checkpoints and all checkpoints of all
+declared compatible trained twins. This includes the discovery checkpoint, a separate control
+selection checkpoint and the other parameter controls. A cheap rule that matches the control
 networks but fails a required trained checkpoint is rejected before baseline freezing.
 
-Candidates are checked in order of their reward on the untrained selection checkpoint until one
+Candidates are checked in order of their reward on the control selection checkpoint until one
 passes every acceptance gate; there is no old three-candidate cutoff. Trained outputs affect
 pass/fail eligibility; trained rewards do not rank programs.
 The search agent is not given these trained measurements as research feedback. The baseline is
@@ -67,7 +67,7 @@ The three modes use one shared allowance:
 - `trained` runs trained-model research without a baseline agent or imported comparison. When
   final synthesis is enabled, its share is reserved and the remaining allowance goes to research.
 - `baseline` gives its one global agent the full nominal run allowance, subject to the usual
-  session cap. It runs the same untrained and trained verification gates, then writes a deterministic
+  session cap. It runs the same control and trained verification gates, then writes a deterministic
   report. There are no trained-model research sessions and no paid lead summary.
 - `both` reserves the configured `baseline_fraction`, by default 20 percent, for the global agent.
   With the usual 10 percent final-summary share, a $25 total assigns up to $5 to baseline search,
@@ -79,7 +79,7 @@ attempts use the parent spending ledger. When mode is omitted, an enabled config
 
 `orchestration.baseline_entry` imports an existing frozen program and releases its search allocation.
 In a new version 2 run the imported program must pass the same full-coverage exactness gates on all
-required untrained and trained checkpoints before use. It remains labeled as supplied, with zero
+required control and trained checkpoints before use. It remains labeled as supplied, with zero
 search sessions. These local checks do not establish its search provenance or universal validity.
 Explicit `trained` mode rejects a supplied baseline entry. Old saved modes and validation policies
 remain unchanged on resume, and completed baseline phases are reused. Missing required counterpart
@@ -138,8 +138,8 @@ automatically scheduled, and the final synthesis must not claim it occurred unle
 actually supplied. A separately specified destination model/checkpoint interface and aggregation would
 be needed for an automatic cross-adapter control audit.
 
-Version 2 baseline validation evaluates the comparator on untrained and trained parameters; it does not
-evaluate the discovered target interpretations on those untrained controls. Its validation receipts therefore
+Version 2 baseline validation evaluates the comparator on control and trained parameters; it does not
+evaluate the discovered target interpretations on those parameter controls. Its validation receipts therefore
 do not fill this transfer experiment's missing evidence.
 
 ## Regional discoveries need comparable populations

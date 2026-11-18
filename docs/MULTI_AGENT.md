@@ -35,7 +35,7 @@ Choose the stages for a new run with `--mode`:
 | Mode | Agent sessions | Automatic validation and output |
 | --- | --- | --- |
 | `trained` | Planning lead, regional researchers, integrating lead, optional final lead synthesis | Trained-model research, frozen global and regional candidates, final audits and report; no baseline search or imported comparison |
-| `baseline` | One global baseline agent, or no agent when a frozen entry is supplied | Validate the comparator on all required untrained and trained checkpoints, freeze it and write a deterministic report; no trained-model research or final lead synthesis |
+| `baseline` | One global baseline agent, or no agent when a frozen entry is supplied | Validate the comparator on all required control and trained checkpoints, freeze it and write a deterministic report; no trained-model research or final lead synthesis |
 | `both` | One global baseline agent followed by trained-model research and optional final lead synthesis | Validate and freeze the baseline first, then reuse it for global and regional comparisons |
 
 The choice is saved in `orchestration.mode`. The CLI option also enables orchestration, so it can be
@@ -433,15 +433,15 @@ not assign regional workers.
 
 Only formal submissions are eligible for the generated baseline. Under validation policy version 2,
 the controller considers every eligible submission. Each must cover every evaluated input and
-agree with every checked output on the session's untrained checkpoint, a separate untrained
-selection checkpoint, every remaining declared untrained checkpoint and every checkpoint of the
+agree with every checked output on the session's control checkpoint, a separate control
+selection checkpoint, every remaining declared control checkpoint and every checkpoint of the
 declared compatible trained twins. A failure on any required checkpoint rejects that candidate.
 The session's early checkpoint likewise requires full coverage and exact empirical fidelity.
 
-Among the candidates passing all gates, ranking uses rewards from the untrained selection
+Among the candidates passing all gates, ranking uses rewards from the control selection
 checkpoint only. Trained checkpoint outputs therefore affect eligibility, but their rewards do
 not select the winner. The validated program is frozen before any trained-model research session.
-This policy catches, for example, a cheap rule that happens to work on low-variation untrained
+This policy catches, for example, a cheap rule that happens to work on low-variation control
 outputs but fails after training. It remains empirical validation over finite checkpoints and
 evaluated inputs, not a universal proof for every weight assignment or every unsampled input.
 
@@ -476,7 +476,7 @@ orchestration:
 ```
 
 This overrides generation and its resource reservation. In a new version 2 run the supplied entry
-is snapshotted and must pass the same full-coverage exactness checks on all required untrained
+is snapshotted and must pass the same full-coverage exactness checks on all required control
 and trained checkpoints before use. No search session is claimed for it, and validation does not
 establish how it was found or prove correctness for arbitrary weights. A failure stops the phase
 visibly. Researchers see either source of frozen program under the neutral name `comparison_entry`.

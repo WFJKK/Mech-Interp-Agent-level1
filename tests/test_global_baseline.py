@@ -425,6 +425,7 @@ def test_current_freeze_checks_every_trained_checkpoint_but_ranks_only_control_r
     assert result["chosen"] == 2 and result["validation_policy_version"] == 2
     assert result["trained_checkpoints_used_for_acceptance"] is True
     assert result["trained_rewards_used_for_selection"] is False
+    assert result["selection"]["ranking_population"] == "independent_parameter_control"
     assert "target_weights_used_in_selection" not in result
     assert set(result["trained_receipts"]) == TRAINED
     assert {f"{item['model']}/{item['network']}" for item in result["confirmation"]["trained_checkpoints"]} == TRAINED

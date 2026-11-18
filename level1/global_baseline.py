@@ -574,7 +574,7 @@ def _freeze_v2(path: Path, cfg: dict, control_model, plan: dict | None, record: 
                             {"fraction_of_shared_api_allowance": 0.0, "paid_agent_session": False}),
              "search": {"network": first, "input_seed": control_cfg["verifier"]["sample_seed"]},
              "selection": {"network": second, "input_seed": checks["selection_seed"],
-                           "ranking_population": "independent_untrained_control",
+                           "ranking_population": "independent_parameter_control",
                            "order": "highest independent control reward among exact full-domain entries; trained checkpoints only determine pass or fail",
                            "candidates_limit": None, "tried": tried},
              "confirmation": {"networks": others, "input_seed": checks["confirmation_seed"],
