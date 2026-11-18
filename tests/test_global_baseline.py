@@ -1,4 +1,4 @@
-"""The one-agent comparator is selected on independent full-domain controls."""
+"""Control reward ranks the comparator; the versioned checkpoint gate accepts it."""
 
 import copy
 
@@ -18,7 +18,11 @@ def config(tmp_path, **changes):
                  "orchestration": {"enabled": True, "baseline_agent": True,
                                    "baseline_fraction": 0.2, "development_seed": 73,
                                    "final_summary": False}}
-    return run_config.load("config/pilot/lin-c-smoke.yaml", run_config.merge(overrides, changes))
+    cfg = run_config.load("config/pilot/lin-c-smoke.yaml", run_config.merge(overrides, changes))
+    if "baseline_validation_version" not in (changes.get("orchestration") or {}):
+        # These original cases exercise already-saved runs, before policy v2.
+        cfg["orchestration"].pop("baseline_validation_version", None)
+    return cfg
 
 
 def entry(value):
@@ -66,8 +70,13 @@ def fake_verifier(monkeypatch, overrides=None, interrupt=None):
             calls.append({"network": self.network, "value": value, "seed": seed, "config": self.cfg})
             if interrupt and interrupt(self.network, value):
                 raise RuntimeError("interrupted local validation")
-            fields = overrides.get((self.network, value), {})
-            return receipt(self.network, program, seed=seed, **fields)
+            fields = dict(overrides.get((self.network, value), {}))
+            status = fields.pop("status", "scored")
+            row = receipt(self.network, program, seed=seed, **fields)
+            row["status"] = status
+            if status == "refused":
+                row.update(reason="the test program cannot run on this checkpoint", parts=None, reward=None)
+            return row
 
     monkeypatch.setattr(global_baseline, "Verifier", FakeVerifier)
     return calls
@@ -331,3 +340,313 @@ def test_real_reference_program_passes_independent_control_verifier(tmp_path):
     assert result["status"] == "established"
     assert all(global_baseline._full_domain_exact(row) for row in result["control_receipts"].values())
     assert all(row["inputs"]["n"] == 16 for row in result["control_receipts"].values())
+
+
+V2 = {"baseline_validation_version": 2}
+TRAINED = {"lin-c/lin-c-s0", "lin-c/lin-c-s1", "lin-a-1to4/lin-a-1to4-s0", "lin-a-1to4/lin-a-1to4-s1"}
+
+
+def test_research_modes_control_baseline_generation_and_validation():
+    options = {"enabled": True, "baseline_agent": False, "baseline_fraction": 0.2,
+               "baseline_validation_version": 2}
+    cfg = {"orchestration": {**options, "mode": "baseline"}}
+    assert global_baseline.required(cfg) and global_baseline.enabled(cfg)
+    assert global_baseline.needs_validation(cfg) and global_baseline.fraction(cfg) == 1.0
+    cfg["orchestration"].update(mode="both", baseline_entry="provided.json")
+    assert global_baseline.required(cfg) and global_baseline.needs_validation(cfg)
+    assert not global_baseline.enabled(cfg) and global_baseline.fraction(cfg) == 0
+    cfg["orchestration"].pop("baseline_validation_version")
+    assert not global_baseline.needs_validation(cfg)  # saved legacy supplied entry
+    cfg["orchestration"].update(mode="trained", baseline_agent=True)
+    assert not global_baseline.required(cfg) and not global_baseline.needs_validation(cfg)
+    assert not global_baseline.enabled(cfg) and global_baseline.fraction(cfg) == 0
+
+
+def test_current_preflight_loads_all_declared_trained_twins_before_research(tmp_path, monkeypatch):
+    cfg = config(tmp_path, orchestration=V2)
+    visited = []
+
+    def load_weights(model, network):
+        visited.append(f"{model.name}/{network}")
+        return {"parameter": np.array([len(visited)], dtype=np.float64)}
+
+    monkeypatch.setattr(Model, "load_weights", load_weights)
+    global_baseline.preflight(cfg)
+    assert visited[:6] == [f"lin-e/lin-e-s{i}" for i in range(6)]
+    assert set(visited[6:]) == TRAINED and len(visited) == 10
+    assert {model.name for model in global_baseline.validation_models(cfg)} == {"lin-e", "lin-c", "lin-a-1to4"}
+
+
+def test_an_unusable_other_trained_twin_fails_preflight(tmp_path, monkeypatch):
+    cfg = config(tmp_path, orchestration=V2)
+    real = Model.load_weights
+
+    def unusable(model, network):
+        if network == "lin-a-1to4-s1":
+            raise ModelError("the other trained checkpoint is corrupt")
+        return real(model, network)
+
+    monkeypatch.setattr(Model, "load_weights", unusable)
+    with pytest.raises(ModelError, match="other trained checkpoint"):
+        global_baseline.preflight(cfg)
+
+
+@pytest.mark.parametrize("changed", ["definition", "sizes", "data_set", "ids", "empty"])
+def test_current_config_preflights_every_trained_twin_definition(tmp_path, monkeypatch, changed):
+    cfg = config(tmp_path, orchestration=V2)
+    real = global_baseline.load_model
+
+    def altered(path):
+        model = real(path)
+        if model.name == "lin-a-1to4":
+            if changed == "definition":
+                model.source = lambda: "def reference(g, lv1):\n    return g.token(0)\n"
+            elif changed in ("ids", "empty"):
+                model.config["networks"] = [{"id": "same"}, {"id": "same"}] if changed == "ids" else []
+            else:
+                info = model.info()
+                info[changed] = {"different": True}
+                model.info = lambda: info
+        return model
+
+    monkeypatch.setattr(global_baseline, "load_model", altered)
+    with pytest.raises(RuntimeError, match="declared trained twin"):
+        global_baseline.config_for(cfg)
+
+
+def test_current_freeze_checks_every_trained_checkpoint_but_ranks_only_control_reward(tmp_path, monkeypatch):
+    path, cfg, model, plan, record = prepare(tmp_path, orchestration=V2)
+    changes = {("lin-e-s1", 1): {"reward": 0.5}, ("lin-e-s1", 2): {"reward": 0.8}}
+    for name in ("lin-c-s0", "lin-c-s1", "lin-a-1to4-s0", "lin-a-1to4-s1"):
+        changes[(name, 1)] = {"reward": 100}
+        changes[(name, 2)] = {"reward": -100}
+    calls = fake_verifier(monkeypatch, changes)
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    assert result["chosen"] == 2 and result["validation_policy_version"] == 2
+    assert result["trained_checkpoints_used_for_acceptance"] is True
+    assert result["trained_rewards_used_for_selection"] is False
+    assert "target_weights_used_in_selection" not in result
+    assert set(result["trained_receipts"]) == TRAINED
+    assert {f"{item['model']}/{item['network']}" for item in result["confirmation"]["trained_checkpoints"]} == TRAINED
+    assert all(row["model"] == key.split("/")[0] for key, row in result["trained_receipts"].items())
+    assert all(row["reward"] == -100 for row in result["trained_receipts"].values())
+    assert len(calls) == 10  # two rankings, four remaining controls, all four trained checkpoints
+    confirm = [call for call in calls if call["network"] != "lin-e-s1"]
+    assert len({call["seed"] for call in confirm}) == 1
+    assert confirm[0]["seed"] != result["selection"]["input_seed"]
+    assert all(call["config"]["verifier"] == global_baseline.config_for(cfg)["verifier"] for call in calls)
+
+
+@pytest.mark.parametrize("bad", [{"agree": 3}, {"coverage": 0.5, "agree": 2}, {"status": "refused"}])
+def test_control_exactness_does_not_hide_failed_trained_checks(tmp_path, monkeypatch, bad):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,), orchestration=V2)
+    calls = fake_verifier(monkeypatch, {("lin-a-1to4-s1", 1): bad})
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    assert result["status"] == "failed" and not (path / global_baseline.ENTRY).exists()
+    detail = result["candidates"]["1"]
+    assert all(global_baseline._full_domain_exact(row) for row in detail["confirmation"].values())
+    assert not detail["passed"] and set(detail["trained_confirmation"]) == TRAINED
+    assert len(calls) == 9
+
+
+def test_later_eligible_program_is_tried_after_trained_failure_despite_legacy_limit(tmp_path, monkeypatch):
+    path, cfg, model, plan, record = prepare(tmp_path, orchestration=V2, baseline={"candidates": 1})
+    fake_verifier(monkeypatch, {("lin-e-s1", 1): {"reward": 0.9}, ("lin-e-s1", 2): {"reward": 0.7},
+                                ("lin-c-s1", 1): {"agree": 3}})
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    assert result["chosen"] == 2 and result["selection"]["tried"] == [1, 2]
+    assert result["selection"]["candidates_limit"] is None
+
+
+def test_current_policy_does_not_read_obsolete_candidate_cap(tmp_path, monkeypatch):
+    cfg = config(tmp_path, orchestration=V2)
+    cfg["baseline"]["candidates"] = None
+    assert global_baseline.config_for(cfg)["model"] == "models/lin-e"
+
+
+def test_current_validation_resume_preserves_completed_checks_and_seeds(tmp_path, monkeypatch):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,), orchestration=V2)
+    fake_verifier(monkeypatch, interrupt=lambda network, value: network == "lin-a-1to4-s0")
+    with pytest.raises(RuntimeError, match="interrupted local validation"):
+        global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    pending = read_json(path / global_baseline.CHECKS)
+    completed = set(pending["candidates"]["1"]["trained_confirmation"])
+    calls = fake_verifier(monkeypatch)
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    assert result["status"] == "established"
+    assert {call["network"] for call in calls} == {key.split("/")[1] for key in TRAINED - completed}
+    assert all(call["seed"] == pending["confirmation_seed"] for call in calls)
+    assert result["selection"]["input_seed"] == pending["selection_seed"]
+    before = (path / global_baseline.FILE).read_bytes()
+    calls.clear()
+    assert global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None) == result
+    assert not calls and (path / global_baseline.FILE).read_bytes() == before
+
+
+@pytest.mark.parametrize("kind", ["receipt", "cohort", "policy", "entry"])
+def test_current_frozen_evidence_cannot_silently_change(tmp_path, monkeypatch, kind):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,), orchestration=V2)
+    fake_verifier(monkeypatch)
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    if kind == "receipt":
+        result["trained_receipts"]["lin-c/lin-c-s0"]["parts"]["n_agree"] -= 1
+        write_json(path / global_baseline.FILE, result)
+    elif kind == "policy":
+        result["validation_policy_version"] = 1
+        write_json(path / global_baseline.FILE, result)
+    elif kind == "entry":
+        write_json(path / global_baseline.ENTRY, entry(9))
+    else:
+        real = global_baseline.load_model
+
+        def other_cohort(source):
+            value = real(source)
+            if value.name == "lin-a-1to4":
+                value.config["networks"][1]["sha256"] = "different checkpoint"
+            return value
+
+        monkeypatch.setattr(global_baseline, "load_model", other_cohort)
+    with pytest.raises(RuntimeError, match="(changed|different|differs)"):
+        global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+
+
+def test_pending_trained_receipt_tampering_is_detected_before_resume(tmp_path, monkeypatch):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,), orchestration=V2)
+    fake_verifier(monkeypatch, interrupt=lambda network, value: network == "lin-a-1to4-s0")
+    with pytest.raises(RuntimeError, match="interrupted local validation"):
+        global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    pending = read_json(path / global_baseline.CHECKS)
+    pending["confirmation_seed"] += 1
+    write_json(path / global_baseline.CHECKS, pending)
+    calls = fake_verifier(monkeypatch)
+    with pytest.raises(RuntimeError, match="validation evidence changed"):
+        global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    assert not calls
+
+
+def test_supplied_program_gets_identical_acceptance_without_an_agent(tmp_path, monkeypatch):
+    source = tmp_path / "provided.json"
+    write_json(source, entry(1))
+    cfg = config(tmp_path, orchestration={**V2, "baseline_entry": str(source)})
+    calls = fake_verifier(monkeypatch)
+    path = tmp_path / "run"
+    result = global_baseline.validate_provided(path, cfg, out=lambda _: None)
+    assert result["status"] == "established" and result["source"] == "provided"
+    assert result["session_id"] is None and len(calls) == 10
+    assert result["allocation"] == {"fraction_of_shared_api_allowance": 0.0, "paid_agent_session": False}
+    assert set(result["trained_receipts"]) == TRAINED
+    assert set(result["control_receipts"]) == {f"lin-e-s{i}" for i in range(6)}
+    assert read_json(path / global_baseline.ENTRY) == entry(1)
+    write_json(source, entry(9))
+    calls.clear()
+    assert global_baseline.validate_provided(path, cfg, out=lambda _: None) == result
+    assert not calls  # resume retains its original immutable supplied program
+
+
+@pytest.mark.parametrize("bad", [{"agree": 3}, {"coverage": 0.5, "agree": 2}, {"status": "refused"}])
+def test_supplied_program_cannot_skip_trained_acceptance(tmp_path, monkeypatch, bad):
+    source = tmp_path / "provided.json"
+    write_json(source, entry(1))
+    cfg = config(tmp_path, orchestration={**V2, "baseline_entry": str(source)})
+    calls = fake_verifier(monkeypatch, {("lin-c-s1", 1): bad})
+    path = tmp_path / "run"
+    result = global_baseline.validate_provided(path, cfg, out=lambda _: None)
+    assert result["status"] == "failed" and result["source"] == "provided"
+    assert not (path / global_baseline.ENTRY).exists()
+    calls.clear()
+    assert global_baseline.validate_provided(path, cfg, out=lambda _: None) == result
+    assert not calls
+
+
+def test_legacy_frozen_baseline_stays_controls_only_and_is_never_upgraded(tmp_path, monkeypatch):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,))
+    fake_verifier(monkeypatch)
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    before = (path / global_baseline.FILE).read_bytes()
+    assert "validation_policy_version" not in result and "trained_receipts" not in result
+    calls = fake_verifier(monkeypatch, {("lin-c-s0", 1): {"status": "refused"}})
+    assert global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None) == result
+    assert not calls and (path / global_baseline.FILE).read_bytes() == before
+    cfg["orchestration"].update(V2)
+    with pytest.raises(RuntimeError, match="different policy"):
+        global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    assert not calls and (path / global_baseline.FILE).read_bytes() == before
+
+
+def _persist_baseline_session(path, plan, record):
+    write_json(path / global_baseline.DIRECTORY / "state.json",
+               {"baseline": plan["id"], "sessions": {plan["id"]: plan}})
+    write_json(path / plan["directory"] / "record.json", record)
+
+
+@pytest.mark.parametrize("supplied", [False, True])
+def test_verify_frozen_is_read_only_without_any_new_validation_work(tmp_path, monkeypatch, supplied):
+    fake_verifier(monkeypatch)
+    if supplied:
+        source = tmp_path / "provided.json"
+        write_json(source, entry(1))
+        cfg = config(tmp_path, orchestration={**V2, "baseline_entry": str(source)})
+        path = tmp_path / "run"
+        result = global_baseline.validate_provided(path, cfg, out=lambda _: None)
+    else:
+        path, cfg, model, plan, record = prepare(tmp_path, values=(1,), orchestration=V2)
+        _persist_baseline_session(path, plan, record)
+        result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    before = {str(file.relative_to(path)): file.read_bytes() for file in path.rglob("*") if file.is_file()}
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("frozen verification must not score, draw seeds, load weights or write")
+
+    monkeypatch.setattr(global_baseline, "Verifier", forbidden)
+    monkeypatch.setattr(global_baseline, "_fresh_seed", forbidden)
+    monkeypatch.setattr(global_baseline, "write_json", forbidden)
+    monkeypatch.setattr(Model, "load_weights", forbidden)
+    assert global_baseline.verify_frozen(path, cfg) == result
+    assert {str(file.relative_to(path)): file.read_bytes() for file in path.rglob("*") if file.is_file()} == before
+
+
+@pytest.mark.parametrize("change", ["receipts", "rehashed_receipts", "formal_record", "missing_record", "missing_frozen"])
+def test_verify_frozen_rejects_inconsistent_or_missing_completed_evidence(tmp_path, monkeypatch, change):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,), orchestration=V2)
+    _persist_baseline_session(path, plan, record)
+    fake_verifier(monkeypatch)
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+    if change in ("receipts", "rehashed_receipts"):
+        result["trained_receipts"].pop("lin-c/lin-c-s1")
+        if change == "rehashed_receipts":
+            global_baseline._write_sealed(path / global_baseline.FILE, result)
+        else:
+            write_json(path / global_baseline.FILE, result)
+    elif change == "formal_record":
+        record["submissions"][0]["parts"]["n_agree"] -= 1
+        write_json(path / plan["directory"] / "record.json", record)
+    elif change == "missing_record":
+        (path / plan["directory"] / "record.json").rename(path / "moved-record.json")
+    else:
+        (path / global_baseline.FILE).rename(path / "moved-baseline.json")
+    with pytest.raises(RuntimeError, match="(changed|different|missing)"):
+        global_baseline.verify_frozen(path, cfg)
+
+
+def test_verify_frozen_rejects_changed_supplied_snapshot(tmp_path, monkeypatch):
+    source = tmp_path / "provided.json"
+    write_json(source, entry(1))
+    cfg = config(tmp_path, orchestration={**V2, "baseline_entry": str(source)})
+    fake_verifier(monkeypatch)
+    path = tmp_path / "run"
+    global_baseline.validate_provided(path, cfg, out=lambda _: None)
+    write_json(path / global_baseline.PROVIDED, entry(9))
+    with pytest.raises(RuntimeError, match="different"):
+        global_baseline.verify_frozen(path, cfg)
+
+
+def test_verify_frozen_preserves_legacy_raw_record_without_new_checks(tmp_path, monkeypatch):
+    path, cfg, model, plan, record = prepare(tmp_path, values=(1,))
+    fake_verifier(monkeypatch)
+    result = global_baseline.freeze(path, cfg, model, plan, record, out=lambda _: None)
+
+    def forbidden(*args, **kwargs):
+        pytest.fail("reading a legacy record must not reconstruct v2 validation conditions")
+
+    monkeypatch.setattr(global_baseline, "config_for", forbidden)
+    assert global_baseline.verify_frozen(path, cfg) == result

@@ -13,6 +13,58 @@ from level1.verifier import Verifier
 CFG = {"reward": {"name": "r_alpha", "alpha": 10.0}}
 
 
+def test_global_baseline_cannot_rely_on_small_control_weights(tmp_path):
+    """Packed values fit all controls but overflow trained twins; try beyond three entries.
+
+    The generic claim must survive every declared trained checkpoint before it can
+    provide a reward comparator, even when all untrained controls agree exactly.
+    """
+    from level1 import global_baseline, run_config
+    from level1.networks import load_model
+    from level1.util import write_json
+
+    cfg = run_config.load("config/pilot/lin-c-smoke.yaml", {
+        "runs_dir": str(tmp_path), "backend": "fake", "sandbox": "process", "rounds_max": 1,
+        "verifier": {"sample_size": 64, "reference_samples": 1, "workload_size": 16384},
+        "session": {"python_calls": 40, "submissions": 5},
+        "orchestration": {"enabled": True, "baseline_agent": True, "baseline_validation_version": 2,
+                          "development_seed": 73, "final_summary": False}})
+    control_cfg = global_baseline.config_for(cfg)
+    control = load_model(control_cfg["model"])
+    weights = control.load_weights(control_cfg["network"])
+    scale = {"embed": 2.0**65, "hidden": 2.0**64, "unembed": 2.0**64}
+    programs = []
+    for packed in (("unembed",), ("hidden",), ("embed",), ("hidden", "unembed")):
+        graph = Graph(weights, 4)
+        matrices = {}
+        for name in ("embed", "hidden", "unembed"):
+            value = graph.weight(name)
+            if name in packed:
+                value = lang.cast(lang.cast(value * scale[name], int), float) * (1.0 / scale[name])
+            matrices[name] = value
+        product = matrices["unembed"] @ (matrices["hidden"] @ matrices["embed"])
+        programs.append(graph.entry(predict=lang.take_sum(product, graph.tokens(), axis=1).argmax()))
+    programs.append(control.reference_entry(weights))
+    path = tmp_path / "run"
+    plan = {"id": "a0001", "role": "baseline", "directory": "multi_agent/sessions/a0001-baseline"}
+    record = {"submissions": [], "meta": {"stop_reason": "end_turn"}}
+    verifier = Verifier(control, control_cfg["network"], control_cfg)
+    for number, program in enumerate(programs, 1):
+        scored = verifier.score(program, seed=73)
+        assert global_baseline._full_domain_exact(scored)
+        scored.update(submission=number, name=f"candidate-{number}", claim_scope={"kind": "all"})
+        record["submissions"].append(scored)
+        write_json(path / plan["directory"] / "session/submissions" / f"{number:03d}" / "entry.json", program)
+    frozen = global_baseline.freeze(path, cfg, control, plan, record, out=lambda _: None)
+    assert frozen["status"] == "established" and frozen["chosen"] == 5
+    assert set(frozen["selection"]["tried"]) == {1, 2, 3, 4, 5}
+    for number in (1, 2, 3, 4):
+        candidate = frozen["candidates"][str(number)]
+        assert all(global_baseline._full_domain_exact(row) for row in candidate["confirmation"].values())
+        assert any(row["status"] == "refused" for row in candidate["trained_confirmation"].values())
+    assert all(global_baseline._full_domain_exact(row) for row in frozen["trained_receipts"].values())
+
+
 def test_declared_workload_cannot_be_discounted_by_requesting_more_checks(model4):
     """The same fixed setup is not made cheaper by checking a larger sample."""
     w = model4.load_weights("lin-a-1to4-s0")
