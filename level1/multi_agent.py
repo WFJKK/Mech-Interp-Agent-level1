@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import artifacts, budget, hygiene, lang, prompt, regions, report, rewards, synthesis
+from . import artifacts, budget, global_baseline, hygiene, lang, prompt, regions, report, rewards, synthesis
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session
@@ -145,10 +145,16 @@ def _scope_cfg(cfg: dict, scope: dict) -> dict:
 
 
 def _baselines(path: Path, cfg: dict) -> dict | None:
-    """Snapshot a user-supplied comparison program once; do not launch a run."""
+    """Read the frozen global comparison, or snapshot an operator-supplied one."""
     target = Path(path) / ROOT / "baseline_entry.json"
     if target.exists():
-        return read_json(target)
+        entry = read_json(target)
+        metadata = Path(path) / ROOT / "baseline.json"
+        if metadata.exists():
+            frozen = read_json(metadata)
+            if frozen.get("entry_sha256") != lang.entry_hash(entry):
+                raise RuntimeError("the frozen global baseline changed after selection")
+        return entry
     source = _options(cfg).get("baseline_entry")
     if not source:
         return None
@@ -158,6 +164,9 @@ def _baselines(path: Path, cfg: dict) -> dict | None:
     entry = read_json(source)
     lang.check_structure(entry, cfg["entry"]["max_nodes"], cfg["entry"]["max_const_scalars"])
     write_json(target, entry)
+    write_json(Path(path) / ROOT / "baseline.json", {
+        "source": "provided", "status": "provided", "entry_sha256": lang.entry_hash(entry),
+        "reason": "A supplied frozen program; no independent baseline-agent search was run.", "at": now()})
     return entry
 
 
@@ -204,7 +213,7 @@ def archive_summary(archive: dict, limit: int) -> str:
                         "\n".join(row(cid) for cid in ids[:limit]))
     for key, receipt in archive["baseline_scores"].items():
         if receipt["status"] == "scored":
-            sections.append(f"Supplied comparison on {key}: reward {receipt['reward']:.6f}, "
+            sections.append(f"Frozen comparison on {key}: reward {receipt['reward']:.6f}, "
                             f"fidelity {receipt['parts']['fidelity']}, cost {rewards.cost_of(receipt['parts'])}.")
     drafts = artifacts.describe(archive)
     if drafts:
@@ -235,19 +244,25 @@ def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, in
     global_fraction = 1.0 - planning - regional
     total_api, per_session = float(cfg["budget"]["run_usd"]), float(cfg["budget"]["round_usd"])
     summary = synthesis.fraction(cfg)
+    baseline_share = global_baseline.fraction(cfg)
+    if role == "baseline":
+        cap = min(per_session, total_api * baseline_share)
+        return (math.floor(session["python_calls"] * cfg["rounds_max"] * baseline_share),
+                int(opt["baseline_submissions"]), cap, cap)
     if role == "summary":
         cap = min(per_session, total_api * summary)
         return 0, 0, cap, cap
-    total_api *= 1.0 - summary
+    total_api *= 1.0 - summary - baseline_share
+    python_calls = session["python_calls"] * (1.0 - baseline_share)
     if cycle == 0:
         cap = min(per_session, total_api * planning)
-        return math.floor(session["python_calls"] * cfg["rounds_max"] * planning), 0, cap, cap
+        return math.floor(python_calls * cfg["rounds_max"] * planning), 0, cap, cap
     cycle_cap = min(per_session, total_api * (1.0 - planning) / cfg["rounds_max"])
     if role == "regional":
-        calls = math.floor(session["python_calls"] * regional) // workers
+        calls = math.floor(python_calls * regional) // workers
         cap = cycle_cap * regional / (1.0 - planning) / workers
         return calls, int(opt.get("regional_submissions", 1)), cap, cycle_cap
-    calls = math.floor(session["python_calls"] * global_fraction)
+    calls = math.floor(python_calls * global_fraction)
     cap = cycle_cap * global_fraction / (1.0 - planning)
     return calls, session["submissions"] - workers * int(opt.get("regional_submissions", 1)), cap, cycle_cap
 
@@ -255,10 +270,14 @@ def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, in
 def _quota(cfg: dict, base: float, role: str, cycle: int, workers: int, integer: bool):
     opt = _options(cfg)
     summary = synthesis.fraction(cfg)
+    baseline_share = global_baseline.fraction(cfg)
+    if role == "baseline":
+        value = base * cfg["rounds_max"] * baseline_share
+        return math.floor(value) if integer else value
     if role == "summary":
         value = base * cfg["rounds_max"] * summary
         return math.floor(value) if integer else value
-    base *= 1.0 - summary
+    base *= 1.0 - summary - baseline_share
     if cycle == 0:
         value = base * cfg["rounds_max"] * opt["planning_fraction"]
     elif role == "regional":
@@ -270,7 +289,8 @@ def _quota(cfg: dict, base: float, role: str, cycle: int, workers: int, integer:
 
 
 def role_config(cfg: dict, plan: dict) -> dict:
-    out = _scope_cfg(cfg, plan["scope"])
+    out = (global_baseline.config_for(cfg) if plan["role"] == "baseline"
+           else _scope_cfg(cfg, plan["scope"]))
     calls, submissions, cap, cycle_cap = _allocation(cfg, plan["role"], plan["cycle"], plan["worker_count"])
     out["session"]["python_calls"] = calls
     out["session"]["submissions"] = submissions
@@ -279,13 +299,13 @@ def role_config(cfg: dict, plan: dict) -> dict:
     if out["session"]["max_turns"] < 1 and cfg["backend"] != "fake":
         raise RuntimeError("the turn budget is too small for the configured research-role allocation")
     out["budget"].update(round_usd=cap, cycle_usd=cycle_cap,
-                         cycle_id="summary" if plan["role"] == "summary" else
+                         cycle_id=plan["role"] if plan["role"] in ("baseline", "summary") else
                          "planning" if plan["cycle"] == 0 else f"cycle-{plan['cycle']:03d}")
     max_assignments = (_options(cfg)["workers"] if plan["role"] == "lead" and plan["cycle"] < cfg["rounds_max"] else 0)
     out["research_task"] = {"role": plan["role"], "task": plan["task"], "cycle": plan["cycle"],
                             "session_id": plan["id"], "max_assignments": max_assignments}
     checkpoint = _options(cfg).get("checkpoint_python_calls")
-    if plan["role"] == "lead" and plan["cycle"] > 0 and checkpoint is not None:
+    if (plan["role"] == "baseline" or (plan["role"] == "lead" and plan["cycle"] > 0)) and checkpoint is not None:
         out["research_task"]["checkpoint_python_calls"] = min(int(checkpoint), calls)
     return out
 
@@ -350,7 +370,7 @@ def _history(path: Path, state: dict, before_index: int) -> list[dict]:
     rows = []
     for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
         record_path = Path(path) / plan["directory"] / "record.json"
-        if plan["role"] != "summary" and plan["index"] < before_index and record_path.exists():
+        if plan["role"] not in ("baseline", "summary") and plan["index"] < before_index and record_path.exists():
             record = read_json(record_path)
             rows.append({"session_id": plan["id"], "role": plan["role"], "scope": plan["scope"],
                          "notes": _research_notes(record), "submissions": record["submissions"]})
@@ -389,6 +409,8 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
     if completed.exists():
         return read_json(completed)
     role_cfg = role_config(cfg, plan)
+    if plan["role"] == "baseline":
+        model = load_model(role_cfg["model"])
     meta_path = directory / "meta.json"
     session_existed = (directory / "session" / "session.json").exists()
     exhausted = None
@@ -399,7 +421,8 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
             if not session_existed:
                 raise StopRun(exhausted)
     archive = plan["snapshot"]
-    session = Session.create(directory / "session", role_cfg, cfg["network"], path, _carried(path, cfg, archive))
+    carried = {} if plan["role"] == "baseline" else _carried(path, cfg, archive)
+    session = Session.create(directory / "session", role_cfg, role_cfg["network"], path, carried)
     history = _safe_history(path, state, plan["history"] or [])
     prompt_path = directory / ("prompt.history_safe.md" if history != (plan["history"] or []) else "prompt.md")
     if not prompt_path.exists():
@@ -541,16 +564,20 @@ def _drive(path, fake_scripts=None, out=print) -> str:
         state = read_json(_state_path(path))
     else:
         state = {"version": 1, "next_index": 0, "sessions": {}, "cycles": [], "stop_reason": None}
-        planning = _new_plan(state, "lead", 0, ALL,
-                             "Choose bounded input regions to investigate and assign their research tasks.",
-                             int(_options(cfg)["workers"]), _snapshot(archive), [])
-        state["planning"] = planning["id"]
+        if global_baseline.enabled(cfg):
+            baseline_plan = _new_plan(state, "baseline", 0, ALL,
+                                      "Develop a full-domain predictor exact for any parameter values, with low measured cost.",
+                                      1, _empty_archive(), [])
+            allocated = role_config(cfg, baseline_plan)
+            baseline_plan["allocation"] = {"session": allocated["session"], "budget": allocated["budget"]}
+            state["baseline"] = baseline_plan["id"]
         write_json(_state_path(path), state)
 
     def run_one(plan):
         out(f"{plan['id']}: {plan['role']} on {regions.scope_id(plan['scope'])}")
         record = _run_session(path, cfg, model, state, plan, fake_scripts, out)
-        _ingest(path, cfg, model, archive, plan, record)
+        if plan["role"] != "baseline":
+            _ingest(path, cfg, model, archive, plan, record)
         plan["status"] = "completed"
         write_json(_state_path(path), state)
         return record
@@ -570,6 +597,24 @@ def _drive(path, fake_scripts=None, out=print) -> str:
             if (folder / "record.json").exists() or ((folder / "meta.json").exists() and (folder / "response.md").exists()):
                 run_one(plan)
         refusal_barrier()
+        if global_baseline.enabled(cfg):
+            if "baseline" not in state:
+                raise StopRun("this persisted research plan has no baseline phase; start a new run with the updated configuration")
+            baseline_plan = state["sessions"][state["baseline"]]
+            record = run_one(baseline_plan)
+            control_cfg = role_config(cfg, baseline_plan)
+            result = global_baseline.freeze(path, cfg, load_model(control_cfg["model"]), baseline_plan, record, out)
+            if result.get("status") != "established":
+                raise StopRun("the global baseline was not established: " + str(result.get("reason", "no validated global program")))
+            refusal_barrier()
+        _comparison(path, cfg, model, archive, ALL)
+        write_json(_archive_path(path), archive)
+        if "planning" not in state:
+            planning = _new_plan(state, "lead", 0, ALL,
+                                 "Choose bounded input regions to investigate and assign their research tasks.",
+                                 int(_options(cfg)["workers"]), _snapshot(archive), [])
+            state["planning"] = planning["id"]
+            write_json(_state_path(path), state)
         planning = state["sessions"][state["planning"]]
         last_lead = run_one(planning)
         while True:
@@ -643,7 +688,7 @@ def _drive(path, fake_scripts=None, out=print) -> str:
         # A budget interruption can occur after save_entry but before a response
         # record exists. Preserve that work without promoting it to a submission.
         for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
-            if plan["role"] != "summary":
+            if plan["role"] not in ("baseline", "summary"):
                 artifacts.collect(path, cfg, archive, plan)
         write_json(_archive_path(path), archive)
         state["stop_reason"] = str(exc)
@@ -694,6 +739,11 @@ def _finish(path, out=print, fake_scripts=None) -> dict:
     path = Path(path)
     run = read_json(path / "run.json")
     cfg, model = run["config"], load_model(run["config"]["model"])
+    if global_baseline.enabled(cfg):
+        status = _baseline_status(path, cfg)
+        if status.get("status") != "established" or _baselines(path, cfg) is None:
+            write_report(path)
+            raise RuntimeError("the required global baseline is not established; resume the saved baseline phase before finishing research")
     archive = read_archive(path)
     frozen_path = path / ROOT / "lock.json"
     if frozen_path.exists():
@@ -766,6 +816,20 @@ def _synthesize(path: Path, cfg: dict, model, frozen: dict, archive: dict, fake_
     return result
 
 
+def _baseline_status(path: Path, cfg: dict) -> dict:
+    saved = path / ROOT / "baseline.json"
+    if saved.exists():
+        return read_json(saved)
+    if (path / ROOT / "baseline_entry.json").exists():
+        return {"source": "provided", "status": "provided",
+                "reason": "A frozen comparison supplied under the saved configuration."}
+    if global_baseline.enabled(cfg):
+        return {"source": "single_agent_search", "status": "pending",
+                "reason": "The one-agent global baseline must be established before research begins."}
+    return {"source": None, "status": "not_configured",
+            "reason": "This saved configuration has no automatic baseline search or supplied program."}
+
+
 def write_report(path) -> None:
     path = Path(path)
     run, archive = read_json(path / "run.json"), read_archive(path)
@@ -782,6 +846,8 @@ def write_report(path) -> None:
     api_budget = budget.state(path, run["config"]["budget"]) if run["config"]["auth"] == "api_key" else None
     result = {"orchestration": "regional_global", "network": run["config"]["network"],
               "archive": archive, "state": state, "sessions": records, "audits": audits}
+    baseline_status = _baseline_status(path, run["config"])
+    result["baseline"] = baseline_status
     summary = synthesis.report(path, run["config"])
     result["lead_summary"] = summary
     if api_budget is not None:
@@ -790,6 +856,10 @@ def write_report(path) -> None:
     lines = ["# Regional research and global integration", "", f"Network: `{run['config']['network']}`.", "",
              "The same reward is measured separately within each declared scope. Regional rewards do not select the global program.",
              "All findings here are measured claims unless an independent certificate is supplied.", "",
+             "## Global baseline", "", f"Status: `{baseline_status['status']}`.", "",
+             str(baseline_status.get("reason") or "The frozen program passed the recorded parameter checks."), "",
+             "One frozen global program is scored on the target network within each claim's scope, using the same inputs and workload as the candidate. Regional comparisons do not launch additional baseline agents.", "",
+             "A single-agent comparison search has different resources from the research team. A reward gap over this known program can include generic optimizations; it does not by itself measure an effect of training.", "",
              "## Global selection", "", f"Selected candidate: `{archive['global']['best'] or 'none'}`.", "",
              "## Development archive", "", "| Candidate | Role | Scope | Coverage | Fidelity | Cost | Reward | Comparison gap |",
              "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
@@ -814,12 +884,20 @@ def write_report(path) -> None:
                          f"declared workload: {metadata.get('workload_size')}.")
     if archive.get("drafts"):
         lines += ["", "## Saved draft artifacts", "", artifacts.describe(archive), ""]
-    lines += ["", "## Final locked checks", "", "| Candidate | Check | Network | Fidelity | Reward |", "| --- | --- | --- | ---: | ---: |"]
+    lines += ["", "## Final locked checks", "", "| Candidate | Check | Network | Fidelity | Reward | Baseline fidelity | Baseline reward | Reward gap |",
+              "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
     for cid, audit in audits.items():
         for label in ("fresh", "held_out"):
             receipt = audit.get(label)
             if receipt and receipt["status"] == "scored":
-                lines.append(f"| {cid} | {label} | {receipt['network']} | {receipt['parts']['fidelity']} | {receipt['reward']:.6f} |")
+                comparison = audit.get(f"{label}_baseline")
+                if comparison and comparison.get("status") == "scored":
+                    details = (f"{comparison['parts']['fidelity']} | {comparison['reward']:.6f} | "
+                               f"{receipt['reward'] - comparison['reward']:+.6f}")
+                else:
+                    details = "unavailable | unavailable | unavailable"
+                lines.append(f"| {cid} | {label} | {receipt['network']} | {receipt['parts']['fidelity']} | {receipt['reward']:.6f} | {details} |")
+    lines += ["", "Comparison gaps are differences between the recorded rewards. If the comparison fails full coverage or agreement on a target check, its score is not evidence of a validated generic baseline on that check."]
     lines += ["", "## Execution", "", f"Completed cycles: {sum(c['status'] == 'completed' for c in state.get('cycles', []))}.",
               f"Stop reason: {state.get('stop_reason') or 'research is in progress'}.", "",
               "The raw session receipts, fixed-development comparisons and frozen final checks are kept separately. Final checks never feed research sessions or archive selection. A separate tool-less lead synthesis may describe them after locking.", ""]

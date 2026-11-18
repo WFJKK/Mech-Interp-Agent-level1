@@ -46,7 +46,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import budget, hygiene, lang, prompt, rewards, run_config
+from . import budget, global_baseline, hygiene, lang, prompt, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
 from .session import RESEARCH_SUBMIT_TOOL, RESEARCH_TOOLS, Session, surface
@@ -203,7 +203,7 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
            "research system prompt": SYSTEM_PROMPT, "summary system prompt": SUMMARY_SYSTEM_PROMPT,
            "temporary folder's location": tempfile.gettempdir()}
     if ((cfg.get("orchestration") or {}).get("enabled")
-            or (cfg.get("research_task") or {}).get("role") in ("lead", "regional")):
+            or (cfg.get("research_task") or {}).get("role") in ("lead", "regional", "baseline")):
         import json
 
         out.update({f"research tool {name}": json.dumps(spec) for name, spec in RESEARCH_TOOLS.items()})
@@ -232,6 +232,8 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         raise RuntimeError(f"{path} is a run already: resume it, or give the config another run_id")
     model = load_model(cfg["model"])
     model.network(cfg["network"])
+    control_cfg = global_baseline.config_for(cfg) if global_baseline.enabled(cfg) else None
+    control_model = load_model(control_cfg["model"]) if control_cfg is not None else None
     second = (cfg.get("seed_check") or {}).get("network")
     if second:
         model.network(second)
@@ -252,6 +254,15 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     else:
         first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
+    if control_model is not None:
+        from . import multi_agent
+
+        plan = {"role": "baseline", "scope": {"kind": "all"}, "cycle": 0, "worker_count": 1,
+                "id": "a0001", "task": "Develop a full-domain predictor exact for any parameter values, with low measured cost."}
+        baseline_cfg = multi_agent.role_config(cfg, plan)
+        baseline_prompt = prompt.build_multi(baseline_cfg, control_model, 0, "baseline", plan["task"], "", [])
+        hygiene.check({"prompt": baseline_prompt, **agent_surface(baseline_cfg, control_model, sb.mode)},
+                      forbidden_strings(baseline_cfg, control_model))
     report = probe(sb, model, cfg["network"], path / "probe")                      # the system's sandbox on its own
     guarded = probe(sb, model, cfg["network"], path / "probe", guard=True)         # with the guard inside Python
     try:
@@ -273,6 +284,8 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         "n_total": verifier.scope.cardinality if verifier.scope is not None else model.n_total,
         "enumerated": verifier.enumerated, "check": verifier.check, "n_inputs": verifier.n_inputs(),
         **({"scope": itself["scope"]} if "scope" in itself else {}),
+        **({"global_baseline_control": {"model": control_cfg["model"], "network": control_cfg["network"],
+                                       "trusted_hash": trusted_hash(control_model)}} if control_model is not None else {}),
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
         + (f"every one of {verifier.n_inputs():,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
@@ -282,6 +295,10 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
             log(f"billed to the API key in {cfg['api_key_env']}: ${float(b['run_usd']):.2f} shared run allowance; "
                 "cycles and role sessions receive portions of it, recorded in spend.jsonl. "
                 "A final response can exceed its attempt cap.")
+            if control_model is not None:
+                cap = min(float(b["round_usd"]), float(b["run_usd"]) * global_baseline.fraction(cfg))
+                log(f"one global baseline agent runs first, with ${cap:.2f} reserved within that allowance; "
+                    "its frozen program will be compared on every claimed domain")
         else:
             log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
                 f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
@@ -314,6 +331,13 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
             raise RuntimeError("the code, the prompt, the guide or the model folder changed since this run began; "
                                "resume with --accept-changes to go on all the same (the log will say so)")
         log("the trusted files changed since the run began; going on as asked", trusted_hash=trusted_hash(model))
+    control = run.get("global_baseline_control")
+    if control and trusted_hash(load_model(control["model"])) != control["trusted_hash"]:
+        if not accept_changes:
+            raise RuntimeError("the baseline's trusted files or parameter-control model changed since this run began; "
+                               "resume with --accept-changes to go on all the same (the log will say so)")
+        log("the baseline's trusted files changed since the run began; going on as asked",
+            baseline_trusted_hash=trusted_hash(load_model(control["model"])))
     if (cfg.get("orchestration") or {}).get("enabled"):
         from . import multi_agent
 
@@ -479,8 +503,8 @@ def run_baseline(cfg: dict, fake_scripts=None, out=print, prices: str | None = N
     from . import baseline
 
     if (cfg.get("orchestration") or {}).get("enabled"):
-        raise RuntimeError("automatic baseline runs use the original round layout; for a research run, set "
-                           "orchestration.baseline_entry to a frozen comparison program instead")
+        raise RuntimeError("research runs execute their one-agent global baseline inside run/resume; "
+                           "use a new configuration with orchestration.baseline_agent: true, or supply baseline_entry")
 
     if (prices or lang.PRICES) != lang.PRICES:
         raise RuntimeError(f"the run was measured under {prices}, and this code prices under {lang.PRICES}: no baseline "
@@ -524,8 +548,14 @@ def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | No
     from . import baseline
 
     if (cfg.get("orchestration") or {}).get("enabled"):
-        raise RuntimeError("--with-baseline is for the original run mode; set orchestration.baseline_entry "
-                           "to score a frozen comparison program on every research domain")
+        if not global_baseline.enabled(cfg) and not cfg["orchestration"].get("baseline_entry"):
+            raise RuntimeError("this saved research configuration has no baseline phase; start a new run with "
+                               "orchestration.baseline_agent: true, or configure baseline_entry before starting")
+        if resume:
+            return drive(Path(resume), fake_scripts=fake_scripts, out=out,
+                         accept_changes=accept_changes, budget_usd=budget_usd)
+        path = start(cfg, fake_scripts=fake_scripts, out=out)
+        return "finished" if (path / "multi_agent/lock.json").is_file() else "stopped"
 
     prices = read_json(Path(resume) / "run.json").get("prices") if resume else lang.PRICES
     if prices != lang.PRICES:

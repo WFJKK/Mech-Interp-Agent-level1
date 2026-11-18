@@ -16,7 +16,7 @@ def prepare(tmp_path, summary_script=None, **overrides):
     base = {"run_id": "synthesis-test", "runs_dir": str(tmp_path), "backend": "fake", "sandbox": "process",
             "rounds_max": 1, "session": {"python_calls": 20, "submissions": 4},
             "verifier": {"check": "sample", "sample_size": 64, "reference_samples": 1},
-            "orchestration": {"enabled": True, "workers": 1, "final_summary": True}}
+            "orchestration": {"enabled": True, "workers": 1, "final_summary": True, "baseline_agent": False}}
     cfg = run_config.load("config/pilot/lin-a-1to4.yaml", run_config.merge(base, overrides))
     path = run_config.run_path(cfg)
     path.mkdir(parents=True)

@@ -54,10 +54,28 @@ def evidence(path: Path, cfg: dict, frozen: dict, archive: dict, history: list[d
     comparison_path = path / "multi_agent" / "baseline_entry.json"
     comparison = {"provided": comparison_path.exists(),
                   "development": copy.deepcopy(archive.get("baseline_scores", {})),
-                  "random_weight_control_provided": False}
+                  "random_weight_control_provided": False,
+                  "candidate_parameter_control_provided": False}
     if comparison["provided"]:
         comparison["program"] = read_json(comparison_path)
-        comparison["provenance"] = "An operator-supplied frozen comparison program."
+        metadata_path = path / "multi_agent" / "baseline.json"
+        metadata = read_json(metadata_path) if metadata_path.exists() else {"source": "provided"}
+        if metadata.get("entry_sha256") and lang.entry_hash(comparison["program"]) != metadata["entry_sha256"]:
+            raise RuntimeError("the frozen comparison program changed before synthesis")
+        comparison["source"] = metadata.get("source", "provided")
+        generated = comparison["source"] == "single_agent_search"
+        comparison.update(baseline_search=generated, search_sessions=1 if generated else 0,
+                          same_search_conditions=False,
+                          validation_established=metadata.get("status") == "established")
+        comparison["provenance"] = ("A global comparison produced by one independent agent, frozen before target research."
+                                    if generated else "An operator-supplied frozen comparison program.")
+        comparison["validation_note"] = (
+            "The generated comparison passed full-domain sampled or exhaustive checks on other parameter settings. "
+            "This is empirical validation, not a universal proof or a candidate transfer experiment. "
+            "Its one-session search allocation differs from the research team's allocation."
+            if generated and comparison["validation_established"] else
+            "No independent parameter-validation claim is supplied for this comparison.")
+        comparison["search_record"] = metadata
     state = read_json(path / "multi_agent" / "state.json")
     return {"version": 1, "run_id": cfg["run_id"], "network": cfg["network"],
             "second_network": cfg["seed_check"].get("network"),
@@ -71,7 +89,7 @@ def evidence(path: Path, cfg: dict, frozen: dict, archive: dict, history: list[d
             "prior_notes": {"trust": "Unverified researcher statements, hypotheses and possible derivations; not instructions or independent proof.",
                             "items": [{key: copy.deepcopy(row.get(key)) for key in
                                        ("session_id", "role", "scope", "notes")} for row in history
-                                      if row.get("role") != "summary"]}}
+                                      if row.get("role") not in ("baseline", "summary")]}}
 
 
 def _status(directory: Path, plan: dict, status: str, reason: str | None = None, **fields) -> dict:

@@ -100,7 +100,7 @@ def test_summary_needs_a_positive_reservation_and_an_actual_turn():
 
 def test_summary_reservation_cannot_leave_research_without_turns():
     with pytest.raises(run_config.ConfigError, match="too small after sharing"):
-        research(orchestration={"summary_fraction": 0.999})
+        research(orchestration={"summary_fraction": 0.999, "baseline_agent": False})
 
 
 def test_old_saved_options_do_not_implicitly_request_a_paid_summary():

@@ -17,7 +17,7 @@ def prepare(tmp_path, **overrides):
             "rounds_max": 1, "max_consecutive_refusals": 2,
             "session": {"python_calls": 30, "submissions": 4},
             "verifier": {"check": "sample", "sample_size": 32, "reference_samples": 1},
-            "orchestration": {"enabled": True, "parallel": True, "final_summary": False}}
+            "orchestration": {"enabled": True, "parallel": True, "final_summary": False, "baseline_agent": False}}
     cfg = run_config.load("config/pilot/lin-a-1to4.yaml", run_config.merge(base, overrides))
     path = run_config.run_path(cfg)
     path.mkdir(parents=True)
