@@ -20,42 +20,71 @@ For a candidate P, a comparison B and target weights W, the within-scope gap is
 \Delta_S = R_S(P;W)-R_S(B;W).
 ```
 
-Report coverage, fidelity and cost alongside the gap. A positive gap is improvement over that frozen
-program under the declared tradeoff; it does not prove optimality or measure a quantity of learned
-structure. Even a program valid for arbitrary weights may inspect particular weight values and exploit
-special cases when it executes.
+Report coverage, fidelity and cost alongside the gap. A validated generic-comparison gap requires
+the comparator to have full coverage and exact agreement on the actual evaluated target scope,
+with matching samples or enumeration, prices and setup workload. If the comparator fails these
+checks, retain its raw receipts and any raw arithmetic with an invalid-comparison label; do not
+present that difference as established generic efficiency improvement. A valid positive gap is
+improvement over this frozen program under the declared tradeoff. It does not prove optimality or
+measure a quantity of learned structure. Even a program valid for arbitrary weights may inspect
+particular weight values and exploit special cases when it executes.
 
-New multi-agent runs automatically ask one agent to find a global generic program before target
-research starts. The existing `baseline_of` declaration identifies a counterpart with the same
+The framework can ask one agent to find a global generic program, either alone (`--mode baseline`)
+or before target research (`--mode both`). The existing `baseline_of` declaration identifies a counterpart with the same
 architecture, shapes and input distribution and at least four parameter checkpoints. The agent
 receives the additional requirement of validity across arbitrary weights, without being told the
 target's task or its own checkpoint's control status. It has no regional baseline workers.
 
-Only formally submitted programs are considered. A candidate must cover the full domain and match
-every checked output on the discovery checkpoint, a separate selection checkpoint and the remaining
-controls. Selection and freezing use those controls independently of the trained target's outputs.
-Finite checkpoint tests provide empirical support, not a proof for every possible weight assignment.
-The source, resource allocation, coverage and validation receipts remain on record.
+Only formally submitted programs are considered for generated baselines. New runs use validation
+policy version 2, in which every eligible submitted program can compete. To pass, a program must have full coverage and
+match every evaluated output on all declared untrained checkpoints and all checkpoints of all
+declared compatible trained twins. This includes the discovery checkpoint, a separate untrained
+selection checkpoint and the other untrained controls. A cheap rule that matches the untrained
+networks but fails a required trained checkpoint is rejected before baseline freezing.
+
+Candidates are checked in order of their reward on the untrained selection checkpoint until one
+passes every acceptance gate; there is no old three-candidate cutoff. Trained outputs affect
+pass/fail eligibility; trained rewards do not rank programs.
+The search agent is not given these trained measurements as research feedback. The baseline is
+frozen before trained-model research begins. Finite checkpoint tests provide empirical support,
+not a proof for every possible weight assignment or unsampled input. The source, resource allocation,
+validation policy version and individual receipts remain on record.
+
+Version 1 records retain their original control-only acceptance policy and any original candidate
+limit. Resume does not reinterpret those records as if version 2's trained acceptance checks had
+occurred. Legacy imported entries with no parameter validation remain explicitly unvalidated.
 
 The one frozen global program is then remeasured on the target's global domain and every regional
 claim, with matching inputs and workload within each comparison. A regional comparison means applying
 that same global program to the region; it does not mean another agent optimized a regional baseline.
 The gap is reported while research agents continue optimizing the ordinary reward, without subtracting
-the gap automatically. If the comparator fails on a target checkpoint, retain the measured fidelity
-and describe the raw reward difference without treating it as established generic efficiency.
+the gap automatically. A comparator can still fail a later fresh-input or regional check despite
+passing parameter validation. The validated gap is withheld for that check rather than overridden
+by its earlier validation status.
 
-`orchestration.baseline_agent: true` enables the phase for new research configurations. Its default
-`baseline_fraction: 0.2` comes from the original shared API, Python, turn and time allowances, and
-`baseline_submissions: 2` explicitly budgets its formal submissions. The usual final-summary share
-also remains within the original total. For example, $25 reserves up to $5 for the baseline, $2.50
-for synthesis and $17.50 for research. All API attempts use the parent spending ledger.
+The three modes use one shared allowance:
 
-`orchestration.baseline_entry` instead imports an existing frozen program and releases the automatic
-baseline allocation. Importing JSON alone does not establish provenance or arbitrary-weight validity.
-Setting `baseline_agent: false` explicitly omits generation. Old saved configurations lacking this
-field do not acquire a paid phase on resume; completed baseline phases are reused. Missing control
-models fail preflight before API use, and a search without a validated full-domain submission stops
-visibly before target research. See `MULTI_AGENT.md` for configuration and records.
+- `trained` runs trained-model research without a baseline agent or imported comparison. When
+  final synthesis is enabled, its share is reserved and the remaining allowance goes to research.
+- `baseline` gives its one global agent the full nominal run allowance, subject to the usual
+  session cap. It runs the same untrained and trained verification gates, then writes a deterministic
+  report. There are no trained-model research sessions and no paid lead summary.
+- `both` reserves the configured `baseline_fraction`, by default 20 percent, for the global agent.
+  With the usual 10 percent final-summary share, a $25 total assigns up to $5 to baseline search,
+  $2.50 to synthesis and $17.50 to research. These are allocations within the $25, not extra budgets.
+
+`baseline_submissions: 2` explicitly budgets the global agent's formal submissions. All API
+attempts use the parent spending ledger. When mode is omitted, an enabled configuration with
+`baseline_agent: true` selects `both`, preserving existing configuration inference.
+
+`orchestration.baseline_entry` imports an existing frozen program and releases its search allocation.
+In a new version 2 run the imported program must pass the same full-coverage exactness gates on all
+required untrained and trained checkpoints before use. It remains labeled as supplied, with zero
+search sessions. These local checks do not establish its search provenance or universal validity.
+Explicit `trained` mode rejects a supplied baseline entry. Old saved modes and validation policies
+remain unchanged on resume, and completed baseline phases are reused. Missing required counterpart
+models or checkpoints fail preflight before API use. A baseline phase without a validated full-domain
+program stops visibly before target research. `MULTI_AGENT.md` describes commands and saved records.
 
 ## 2. Independent searches on trained and random checkpoints
 
@@ -84,8 +113,9 @@ must be specified by a weight-sampling or parameter-randomization procedure; "ra
 model independent of architecture and scale.
 
 The automatic single-agent global baseline does not implement this matched multi-agent experiment.
-Its additional exactness instruction, one-agent search and smaller reserved allowance differ from
-the target research procedure. A gain over its frozen program may be a generic optimization that
+Its additional exactness instruction, one-agent search and distinct resource allocation differ from
+the target research procedure. Its trained-checkpoint acceptance gates also differ from an entirely
+independent random-control research arm. A gain over its frozen program may be a generic optimization that
 this baseline search missed. Neither the automatic phase nor the original single-agent baseline
 runner establishes matched discovery objectives or total spending across research arms. An automatic
 matched-search runner and aggregate analysis remain separate future work.
@@ -108,8 +138,8 @@ automatically scheduled, and the final synthesis must not claim it occurred unle
 actually supplied. A separately specified destination model/checkpoint interface and aggregation would
 be needed for an automatic cross-adapter control audit.
 
-The automatic baseline phase evaluates the baseline program on control parameters; it does not
-evaluate the discovered target interpretations on those controls. Its validation receipts therefore
+Version 2 baseline validation evaluates the comparator on untrained and trained parameters; it does not
+evaluate the discovered target interpretations on those untrained controls. Its validation receipts therefore
 do not fill this transfer experiment's missing evidence.
 
 ## Regional discoveries need comparable populations
@@ -142,7 +172,9 @@ The final lead should identify the recorded global winner and explain regional f
 For each material claim, ask:
 
 - Was the candidate compared with the frozen global baseline on this same checkpoint and scope?
+- Did the comparator have full coverage and exact fidelity on that actual check, with matching inputs, prices and workload?
 - Was that baseline generated in the recorded single-agent phase or imported, and what validation passed?
+- Does the recorded policy include trained checkpoint acceptance, and were those outputs used only for pass/fail rather than reward ranking?
 - Was its fixed interpretation checked on another checkpoint, and which comparisons are absent?
 - Was an independent matched random-control search actually performed?
 - Is the explanation supported by measurements, a mathematical argument, or an independently checked

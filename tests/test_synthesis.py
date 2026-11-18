@@ -5,7 +5,7 @@ import hashlib
 
 import pytest
 
-from level1 import budget, multi_agent, run_config, synthesis
+from level1 import budget, lang, multi_agent, prompt, run_config, synthesis
 from level1.util import read_json, write_json
 
 
@@ -234,3 +234,141 @@ def test_summary_hygiene_neutralizes_operator_labels_and_preserves_discoveries(t
     assert read_json(path / "multi_agent/summary/evidence.json")["run_id"] == "OPERATOR_ONLY_LABEL"
     text = (path / "multi_agent/summary/prompt.md").read_text()
     assert "OPERATOR_ONLY_LABEL" not in text and "RESEARCH_DISCOVERY_MARKER" in text
+
+
+def test_baseline_only_has_no_paid_summary_or_summary_artifacts(tmp_path, monkeypatch):
+    cfg = {"orchestration": {"enabled": True, "mode": "baseline", "final_summary": True,
+                             "summary_fraction": 0.1}}
+    assert synthesis.enabled(cfg) is False
+    assert synthesis.fraction(cfg) == 0.0
+    monkeypatch.setattr(synthesis, "make", lambda *a, **k: pytest.fail("baseline-only mode cannot start a lead session"))
+    assert synthesis.run(tmp_path, cfg, None, {}, {}, {}, {}, [], out=lambda *_: None)["status"] == "disabled"
+    assert synthesis.report(tmp_path, cfg)["status"] == "disabled"
+    assert not (tmp_path / "multi_agent/summary").exists()
+    for mode in ("trained", "both"):
+        other = copy.deepcopy(cfg)
+        other["orchestration"]["mode"] = mode
+        assert synthesis.enabled(other)
+        assert synthesis.fraction(other) == 0.1
+
+
+def _receipt(*, reward=0.9, network="target", seed=7):
+    return {"status": "scored", "network": network, "prices": lang.PRICES, "reward": reward,
+            "reward_detail": {"name": "r_alpha", "params": {"alpha": 10.0}},
+            "inputs": {"mode": "sample", "n": 4, "seed": seed, "scope_id": "all"},
+            "scope": {"id": "all", "spec": {"kind": "all"}, "workload_size": 16},
+            "parts": {"coverage": 1.0, "fidelity": 1.0, "n_inputs": 4, "n_in_region": 4,
+                      "n_agree": 4, "workload_size": 16}}
+
+
+def test_comparison_gap_requires_exact_full_scope_comparator_but_candidate_can_be_partial():
+    candidate, comparison = _receipt(), _receipt(reward=0.7)
+    candidate["parts"].update(coverage=0.5, fidelity=0.5, n_in_region=2, n_agree=1)
+    result = synthesis.comparison_result(candidate, comparison)
+    assert result["valid"] is True and result["reward_gap"] == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize("changes", [
+    {"coverage": 0.5, "n_in_region": 2, "n_agree": 2},
+    {"fidelity": 0.75, "n_agree": 3},
+    {"n_inputs": 0, "n_in_region": 0, "n_agree": 0},
+])
+def test_incorrect_or_partial_comparator_withholds_gap_and_keeps_raw_arithmetic(changes):
+    candidate, comparison = _receipt(), _receipt(reward=0.7)
+    comparison["parts"].update(changes)
+    result = synthesis.comparison_result(candidate, comparison)
+    assert result["valid"] is False and result["reward_gap"] is None
+    assert result["reason"]
+    assert result["raw_reward_difference"] == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize("field,value", [("network", "different"), ("prices", None),
+                                         ("reward_detail", {"name": "r_alpha", "params": {"alpha": 1.0}}),
+                                         ("reward_detail", None),
+                                         ("inputs", {"mode": "sample", "n": 4, "seed": 9}),
+                                         ("scope", {"id": "different", "spec": {"kind": "all"}})])
+def test_unmatched_or_missing_conditions_withhold_comparison_gap(field, value):
+    candidate, comparison = _receipt(), _receipt(reward=0.7)
+    comparison[field] = value
+    assert synthesis.comparison_result(candidate, comparison)["reward_gap"] is None
+    assert synthesis.comparison_result(candidate, comparison)["valid"] is False
+
+
+def test_comparison_rejects_changed_workload_or_old_incomplete_receipts():
+    candidate, comparison = _receipt(), _receipt(reward=0.7)
+    comparison["parts"]["workload_size"] = 4096
+    assert "workload" in synthesis.comparison_result(candidate, comparison)["reason"]
+    old = {"status": "scored", "reward": 0.7, "parts": {"coverage": 1.0, "fidelity": 1.0}}
+    assert synthesis.comparison_result(candidate, old)["valid"] is False
+    assert synthesis.comparison_result(candidate, None)["reward_gap"] is None
+
+
+def _evidence_fixture(tmp_path, metadata):
+    cfg = run_config.load("config/pilot/lin-c.yaml", {"backend": "fake", "sandbox": "process"})
+    program = {"format": lang.FORMAT, "nodes": [{"op": "const", "dtype": "int", "value": 0}],
+               "predict": 0, "rule": None}
+    digest = lang.entry_hash(program)
+    candidate = {"id": "candidate", "entry_sha256": digest, "entry_path": "candidate.json",
+                 "role": "lead", "scope_id": "all", "scope": {"kind": "all"},
+                 "selection": _receipt(network=cfg["network"])}
+    frozen = {"global": "candidate", "regional": {}, "candidates": [candidate], "at": "frozen-time"}
+    archive = {"baseline_scores": {"all": _receipt(network=cfg["network"], reward=0.7)}}
+    audit = {"candidate_id": "candidate", "entry_sha256": digest, "scope": candidate["scope"],
+             "fresh": _receipt(network=cfg["network"], seed=11),
+             "fresh_baseline": _receipt(network=cfg["network"], reward=0.7, seed=11),
+             "held_out": _receipt(network=cfg["seed_check"]["network"], seed=13),
+             "held_out_baseline": _receipt(network=cfg["seed_check"]["network"], reward=0.7, seed=13)}
+    audit["fresh_baseline"]["parts"].update(fidelity=0.75, n_agree=3)
+    write_json(tmp_path / "candidate.json", program)
+    write_json(tmp_path / "multi_agent/baseline_entry.json", program)
+    write_json(tmp_path / "multi_agent/baseline.json", {"entry_sha256": digest, **metadata})
+    write_json(tmp_path / "multi_agent/state.json", {})
+    write_json(tmp_path / "multi_agent/audits/candidate.json", audit)
+    return cfg, synthesis.evidence(tmp_path, cfg, frozen, archive, [])
+
+
+@pytest.mark.parametrize("source,sessions", [("single_agent_search", 1), ("provided", 0)])
+def test_v2_acceptance_provenance_and_actual_scope_validity_are_separate(tmp_path, source, sessions):
+    _, evidence = _evidence_fixture(tmp_path, {
+        "source": source, "status": "established", "validation_policy_version": 2,
+        "trained_checkpoints_used_for_acceptance": True, "trained_rewards_used_for_selection": False,
+        "trained_receipts": {"PRIVATE_TRAINED_MODEL/network": {"model": "PRIVATE_TRAINED_MODEL"}},
+        "control_receipts": {"PRIVATE_CONTROL_NETWORK": {"network": "PRIVATE_CONTROL_NETWORK"}},
+    })
+    comparison = evidence["comparison"]
+    assert comparison["validation_established"] is True
+    assert comparison["validation_policy_version"] == 2
+    assert comparison["trained_checkpoints_used_for_acceptance"] is True
+    assert comparison["trained_rewards_used_for_selection"] is False
+    assert comparison["candidate_parameter_control_provided"] is False
+    assert comparison["search_sessions"] == sessions
+    assert comparison["baseline_search"] == (sessions == 1)
+    checks = evidence["candidates"][0]["comparisons"]
+    assert checks["development"]["valid"] is True
+    assert checks["fresh"]["valid"] is False and checks["fresh"]["reward_gap"] is None
+    assert checks["fresh"]["raw_reward_difference"] == pytest.approx(0.2)
+    assert checks["held_out"]["valid"] is True
+    view = prompt.summary_evidence(evidence)
+    assert view["comparison"]["additional_checkpoints_used_for_acceptance"] is True
+    assert view["comparison"]["additional_checkpoint_rewards_used_for_selection"] is False
+    assert "trained_checkpoints_used_for_acceptance" not in view["comparison"]
+    assert "PRIVATE_TRAINED_MODEL" not in str(view) and "PRIVATE_CONTROL_NETWORK" not in str(view)
+    assert "search_record" not in view["comparison"]
+    assert view["candidates"][0]["comparisons"] == checks
+    assert prompt.summary_evidence(view) == view
+
+
+def test_old_control_only_record_is_not_upgraded_by_current_defaults(tmp_path):
+    cfg, evidence = _evidence_fixture(tmp_path, {"source": "single_agent_search", "status": "established"})
+    assert cfg["orchestration"]["baseline_validation_version"] == 2
+    comparison = evidence["comparison"]
+    assert comparison["validation_policy_version"] == 1 and comparison["legacy_validation"] is True
+    assert comparison["trained_checkpoints_used_for_acceptance"] is False
+    assert "only search-family" in comparison["validation_note"]
+    assert "not been upgraded" in comparison["validation_note"]
+
+
+def test_legacy_import_is_not_claimed_to_have_parameter_validation(tmp_path):
+    _, evidence = _evidence_fixture(tmp_path, {"source": "provided", "status": "provided"})
+    assert evidence["comparison"]["validation_established"] is False
+    assert evidence["comparison"]["search_sessions"] == 0

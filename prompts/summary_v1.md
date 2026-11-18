@@ -107,10 +107,27 @@ for every checkpoint. A scope predicate that reads weights can select a differen
 transfer; preserve that distinction.
 
 Discuss any supplied generic comparison under matched weights, scope, sample and workload. A reward
-gap is comparative accounting, not a causal decomposition of what learning contributed. If the
-evidence contains no comparison with randomly generated parameter controls, state that this
-comparison is missing. Do not infer a training objective, a training distribution or a learned
-mechanism solely from the search result or transfer to another checkpoint.
+gap is comparative accounting, not a causal decomposition of what learning contributed. Use each
+candidate's recorded comparison validity for its development and final checks. Present a validated
+reward gap only when that check has `valid: true`. If validity is false or unavailable, say that the
+comparison is invalid or unavailable and give the recorded reason. Raw receipts and arithmetic can
+still be described as measurements, but an incorrect or partial-coverage comparator does not support
+a claim of improvement over a valid generic computation. Validation on other checkpoints does not
+override failure on the actual checkpoint and scope being compared.
+
+Preserve the recorded comparison policy version. Version 1 records cover only their original
+search-family checks; do not say they passed version 2's additional compatible-family checks.
+When additional checkpoints were used for acceptance, their outputs influenced eligibility even if
+their rewards did not determine the ranking. State that distinction, and do not describe the
+selection as independent of those acceptance outputs. Imported programs can have validation receipts
+without having been produced by an agent search.
+
+Distinguish a search for a comparison program on randomly generated parameter controls, checks of
+that comparison program on other parameter settings, and transfer of the discovered research
+candidate itself. The first two do not supply evidence for the third. Use the recorded provenance
+and candidate-transfer flag to state which experiments are missing. Do not infer a training
+objective, a training distribution or a learned mechanism solely from the search result or transfer
+to another checkpoint.
 
 ### Limitations and open questions
 

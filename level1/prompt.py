@@ -449,13 +449,24 @@ def summary_evidence(evidence: dict, *, include_discoveries: bool = True) -> dic
             item["development"] = receipt(candidate["development"], "the network")
         if "final_audits" in candidate:
             item["final_audits"] = audits(candidate["final_audits"])
+        if "comparisons" in candidate:
+            item["comparisons"] = {
+                label: pick(check, ("valid", "reason", "reward_gap", "raw_reward_difference"))
+                for label, check in candidate["comparisons"].items()}
         out["candidates"].append(item)
     supplied = evidence.get("comparison") or {}
     comparison = pick(supplied, ("provided", "random_weight_control_provided", "source", "search_sessions",
                                 "same_search_conditions", "validation_established", "validation_note",
-                                "independent_comparison_search", "candidate_parameter_control_provided"))
+                                "independent_comparison_search", "candidate_parameter_control_provided",
+                                "validation_policy_version", "legacy_validation", "selection_note",
+                                "additional_checkpoints_used_for_acceptance",
+                                "additional_checkpoint_rewards_used_for_selection"))
     if "baseline_search" in supplied:
         comparison["independent_comparison_search"] = supplied["baseline_search"]
+    if "trained_checkpoints_used_for_acceptance" in supplied:
+        comparison["additional_checkpoints_used_for_acceptance"] = supplied["trained_checkpoints_used_for_acceptance"]
+    if "trained_rewards_used_for_selection" in supplied:
+        comparison["additional_checkpoint_rewards_used_for_selection"] = supplied["trained_rewards_used_for_selection"]
     comparison["development"] = {key: receipt(value, "the network") for key, value in supplied.get("development", {}).items()}
     generated = supplied.get("source") == "single_agent_search"
     if "program" in supplied:
