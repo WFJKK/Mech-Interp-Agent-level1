@@ -28,11 +28,7 @@ a candidate claiming only a subset retains that subset's conditional coverage. P
 between the assigned domain and the entry's own region test. Each domain has its own comparison of
 candidates. Do not rank claims on different domains solely by their conditional rewards.
 
-You can declare a narrower evaluation domain with `submit_entry(..., scope=...)`. The evaluator
-intersects it with the assignment, freezes that domain, and retains an independent conditional score
-and its probability in the original distribution. Each claim consumes one submission. An entry's
-region test alone does not declare such a separate task; it still determines coverage inside the
-domain being evaluated. Neither operation changes the reward or operation prices.
+{{CLAIM_NOTE}}
 
 ## The network
 
@@ -46,8 +42,7 @@ The original input distribution is:
 
 {{DATA_SET}}
 
-The regional distribution is this distribution conditioned on the assigned domain. The original
-distribution remains the task for global integration.
+{{DISTRIBUTION_NOTE}}
 
 ## Entries
 
@@ -65,20 +60,11 @@ The evaluator measures coverage, fidelity and cost within the assigned domain, a
 
 {{WORKLOAD_NOTE}}
 
-The runtime includes the entry's region test on every task input and its prediction on covered inputs.
-Setup is charged once over the declared workload. Dividing the whole cost by conditional coverage gives
-the cost per covered input. The membership of an externally assigned domain is known for this regional
-task. A global composition must implement and pay for its own routing and any shared setup.
-For a narrower claim, the configured workload policy is unchanged: an explicitly fixed workload stays
-fixed; otherwise the claim's known finite support sets its workload. Unknown support requires a workload
-already declared by the run. Each receipt reports this value separately from the verification count.
+{{COST_DOMAIN_NOTE}}
 
 {{SAMPLE_NOTE}}
 
-Final candidates are locked before evaluation on fresh inputs and the second network. Those results
-are not returned to researchers and do not select the development winners. A successful regional claim
-is retained even if it does not improve the global program. Numerical agreement is measured evidence;
-state separately any derivation from weights, counterexamples, or additional mechanistic evidence.
+{{FINAL_CHECK_NOTE}}
 {{EXACT_NOTE}}
 
 ## Tools and this session's allocation
@@ -87,13 +73,8 @@ state separately any derivation from weights, counterexamples, or additional mec
 
 - `run_python(code)`: up to {{PYTHON_CALLS}} calls, {{PYTHON_SECONDS}} seconds per call. The code has
   `weights`, `info`, `np`, `lv1`, `model`, `graph`, `entries`, `save_entry`, `reference_entry`,
-  `network_outputs`, and `measure`. The last two use the assigned domain by default; optional `scope=...`
-  tests a narrower claim under the same policy. These local measurements spend no formal submission and
-  cannot satisfy the integration checkpoint.
-- `submit_entry(name, claimed_fidelity, expected_fidelity_other=None, scope=None, scope_entry_name=None)`:
-  up to {{SUBMISSIONS}} submissions in total, including checkpoints and all narrower claims. `scope` can
-  have kind `all`, `lengths`, `predicate`, or `intersection` with a list named `scopes`. For a predicate,
-  pass a saved entry defining its region test as `scope_entry_name`, or include that entry in the scope.
+  `network_outputs`, and `measure`. {{LOCAL_MEASUREMENT_NOTE}}
+{{SUBMISSION_TOOL_NOTE}}
 - Entries may use up to {{MAX_NODES}} nodes and {{MAX_CONST}} literal numbers.
 - Evaluation has a time limit of {{VERIFIER_SECONDS}} seconds per submitted entry.
 - Tool replies include remaining quotas, checkpoint state when enabled, and the current attempt's
@@ -103,9 +84,7 @@ state separately any derivation from weights, counterexamples, or additional mec
 
 {{ASSIGNMENT_NOTE}}
 
-These allocations are a share of one experiment budget. Saved entries and the checked archive are the
-shared record; conversations are separate. A comparison entry, when provided, is available in `entries`
-as `comparison_entry` and is evaluated under the same conditions as other entries on this domain.
+{{SHARED_RECORD_NOTE}}
 
 ## Checked archive
 

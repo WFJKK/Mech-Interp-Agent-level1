@@ -252,6 +252,65 @@ def research_deliverable(cfg: dict) -> str:
             "experimental results and concrete assignments so a later investigator can test and submit them.")
 
 
+def research_domain_notes(role: str, submissions: int) -> dict:
+    """Describe only the domain controls exposed to this session's role."""
+    if role in ("baseline", "comparison"):
+        return {
+            "CLAIM_NOTE": ("This session evaluates the complete assigned domain. Submit a program with full coverage; "
+                           "the task cannot be replaced by a narrower evaluation domain. An entry's region test "
+                           "still contributes to its measured coverage and cost."),
+            "DISTRIBUTION_NOTE": "The assigned domain is the complete original input distribution for this session.",
+            "COST_DOMAIN_NOTE": ("The runtime includes the entry's region test and prediction. The complete program "
+                                 "must pay for any routing and shared setup. Setup is charged once over the declared "
+                                 "workload. Each receipt reports that workload separately from the verification count. "
+                                 "Changing a program does not change the workload policy or operation prices."),
+            "FINAL_CHECK_NOTE": ("After this session, the submitted programs are checked unchanged on other parameter "
+                                 "settings of the same definition and sizes. Those checks select one frozen comparison "
+                                 "program and are not returned to this session. Numerical agreement is measured evidence; "
+                                 "state separately any mathematical justification and numerical limitations."),
+            "LOCAL_MEASUREMENT_NOTE": ("Use `network_outputs()` and `measure(entry)` on the complete assigned domain.\n"
+                                       "  These local measurements spend no formal submission and cannot satisfy the required checkpoint."),
+            "SUBMISSION_TOOL_NOTE": (
+                "- `submit_entry(name, claimed_fidelity, expected_fidelity_other=None)`:\n"
+                f"  up to {submissions} submissions in total, including the checkpoint. Each submission is evaluated\n"
+                "  on the complete assigned domain; the program must cover it and reproduce the network's output."),
+            "SHARED_RECORD_NOTE": ("These allocations are a share of one experiment budget. This independent session "
+                                   "has its own workspace and saved programs. Its formal submissions are the record "
+                                   "used for the subsequent checks and selection of one frozen comparison program."),
+        }
+    return {
+        "CLAIM_NOTE": """You can declare a narrower evaluation domain with `submit_entry(..., scope=...)`. The evaluator
+intersects it with the assignment, freezes that domain, and retains an independent conditional score
+and its probability in the original distribution. Each claim consumes one submission. An entry's
+region test alone does not declare such a separate task; it still determines coverage inside the
+domain being evaluated. Neither operation changes the reward or operation prices.""",
+        "DISTRIBUTION_NOTE": """The regional distribution is this distribution conditioned on the assigned domain. The original
+distribution remains the task for global integration.""",
+        "COST_DOMAIN_NOTE": """The runtime includes the entry's region test on every task input and its prediction on covered inputs.
+Setup is charged once over the declared workload. Dividing the whole cost by conditional coverage gives
+the cost per covered input. The membership of an externally assigned domain is known for this regional
+task. A global composition must implement and pay for its own routing and any shared setup.
+For a narrower claim, the configured workload policy is unchanged: an explicitly fixed workload stays
+fixed; otherwise the claim's known finite support sets its workload. Unknown support requires a workload
+already declared by the run. Each receipt reports this value separately from the verification count.""",
+        "FINAL_CHECK_NOTE": """Final candidates are locked before evaluation on fresh inputs and the second network. Those results
+are not returned to researchers and do not select the development winners. A successful regional claim
+is retained even if it does not improve the global program. Numerical agreement is measured evidence;
+state separately any derivation from weights, counterexamples, or additional mechanistic evidence.""",
+        "LOCAL_MEASUREMENT_NOTE": """The last two use the assigned domain by default; optional `scope=...`
+  tests a narrower claim under the same policy. These local measurements spend no formal submission and
+  cannot satisfy the integration checkpoint.""",
+        "SUBMISSION_TOOL_NOTE": (
+            "- `submit_entry(name, claimed_fidelity, expected_fidelity_other=None, scope=None, scope_entry_name=None)`:\n"
+            f"  up to {submissions} submissions in total, including checkpoints and all narrower claims. `scope` can\n"
+            "  have kind `all`, `lengths`, `predicate`, or `intersection` with a list named `scopes`. For a predicate,\n"
+            "  pass a saved entry defining its region test as `scope_entry_name`, or include that entry in the scope."),
+        "SHARED_RECORD_NOTE": """These allocations are a share of one experiment budget. Saved entries and the checked archive are the
+shared record; conversations are separate. A comparison entry, when provided, is available in `entries`
+as `comparison_entry` and is evaluated under the same conditions as other entries on this domain.""",
+    }
+
+
 def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
                 archive_summary, history) -> str:
     """The research prompt uses the same language and reward, with an explicit conditional domain."""
@@ -307,6 +366,7 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
         "API_ALLOCATION": research_allocation(cfg), "DELIVERABLE_NOTE": research_deliverable(cfg),
         "ASSIGNMENT_NOTE": ASSIGNMENT_NOTE.format(count=count) if role == "lead" and count else "No further investigations can be scheduled in this session.",
         "ARCHIVE": archive_summary or "No checked submissions yet.", "HISTORY": notes or "No earlier research notes.",
+        **research_domain_notes(role, int(cfg["session"]["submissions"])),
     }
     text = (TEMPLATES / "research_v1.md").read_text()
     for key, value in fields.items():

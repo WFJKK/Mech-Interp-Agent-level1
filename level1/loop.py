@@ -232,7 +232,7 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         raise RuntimeError(f"{path} is a run already: resume it, or give the config another run_id")
     model = load_model(cfg["model"])
     model.network(cfg["network"])
-    control_cfg = global_baseline.config_for(cfg) if global_baseline.enabled(cfg) else None
+    control_cfg = global_baseline.preflight(cfg) if global_baseline.enabled(cfg) else None
     control_model = load_model(control_cfg["model"]) if control_cfg is not None else None
     second = (cfg.get("seed_check") or {}).get("network")
     if second:

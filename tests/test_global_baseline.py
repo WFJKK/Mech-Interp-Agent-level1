@@ -2,10 +2,11 @@
 
 import copy
 
+import numpy as np
 import pytest
 
 from level1 import global_baseline, lang, run_config
-from level1.networks import load_model
+from level1.networks import Model, ModelError, load_model
 from level1.util import read_json, write_json
 
 
@@ -101,6 +102,89 @@ def test_absent_control_fails_preflight_instead_of_using_target_weights(tmp_path
     cfg = config(tmp_path, model="models/lin-a", network="lin-a-s0")
     with pytest.raises(RuntimeError, match="no baseline model"):
         global_baseline.config_for(cfg)
+
+
+@pytest.mark.parametrize("network_ids", [
+    ["duplicate", "duplicate", "third", "fourth"],
+    ["first", "", "third", "fourth"],
+    ["first", "  ", "third", "fourth"],
+    ["first", None, "third", "fourth"],
+    ["first", 2, "third", "fourth"],
+])
+def test_invalid_control_ids_fail_configuration_before_a_session(tmp_path, monkeypatch, network_ids):
+    cfg = config(tmp_path)
+    original_load = global_baseline.load_model
+
+    def invalid_ids(path):
+        model = original_load(path)
+        if model.name == "lin-e":
+            model.config["networks"] = [{"id": value} for value in network_ids]
+        return model
+
+    monkeypatch.setattr(global_baseline, "load_model", invalid_ids)
+    with pytest.raises(RuntimeError, match="(nonempty network ID|IDs must be distinct)"):
+        global_baseline.config_for(cfg)
+
+
+@pytest.mark.parametrize("value", [0, -1, True, 1.5, "3", None])
+def test_invalid_candidate_limit_fails_before_control_selection(tmp_path, monkeypatch, value):
+    cfg = config(tmp_path)
+    cfg["baseline"]["candidates"] = value
+
+    def no_model_lookup(*args, **kwargs):
+        pytest.fail("the invalid candidate limit should fail before selecting a control model")
+
+    monkeypatch.setattr(global_baseline.baseline, "config_for", no_model_lookup)
+    with pytest.raises(RuntimeError, match="baseline.candidates must be a positive whole number"):
+        global_baseline.config_for(cfg)
+
+
+def test_preflight_loads_every_declared_control_checkpoint_sequentially(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    visited = []
+
+    def load_weights(model, network):
+        visited.append((model.name, network))
+        return {"parameter": np.array([len(visited)], dtype=np.float64)}
+
+    monkeypatch.setattr(Model, "load_weights", load_weights)
+    control_cfg = global_baseline.preflight(cfg)
+    assert control_cfg == global_baseline.config_for(cfg)
+    assert visited == [("lin-e", f"lin-e-s{i}") for i in range(6)]
+
+
+def test_unusable_confirmation_weights_fail_preflight_before_the_search(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    visited = []
+
+    def load_weights(model, network):
+        visited.append(network)
+        if network == "lin-e-s3":
+            raise ModelError("the confirmation weights do not match their manifest")
+        return {"parameter": np.array([len(visited)], dtype=np.float64)}
+
+    monkeypatch.setattr(Model, "load_weights", load_weights)
+    with pytest.raises(ModelError, match="confirmation weights"):
+        global_baseline.preflight(cfg)
+    assert visited == ["lin-e-s0", "lin-e-s1", "lin-e-s2", "lin-e-s3"]
+
+
+def test_different_checkpoint_manifests_cannot_repeat_identical_parameter_values(tmp_path, monkeypatch):
+    cfg = config(tmp_path)
+    visited = []
+
+    def load_weights(model, network):
+        visited.append(network)
+        value = 1 if network == "lin-e-s5" else len(visited)
+        # Each declared checkpoint has its own filename and file hash. Compare
+        # the actual arrays, including when dictionary insertion order changes.
+        values = {"a": np.array([value], dtype=np.float64), "b": np.array([[value]], dtype=np.float64)}
+        return dict(reversed(list(values.items()))) if network == "lin-e-s5" else values
+
+    monkeypatch.setattr(Model, "load_weights", load_weights)
+    with pytest.raises(RuntimeError, match="repeat the same parameter values"):
+        global_baseline.preflight(cfg)
+    assert visited == [f"lin-e-s{i}" for i in range(6)]
 
 
 @pytest.mark.parametrize("changed", ["sizes", "input_space", "weights", "data_set", "definition"])

@@ -41,6 +41,11 @@ def test_baseline_prompt_is_global_generic_and_does_not_disclose_control_identit
     assert "every evaluated input" in text
     assert "No further investigations can be scheduled" in text
     assert "Your role in this session: **comparison**" in text
+    assert "scope=" not in text and "scope_entry_name" not in text
+    assert "You can declare a narrower evaluation domain" not in text
+    assert "`submit_entry(name, claimed_fidelity, expected_fidelity_other=None)`" in text
+    assert "Use `network_outputs()` and `measure(entry)` on the complete assigned domain" in text
+    assert "Those checks select one frozen comparison program" in text
     assert model.name not in text and cfg["network"] not in text
     reply = session.run_python("import json\nprint(json.dumps(info, sort_keys=True))")
     assert reply["status"] == "ok"
@@ -49,6 +54,19 @@ def test_baseline_prompt_is_global_generic_and_does_not_disclose_control_identit
                    "session tool descriptions": json.dumps(session.TOOLS),
                    "session info": json.dumps(session.info()), "tool reply": json.dumps(reply)},
                   loop.forbidden_strings(cfg, model))
+
+
+@pytest.mark.parametrize("role", ["lead", "regional"])
+def test_research_roles_keep_their_narrower_domain_tools(tmp_path, role):
+    _, cfg, model = make_session(tmp_path)
+    cfg["research_task"] = {"role": role, "max_assignments": 0, "cycle": 1}
+    cfg["exact_on_any_weights"] = False
+    text = prompt.build_multi(cfg, model, 0, role, "Investigate the assigned domain.", "", [])
+    assert "You can declare a narrower evaluation domain with `submit_entry(..., scope=...)`" in text
+    assert "optional `scope=...`" in text
+    assert "expected_fidelity_other=None, scope=None, scope_entry_name=None" in text
+    assert "pass a saved entry defining its region test as `scope_entry_name`" in text
+    assert "are not returned to researchers and do not select the development winners" in text
 
 
 def test_baseline_tools_reject_regional_assignments_and_claims_without_spending(tmp_path):

@@ -5,7 +5,7 @@ import pytest
 from level1 import global_baseline, lang, loop, multi_agent, regions, run_config
 from level1.backends import StopRun
 from level1.backends.fake import FakeBackend
-from level1.networks import load_model
+from level1.networks import Model, ModelError, load_model
 from level1.util import read_json, write_json
 
 
@@ -256,6 +256,38 @@ def test_missing_control_fails_start_before_backend_or_run_creation(tmp_path, mo
     monkeypatch.setattr(loop, "make", no_backend)
     with pytest.raises(RuntimeError, match="no baseline model"):
         loop.start(cfg, fake_scripts=[], out=lambda *_: None)
+    assert not (run_config.run_path(cfg) / "run.json").exists()
+
+
+@pytest.mark.parametrize("broken", ["missing", "corrupt", "duplicate"])
+def test_unusable_later_control_weights_fail_before_backend_construction(tmp_path, monkeypatch, broken):
+    cfg = config(tmp_path)
+    original_load = Model.load_weights
+    visited = []
+    first_weights = {}
+
+    def load_weights(model, network):
+        visited.append((model.name, network))
+        if model.name == "lin-e" and network == "lin-e-s5":
+            if broken == "missing":
+                raise FileNotFoundError("the confirmation checkpoint is absent")
+            if broken == "duplicate":
+                return {name: value.copy() for name, value in first_weights.items()}
+            model.network(network)["sha256"] = "0" * 64
+        weights = original_load(model, network)
+        if model.name == "lin-e" and network == "lin-e-s0":
+            first_weights.update(weights)
+        return weights
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("all control checkpoints must validate before backend construction")
+
+    monkeypatch.setattr(Model, "load_weights", load_weights)
+    monkeypatch.setattr(loop, "make", no_backend)
+    error = {"missing": FileNotFoundError, "corrupt": ModelError, "duplicate": RuntimeError}[broken]
+    with pytest.raises(error):
+        loop.start(cfg, fake_scripts=[], out=lambda *_: None)
+    assert visited == [("lin-e", f"lin-e-s{i}") for i in range(6)]
     assert not (run_config.run_path(cfg) / "run.json").exists()
 
 

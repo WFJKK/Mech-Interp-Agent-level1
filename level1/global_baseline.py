@@ -16,6 +16,8 @@ import math
 import os
 from pathlib import Path
 
+import numpy as np
+
 from . import baseline, lang
 from .networks import load_model
 from .util import now, read_json, write_json
@@ -56,16 +58,43 @@ def _architecture(model) -> str:
     return ast.dump(tree, include_attributes=False)
 
 
+def _candidate_limit(cfg: dict) -> int:
+    options = cfg.get("baseline") or {}
+    limit = options.get("candidates", 3) if isinstance(options, dict) else None
+    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+        raise RuntimeError("baseline.candidates must be a positive whole number")
+    return limit
+
+
+def _control_networks(model) -> list[str]:
+    manifests = model.config.get("networks")
+    if not isinstance(manifests, list) or len(manifests) < 4:
+        raise RuntimeError("the global baseline control needs at least four distinct checkpoints")
+    names = [row.get("id") if isinstance(row, dict) else None for row in manifests]
+    if any(not isinstance(name, str) or not name.strip() for name in names):
+        raise RuntimeError("every global baseline control checkpoint needs a nonempty network ID")
+    if len(set(names)) != len(names):
+        raise RuntimeError("global baseline control network IDs must be distinct")
+    return names
+
+
 def config_for(cfg: dict) -> dict:
     """Preflight the declared control and return an isolated single-session config.
 
-    This deliberately has no fallback to target weights or guessed initialization.
+    This uses the declared control checkpoints without substituting target weights.
     The existing control-model declaration supplies at least four checkpoints.
     """
+    _candidate_limit(cfg)
     source = copy.deepcopy(cfg)
     source.setdefault("orchestration", {})["enabled"] = False
-    control_cfg = baseline.config_for(source)
+    try:
+        control_cfg = baseline.config_for(source)
+    except KeyError as exc:
+        if exc.args == ("id",):
+            raise RuntimeError("every global baseline control checkpoint needs a nonempty network ID") from exc
+        raise
     target, control = load_model(cfg["model"]), load_model(control_cfg["model"])
+    _control_networks(control)
     differences = []
     if _architecture(target) != _architecture(control):
         differences.append("network definition")
@@ -80,6 +109,28 @@ def config_for(cfg: dict) -> dict:
     control_cfg["verifier"]["scope"] = dict(ALL)
     control_cfg["verifier"]["sample_seed"] = int(cfg["orchestration"]["development_seed"])
     control_cfg.pop("research_task", None)
+    return control_cfg
+
+
+def preflight(cfg: dict) -> dict:
+    """Validate every control weight file before starting any paid session."""
+    control_cfg = config_for(cfg)
+    control = load_model(control_cfg["model"])
+    seen = {}
+    for network in _control_networks(control):
+        weights = control.load_weights(network)
+        digest = hashlib.sha256()
+        for name in sorted(weights):
+            value = np.ascontiguousarray(weights[name])
+            digest.update(json.dumps([name, list(value.shape), value.dtype.str]).encode())
+            digest.update(b"\0")
+            if value.size:
+                digest.update(memoryview(value).cast("B"))
+        fingerprint = digest.hexdigest()
+        if fingerprint in seen:
+            raise RuntimeError("the global baseline controls repeat the same parameter values: "
+                               f"{seen[fingerprint]} and {network}; distinct control settings are required")
+        seen[fingerprint] = network
     return control_cfg
 
 
@@ -141,14 +192,12 @@ def freeze(path: Path, cfg: dict, control_model, plan: dict, record: dict, out=p
     control_cfg = config_for(cfg)
     if control_model.name != load_model(control_cfg["model"]).name:
         raise RuntimeError("the baseline session used a different control model than its declared configuration")
-    networks = [network["id"] for network in control_model.config["networks"]]
+    networks = _control_networks(control_model)
     first, second = control_cfg["network"], control_cfg["seed_check"]["network"]
     others = [network for network in networks if network not in (first, second)]
     if len(set(networks)) != len(networks) or first == second or len(others) < 2:
         raise RuntimeError("the global baseline needs distinct search, selection and confirmation checkpoints")
-    limit = (cfg.get("baseline") or {}).get("candidates", 3)
-    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
-        raise RuntimeError("baseline.candidates must be a positive whole number")
+    limit = _candidate_limit(cfg)
     identity = {"session_id": plan["id"], "control": _model_identity(control_model),
                 "verifier": control_cfg["verifier"], "reward": control_cfg["reward"],
                 "entry_limits": control_cfg["entry"], "prices": lang.PRICES,
