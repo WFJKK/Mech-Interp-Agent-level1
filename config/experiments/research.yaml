@@ -11,6 +11,6 @@ orchestration:
   final_summary: true
   initial_regions:
     - scope: {kind: all}
-      task: Investigate simple computational structure and identify input regions with useful special explanations.
+      task: Investigate simple computational structure and identify input regions with useful mechanistic explanations; retain strong interpretations even when their mechanisms remain unclear.
     - scope: {kind: all}
-      task: Independently test competing explanations, exceptions, and computations that several interpretations could share.
+      task: Independently test competing mechanistic explanations, exceptions, and computations that several interpretations could share; distinguish supported findings from hypotheses and unresolved questions.

@@ -105,6 +105,10 @@ End with these headings:
     ## What the network does
     (the interpretation, its scope, supporting evidence and unresolved failures)
 
+    ## Mechanistic understanding
+    (how the target's weights and internal computations explain the behavior; distinguish supported
+     explanations, hypotheses and unresolved questions, and say when the mechanism remains unclear)
+
     ## Experiments and evidence
     (a concise summary of reproducible experiments, results, artifact references and failed hypotheses)
 
@@ -116,3 +120,6 @@ End with these headings:
 
     ## Next
     (the most useful next investigations and opportunities for shared computation)
+
+These notes report the current understanding of the supplied target. An incomplete mechanistic
+explanation does not disqualify a strong executable interpretation or change its measured reward.

@@ -51,6 +51,15 @@ from its investigation. If it makes no assignments, two generic full-domain ques
 fallback: search for useful special explanations, and independently examine alternatives and exceptions.
 A regional result does not need to improve the global score to be retained.
 
+Regional researchers explicitly seek mechanistic explanations relating behavior to the supplied
+network's weights and internal computations. The lead also seeks an overall mechanistic understanding:
+shared mechanisms, connections between regional findings and internal reasons for differences in
+behavior. These investigations take place within the existing research allowances and submission
+checkpoints. Strong interpretations remain eligible when their mechanisms are unclear; mechanistic
+understanding adds no acceptance gate, score term or archive-retention criterion. Closing notes
+separate supported explanations, hypotheses and unresolved questions. The instructions remain
+model-neutral and supply no expected behavior or preferred input partition.
+
 The shared research profile defaults to `both`. Its single global baseline agent searches on
 the model's declared parameter-control counterpart, freezes one validated full-domain program,
 and reuses that program for comparisons on the target's global and regional domains. There are
@@ -542,7 +551,11 @@ unverified evidence. The summary uses the same configured model and account as t
 The requested synthesis explains:
 
 - The best global program found under the declared reward, its computation and source of savings.
+- The best supported overall mechanistic understanding, including shared mechanisms and internal
+  reasons for differences between regions, with unresolved connections stated explicitly.
 - Useful regional interpretations, including findings that did not improve global composition.
+- The mechanistic explanation for each material region when supported, or a clear statement that
+  the mechanism remains unclear without dismissing the measured interpretation.
 - Each material region's scope probability, conditional coverage, fidelity, cost and workload.
 - Supporting measurements, recorded failures, assumptions, unresolved hypotheses and proof status.
 - Which arguments appear valid for general parameters and which depend on particular parameter values.

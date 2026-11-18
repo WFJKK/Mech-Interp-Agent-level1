@@ -81,6 +81,17 @@ If no global candidate was locked, state that directly; do not promote a regiona
 the gap. Explain the program's computation, routing, setup, reuse, exceptions and source of savings.
 Identify which steps read the current weights and which claims depend on their particular values.
 
+### Overall mechanistic understanding
+
+Give the best supported overall mechanistic account of the supplied target network. Connect the
+regional findings, identify shared mechanisms, and explain how differences in internal computation
+produce different behaviors across regions, as far as the frozen evidence supports. Relate the
+account to the network's weights and internal computations rather than only describing the replacement
+program. Distinguish supported explanations, hypotheses and unresolved questions; if no supported
+unifying explanation is available, say so. Recorded agreement and efficiency remain useful findings
+when a mechanism is unclear. Mechanistic understanding is not an additional score or a reason to
+reject, downgrade or replace a frozen candidate. Do not invent a mechanism to complete the narrative.
+
 ### Regional findings
 
 Explain the useful regional interpretations separately from the global winner, including findings
@@ -88,6 +99,8 @@ that did not improve global composition. For each material claim, identify the c
 outer scope probability, conditional coverage, observed fidelity, any bound used, cost and workload.
 Use a compact table when it helps comparison. State missing quantities instead of inventing them.
 Explain interactions or shared computations only as far as the supplied programs and records support.
+For each material region, give the supported mechanistic explanation or state that it remains unclear.
+Keep behavior, computational savings and evidence about the underlying mechanism distinct.
 
 ### Evidence and counterexamples
 
