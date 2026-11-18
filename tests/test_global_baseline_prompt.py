@@ -167,13 +167,14 @@ def test_generated_comparison_summary_preserves_neutral_provenance_and_masks_onl
     assert prompt.summary_evidence(view) == view
     comparison = view["comparison"]
     for key in ("source", "search_sessions", "same_search_conditions", "validation_established", "validation_note",
-                "candidate_parameter_control_provided", "random_weight_control_provided"):
+                "candidate_parameter_control_provided"):
         assert comparison[key] == raw["comparison"][key]
+    assert "random_weight_control_provided" not in comparison
     assert comparison["independent_comparison_search"] is True
     assert "baseline_search" not in comparison
     assert comparison["program"] == program
     assert comparison["provenance"] == (
-        "A frozen full-domain comparison program produced by one independent session and checked on other parameter settings.")
+        "A frozen full-domain comparison program produced by one independent session.")
     assert "PRIVATE" not in str(view) and "lin-e-s0" not in str(view)
     assert "control_model" not in comparison
     masked = prompt.summary_evidence(raw, include_discoveries=False)

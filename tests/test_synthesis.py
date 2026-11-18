@@ -87,7 +87,10 @@ def test_summary_runs_after_frozen_audits_with_no_research_tools(completed):
         assert candidate["final_audits"]["fresh"]["network"] == cfg["network"]
         assert candidate["final_audits"]["held_out"]["network"] == cfg["seed_check"]["network"]
     assert snapshot["comparison"]["provided"] is False
-    assert snapshot["comparison"]["random_weight_control_provided"] is False
+    assert snapshot["comparison"]["baseline_search"] is False
+    assert snapshot["comparison"]["search_sessions"] == 0
+    assert snapshot["comparison"]["candidate_parameter_control_provided"] is False
+    assert "random_weight_control_provided" not in snapshot["comparison"]
     assert "UNTRUSTED_NOTE_MARKER" in str(snapshot["prior_notes"])
     assert len(multi_agent.read_archive(path)["candidates"]) == 2
 
@@ -341,6 +344,7 @@ def test_v2_acceptance_provenance_and_actual_scope_validity_are_separate(tmp_pat
     assert comparison["trained_checkpoints_used_for_acceptance"] is True
     assert comparison["trained_rewards_used_for_selection"] is False
     assert comparison["candidate_parameter_control_provided"] is False
+    assert "random_weight_control_provided" not in comparison
     assert comparison["search_sessions"] == sessions
     assert comparison["baseline_search"] == (sessions == 1)
     checks = evidence["candidates"][0]["comparisons"]
@@ -349,6 +353,9 @@ def test_v2_acceptance_provenance_and_actual_scope_validity_are_separate(tmp_pat
     assert checks["fresh"]["raw_reward_difference"] == pytest.approx(0.2)
     assert checks["held_out"]["valid"] is True
     view = prompt.summary_evidence(evidence)
+    assert view["comparison"]["independent_comparison_search"] == (sessions == 1)
+    assert view["comparison"]["candidate_parameter_control_provided"] is False
+    assert "random_weight_control_provided" not in view["comparison"]
     assert view["comparison"]["additional_checkpoints_used_for_acceptance"] is True
     assert view["comparison"]["additional_checkpoint_rewards_used_for_selection"] is False
     assert "trained_checkpoints_used_for_acceptance" not in view["comparison"]
@@ -372,3 +379,25 @@ def test_legacy_import_is_not_claimed_to_have_parameter_validation(tmp_path):
     _, evidence = _evidence_fixture(tmp_path, {"source": "provided", "status": "provided"})
     assert evidence["comparison"]["validation_established"] is False
     assert evidence["comparison"]["search_sessions"] == 0
+
+
+@pytest.mark.parametrize("source,search", [("single_agent_search", True), ("provided", False)])
+@pytest.mark.parametrize("legacy_control_flag", [False, True])
+def test_legacy_control_flag_cannot_override_comparison_search_provenance(source, search, legacy_control_flag):
+    raw = {"comparison": {"provided": True, "source": source, "baseline_search": search,
+                          "search_sessions": int(search), "validation_established": False,
+                          "same_search_conditions": False,
+                          "candidate_parameter_control_provided": False,
+                          "random_weight_control_provided": legacy_control_flag}}
+    before = copy.deepcopy(raw)
+    view = prompt.summary_evidence(raw)
+    comparison = view["comparison"]
+    assert comparison["independent_comparison_search"] is search
+    assert comparison["search_sessions"] == int(search)
+    assert comparison["validation_established"] is False
+    assert comparison["same_search_conditions"] is False
+    assert comparison["candidate_parameter_control_provided"] is False
+    assert "random_weight_control_provided" not in comparison
+    assert "checked on other parameter settings" not in comparison["provenance"]
+    assert prompt.summary_evidence(view) == view
+    assert raw == before

@@ -559,6 +559,12 @@ distinguishes the single-agent generic search from a matched
 multi-agent control and from transferring the discovered program to other parameters. Agreement on
 another checkpoint does not by itself identify a learned mechanism.
 
+Comparison-search provenance and research-candidate control evidence are separate fields. A false
+candidate-control flag means that no such candidate evaluation was supplied; it does not negate a
+recorded independent comparison search. New evidence omits the ambiguous legacy control flag, and
+the prompt projection ignores it in older evidence snapshots without changing the saved records.
+Existing completed narratives are preserved and are not regenerated automatically.
+
 The synthesis session exposes no tools or MCP servers. It cannot execute code, submit entries, assign
 regions or change the archive. Its output is commentary with evidence references, not a certificate.
 `report.md` links the narrative, and `report.json` records its status and completed text.

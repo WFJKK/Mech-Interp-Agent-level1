@@ -122,12 +122,17 @@ their rewards did not determine the ranking. State that distinction, and do not 
 selection as independent of those acceptance outputs. Imported programs can have validation receipts
 without having been produced by an agent search.
 
-Distinguish a search for a comparison program on randomly generated parameter controls, checks of
-that comparison program on other parameter settings, and transfer of the discovered research
-candidate itself. The first two do not supply evidence for the third. Use the recorded provenance
-and candidate-transfer flag to state which experiments are missing. Do not infer a training
-objective, a training distribution or a learned mechanism solely from the search result or transfer
-to another checkpoint.
+Distinguish an independent search for a comparison program, checks of that comparison program on
+other parameter settings, and transfer of the discovered research candidate itself. Use
+`independent_comparison_search` and `search_sessions` to state whether a comparison search occurred;
+use the validation fields for what its program passed. `same_search_conditions: false` means the
+search allocation differed from the research team's, not that the search was absent.
+`candidate_parameter_control_provided: false` means no separate parameter-control evaluation of the
+research candidates was supplied; it does not mean that no comparison search occurred. The search
+and its validation do not supply evidence for candidate transfer. Describe the search-family
+parameter origin only when the evidence supplies it; a missing origin label does not establish
+that an experiment was absent. Do not infer a training objective, a training distribution or a
+learned mechanism solely from the search result or transfer to another checkpoint.
 
 ### Limitations and open questions
 

@@ -117,7 +117,7 @@ def evidence(path: Path, cfg: dict, frozen: dict, archive: dict, history: list[d
     comparison_path = path / "multi_agent" / "baseline_entry.json"
     comparison = {"provided": comparison_path.exists(),
                   "development": copy.deepcopy(archive.get("baseline_scores", {})),
-                  "random_weight_control_provided": False,
+                  "baseline_search": False, "search_sessions": 0,
                   "candidate_parameter_control_provided": False}
     if comparison["provided"]:
         comparison["program"] = read_json(comparison_path)

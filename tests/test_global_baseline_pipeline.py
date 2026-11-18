@@ -144,7 +144,7 @@ def test_final_checks_and_synthesis_include_frozen_comparisons_with_honest_prove
     assert comparison["source"] == "single_agent_search" and comparison["search_sessions"] == 1
     assert comparison["baseline_search"] and not comparison["same_search_conditions"]
     assert comparison["candidate_parameter_control_provided"] is False
-    assert comparison["random_weight_control_provided"] is False
+    assert "random_weight_control_provided" not in comparison
     assert "not a universal proof" in comparison["validation_note"]
     assert CONTROL_NOTE not in str(evidence["prior_notes"])
 

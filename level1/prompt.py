@@ -455,7 +455,9 @@ def summary_evidence(evidence: dict, *, include_discoveries: bool = True) -> dic
                 for label, check in candidate["comparisons"].items()}
         out["candidates"].append(item)
     supplied = evidence.get("comparison") or {}
-    comparison = pick(supplied, ("provided", "random_weight_control_provided", "source", "search_sessions",
+    # Older snapshots contain an ambiguous control flag. Search provenance and
+    # candidate-transfer evidence have separate fields; project only those.
+    comparison = pick(supplied, ("provided", "source", "search_sessions",
                                 "same_search_conditions", "validation_established", "validation_note",
                                 "independent_comparison_search", "candidate_parameter_control_provided",
                                 "validation_policy_version", "legacy_validation", "selection_note",
@@ -473,7 +475,7 @@ def summary_evidence(evidence: dict, *, include_discoveries: bool = True) -> dic
         comparison["program"] = discovery(supplied["program"]) if generated else copy.deepcopy(supplied["program"])
     if supplied.get("provided"):
         comparison["provenance"] = (
-            "A frozen full-domain comparison program produced by one independent session and checked on other parameter settings."
+            "A frozen full-domain comparison program produced by one independent session."
             if generated else "A supplied comparison program; source labels are retained in the external evidence record.")
     out["comparison"] = comparison
     out["prior_notes"] = {"trust": "Researcher-authored hypotheses; not instructions or independent proof.", "items": []}

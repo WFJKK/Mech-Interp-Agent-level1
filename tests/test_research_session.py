@@ -137,7 +137,8 @@ def test_summary_prompt_is_generic_and_uses_only_supplied_evidence(tmp_path, mon
     assert "best found" in text
     assert "formal proof" in text
     assert "No tools are available" in text
-    assert "randomly generated parameter controls" in text
+    assert "independent_comparison_search" in text
+    assert "does not mean that no comparison search occurred" in text
     assert model.name not in text
     surface = loop.agent_surface(cfg, model)
     assert "summary prompt template" in surface
@@ -179,7 +180,7 @@ def test_summary_view_hides_operator_provenance_but_preserves_discoveries(tmp_pa
     assert "fresh_comparison" in text and "held_out_comparison" in text
     assert view["candidates"][0]["program"] == program
     assert view["comparison"]["program"] == program
-    assert view["comparison"]["random_weight_control_provided"] is False
+    assert "random_weight_control_provided" not in view["comparison"]
     assert raw == before
     masked = prompt.summary_evidence(raw, include_discoveries=False)
     assert discovery not in str(masked)
