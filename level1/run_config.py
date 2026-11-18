@@ -86,11 +86,27 @@ def check_orchestration(cfg: dict) -> None:
     unknown = sorted(set(options) - set(defaults))
     if unknown:
         raise ConfigError(f"unknown orchestration options: {unknown}")
-    for key in ("enabled", "parallel", "final_summary"):
+    for key in ("enabled", "parallel", "final_summary", "baseline_agent"):
         if not isinstance(options.get(key, False), bool):
             raise ConfigError(f"orchestration.{key} must be true or false")
     if not options.get("enabled"):
         return
+    baseline = options.get("baseline_entry")
+    if baseline is not None and (not isinstance(baseline, str) or not baseline.strip()):
+        raise ConfigError("orchestration.baseline_entry must be a path or null")
+    automatic_baseline = options.get("baseline_agent", False) and baseline is None
+    baseline_fraction = options.get("baseline_fraction", 0.0)
+    if (isinstance(baseline_fraction, bool) or not isinstance(baseline_fraction, (int, float))
+            or not math.isfinite(baseline_fraction) or not 0 <= baseline_fraction < 1):
+        raise ConfigError("orchestration.baseline_fraction must be a finite number from 0 up to but not including 1")
+    if automatic_baseline:
+        if baseline_fraction <= 0:
+            raise ConfigError("baseline_agent needs a positive baseline_fraction reserved within the run budget")
+        baseline_submissions = options.get("baseline_submissions")
+        if isinstance(baseline_submissions, bool) or not isinstance(baseline_submissions, int) or baseline_submissions < 2:
+            raise ConfigError("orchestration.baseline_submissions must allow at least two submissions for a checkpoint and an improvement")
+    else:
+        baseline_fraction = 0.0  # supplied programs and old saved configs introduce no paid search
     workers = options.get("workers")
     if isinstance(workers, bool) or not isinstance(workers, int) or workers not in (1, 2):
         raise ConfigError("orchestration.workers must be 1 or 2")
@@ -114,7 +130,10 @@ def check_orchestration(cfg: dict) -> None:
     if options.get("final_summary", False) and summary <= 0:
         raise ConfigError("final_summary needs a positive summary_fraction reserved within the run budget")
     summary = summary if options.get("final_summary", False) else 0.0
-    research_share = 1.0 - summary
+    if summary + baseline_fraction >= 1:
+        raise ConfigError("baseline_fraction + summary_fraction must leave a positive share for research")
+    research_share = 1.0 - summary - baseline_fraction
+    python_share = 1.0 - baseline_fraction
     for key in ("python_calls", "submissions", "max_turns"):
         value = cfg["session"][key]
         if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
@@ -122,14 +141,20 @@ def check_orchestration(cfg: dict) -> None:
     seconds = cfg["session"]["seconds"]
     if isinstance(seconds, bool) or not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds <= 0:
         raise ConfigError("session.seconds must be a positive finite number")
+    if automatic_baseline:
+        for key in ("python_calls", "max_turns"):
+            if math.floor(cfg["session"][key] * cfg["rounds_max"] * baseline_fraction) < 1:
+                raise ConfigError(f"the baseline allocation must allow at least one session.{key}")
     planning, regional = fractions
     global_fraction = 1 - planning - regional
     for key in ("python_calls", "max_turns"):
-        amount = cfg["session"][key] * (research_share if key == "max_turns" else 1.0)
+        amount = cfg["session"][key] * (research_share if key == "max_turns" else python_share)
         if math.floor(amount * regional) // workers < 1 or math.floor(amount * global_fraction) < 1:
             raise ConfigError(f"session.{key} is too small after sharing its allocation between regional and global integration roles")
     if math.floor(cfg["session"]["max_turns"] * cfg["rounds_max"] * planning * research_share) < 1:
         raise ConfigError("the planning allocation must allow at least one turn")
+    if automatic_baseline and math.floor(cfg["session"]["python_calls"] * cfg["rounds_max"] * planning * python_share) < 1:
+        raise ConfigError("the planning allocation must allow at least one Python call after reserving the baseline")
     if summary and math.floor(cfg["session"]["max_turns"] * cfg["rounds_max"] * summary) < 1:
         raise ConfigError("the final summary allocation must allow at least one turn")
     for key in ("development_seed", "archive_per_scope"):
@@ -155,9 +180,6 @@ def check_orchestration(cfg: dict) -> None:
             assignment["scope"] = normalize_scope(assignment["scope"])
         except (ValueError, RuntimeError) as exc:
             raise ConfigError(f"invalid initial region: {exc}") from None
-    baseline = options.get("baseline_entry")
-    if baseline is not None and (not isinstance(baseline, str) or not baseline.strip()):
-        raise ConfigError("orchestration.baseline_entry must be a path or null")
     # An explicit scope opts into stable workload accounting. The absent scope retains the old evaluator.
     if cfg["verifier"].get("scope") is None:
         cfg["verifier"]["scope"] = {"kind": "all"}

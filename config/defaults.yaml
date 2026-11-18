@@ -26,7 +26,7 @@ rounds_max: 5
 patience: 2                           # stop after this many rounds in a row that did not raise the best reward
 
 # Optional research lead, regional investigators and global integration. The original loop is the default.
-# In this mode rounds_max counts research cycles; the existing tool allowances are shared across roles.
+# In this mode rounds_max counts research cycles; API, Python, turn and time allowances are shared across roles.
 orchestration:
   enabled: false
   workers: 2
@@ -36,11 +36,14 @@ orchestration:
   regional_submissions: 1            # per worker per cycle, taken from session.submissions
   checkpoint_python_calls: 2         # integrating leads must score a checkpoint before more Python; null disables
   final_summary: true                # a tool-free lead synthesis after selection and final checks
-  summary_fraction: 0.1              # reserved first from API, turn and time allowances; no extra run budget
+  summary_fraction: 0.1              # share of original API, turn and time allowances; no extra run budget
   development_seed: 0                # fixed development inputs; final evaluation is separate
   archive_per_scope: 8               # entries shown in summaries; all records are retained
   initial_regions: []                # optional [{scope: {...}, task: "..."}] if the lead proposes none
-  baseline_entry: null               # an optional frozen entry, scored under each task's conditions
+  baseline_agent: true               # new research runs first ask one agent for a global generic program
+  baseline_fraction: 0.2             # share of original API, Python, turn and time allowances; no extra dollars
+  baseline_submissions: 2            # this one session's submission quota; research submission quotas stay unchanged
+  baseline_entry: null               # a supplied frozen program overrides the baseline agent and its allocation
 
 # one session (one round)
 session:
