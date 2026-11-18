@@ -8,7 +8,7 @@ is therefore compatible with a correct evaluation.
 
 To study structure associated with learning, keep three comparisons distinct.
 
-## 1. A supplied generic program on the target network
+## 1. A frozen generic program on the target network
 
 Freeze a comparison program and evaluate it using the target checkpoint's weights. Match the candidate's
 assigned input scope, samples, reward, prices and setup workload. This asks whether a candidate improves
@@ -20,21 +20,42 @@ For a candidate P, a comparison B and target weights W, the within-scope gap is
 \Delta_S = R_S(P;W)-R_S(B;W).
 ```
 
-Report coverage, fidelity and cost alongside the gap. A positive gap is improvement over that supplied
+Report coverage, fidelity and cost alongside the gap. A positive gap is improvement over that frozen
 program under the declared tradeoff; it does not prove optimality or measure a quantity of learned
 structure. Even a program valid for arbitrary weights may inspect particular weight values and exploit
 special cases when it executes.
 
-The original baseline procedure searches on a matched random counterpart with an additional request
-for validity across arbitrary weights. It validates candidates on other checkpoints, freezes one, and
-then applies that program to target weights. This is chiefly a method for finding a reusable comparator.
-Finite checkpoint tests provide empirical support, not a proof for every possible weight assignment.
-The baseline's own claimed region and coverage must remain visible.
+New multi-agent runs automatically ask one agent to find a global generic program before target
+research starts. The existing `baseline_of` declaration identifies a counterpart with the same
+architecture, shapes and input distribution and at least four parameter checkpoints. The agent
+receives the additional requirement of validity across arbitrary weights, without being told the
+target's task or its own checkpoint's control status. It has no regional baseline workers.
 
-In multi-agent mode, `orchestration.baseline_entry` imports a frozen comparison. The controller remeasures
-it separately on each investigated scope. Importing JSON alone does not establish its provenance or
-arbitrary-weight validity. The comparison gap is reported; the agents still optimize the ordinary
-reward, without subtracting that gap automatically.
+Only formally submitted programs are considered. A candidate must cover the full domain and match
+every checked output on the discovery checkpoint, a separate selection checkpoint and the remaining
+controls. Selection and freezing use those controls independently of the trained target's outputs.
+Finite checkpoint tests provide empirical support, not a proof for every possible weight assignment.
+The source, resource allocation, coverage and validation receipts remain on record.
+
+The one frozen global program is then remeasured on the target's global domain and every regional
+claim, with matching inputs and workload within each comparison. A regional comparison means applying
+that same global program to the region; it does not mean another agent optimized a regional baseline.
+The gap is reported while research agents continue optimizing the ordinary reward, without subtracting
+the gap automatically. If the comparator fails on a target checkpoint, retain the measured fidelity
+and describe the raw reward difference without treating it as established generic efficiency.
+
+`orchestration.baseline_agent: true` enables the phase for new research configurations. Its default
+`baseline_fraction: 0.2` comes from the original shared API, Python, turn and time allowances, and
+`baseline_submissions: 2` explicitly budgets its formal submissions. The usual final-summary share
+also remains within the original total. For example, $25 reserves up to $5 for the baseline, $2.50
+for synthesis and $17.50 for research. All API attempts use the parent spending ledger.
+
+`orchestration.baseline_entry` instead imports an existing frozen program and releases the automatic
+baseline allocation. Importing JSON alone does not establish provenance or arbitrary-weight validity.
+Setting `baseline_agent: false` explicitly omits generation. Old saved configurations lacking this
+field do not acquire a paid phase on resume; completed baseline phases are reused. Missing control
+models fail preflight before API use, and a search without a validated full-domain submission stops
+visibly before target research. See `MULTI_AGENT.md` for configuration and records.
 
 ## 2. Independent searches on trained and random checkpoints
 
@@ -62,10 +83,12 @@ simple behavior. Such an outcome should be reported as part of the control distr
 must be specified by a weight-sampling or parameter-randomization procedure; "random" is not a universal null
 model independent of architecture and scale.
 
-The existing automatic baseline runner does not implement this matched multi-agent experiment. In
-particular, its extra exactness instruction and its run-matching rules should not be reused as evidence
-that search objectives and total spending were matched. An automatic matched-search runner and aggregate
-analysis remain separate future work.
+The automatic single-agent global baseline does not implement this matched multi-agent experiment.
+Its additional exactness instruction, one-agent search and smaller reserved allowance differ from
+the target research procedure. A gain over its frozen program may be a generic optimization that
+this baseline search missed. Neither the automatic phase nor the original single-agent baseline
+runner establishes matched discovery objectives or total spending across research arms. An automatic
+matched-search runner and aggregate analysis remain separate future work.
 
 ## 3. Transfer of one frozen interpretation
 
@@ -84,6 +107,10 @@ adapter. Random counterparts usually live in separate adapter folders. Cross-ada
 automatically scheduled, and the final synthesis must not claim it occurred unless its evidence is
 actually supplied. A separately specified destination model/checkpoint interface and aggregation would
 be needed for an automatic cross-adapter control audit.
+
+The automatic baseline phase evaluates the baseline program on control parameters; it does not
+evaluate the discovered target interpretations on those controls. Its validation receipts therefore
+do not fill this transfer experiment's missing evidence.
 
 ## Regional discoveries need comparable populations
 
@@ -114,7 +141,8 @@ require an additional, explicit binding policy.
 The final lead should identify the recorded global winner and explain regional findings separately.
 For each material claim, ask:
 
-- Was the candidate compared with a supplied program on this same checkpoint and scope?
+- Was the candidate compared with the frozen global baseline on this same checkpoint and scope?
+- Was that baseline generated in the recorded single-agent phase or imported, and what validation passed?
 - Was its fixed interpretation checked on another checkpoint, and which comparisons are absent?
 - Was an independent matched random-control search actually performed?
 - Is the explanation supported by measurements, a mathematical argument, or an independently checked

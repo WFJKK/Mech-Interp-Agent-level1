@@ -1,9 +1,10 @@
 # Regional research and global integration
 
-The optional research mode uses the existing reward and entry language. A lead researcher assigns
-input domains to regional researchers, then uses their checked results to construct a complete
-program. Code owns evaluation, the shared budget, the archive and the final lock. After the final
-checks, a separate tool-free lead session explains the frozen results.
+The optional research mode uses the existing reward and entry language. One agent first develops
+a global generic baseline. A lead researcher then assigns input domains to regional researchers
+and uses their checked results to construct a complete program. Code owns baseline validation,
+evaluation, the shared budget, the archive and the final lock. After the final checks, a separate
+tool-free lead session explains the frozen results and their baseline comparisons.
 
 The original run mode remains the default. No operation prices or entry-format identifiers change.
 The experiment is selected by `orchestration.enabled: true`.
@@ -34,6 +35,12 @@ and its checkpoints but supplies no expected behavior or input-length split. The
 from its investigation. If it makes no assignments, two generic full-domain questions provide a
 fallback: search for useful special explanations, and independently examine alternatives and exceptions.
 A regional result does not need to improve the global score to be retained.
+
+New research runs automatically include the single-agent global baseline phase. It searches on
+the model's declared parameter-control counterpart, freezes one validated full-domain program,
+and reuses that program for comparisons on the target's global and regional domains. There are
+no regional baseline agents. `--with-baseline` is also accepted for these configurations and uses
+this same phase; it does not add a second baseline run.
 
 To bill the experiment through the existing API-key backend with one total spending limit:
 
@@ -76,6 +83,13 @@ An experiment can extend `research.yaml` and supply its own `model`, `network`, 
 `seed_check.network`, and verifier settings. Those are experiment choices; no controller code or
 research prompt needs to change when selecting another compatible adapter.
 
+Automatic baseline generation also needs a declared counterpart with the same architecture,
+shapes and input distribution. The existing `withheld/<control-model>/task.yaml` declaration
+names the target in `baseline_of`; the counterpart supplies at least four parameter checkpoints.
+This operator metadata is not disclosed to the agents. If the required counterpart is missing
+or incompatible, preflight fails before any API call. An existing frozen program can instead be
+supplied with `orchestration.baseline_entry`.
+
 Model independence is relative to the existing model interface. An adapter supplies `reference(g,
 lv1)`, configured weight arrays and a supported input distribution. The current reference returns one
 integer output per input, has constant forward operation cost across those inputs, and is expressible
@@ -85,8 +99,12 @@ implementation and cost model. Unknown-cardinality domains need an explicit work
 
 ## Roles and schedule
 
-An initial lead session plans investigations. Each research cycle then has regional sessions,
-an evaluation barrier and a lead session that integrates the findings and plans further work.
+One global baseline session runs first. Its validated program is frozen before the target's
+research begins. An initial lead session then plans investigations. Each research cycle has
+regional sessions, an evaluation barrier and a lead session that integrates the findings and
+plans further work. Only the frozen comparison program and its target-scope measurements enter
+research context; the baseline's exploratory notes and unselected programs do not enter the
+regional archive.
 
 The lead can call `assign_region(scope, task, entry_name=None)`. Each assignment contains an
 immutable scope and a bounded question. Workers can explore and submit programs directly to the
@@ -263,9 +281,25 @@ under matching workload conventions, rather than comparing raw scores from diffe
 
 ## Shared resource limits
 
-The original `rounds_max` now counts research cycles. Tool quotas are divided across roles from
-the original overall allowance, rather than copied to each agent. Planning receives 10 percent of
-exploration calls, regional work 60 percent, and integration the remaining 30 percent.
+The original `rounds_max` now counts research cycles. API, Python-call, turn and time allowances
+are shared across roles rather than copied to each agent. For new research configurations,
+`orchestration.baseline_fraction: 0.2` reserves 20 percent of the original total allowance for
+one global baseline session. `orchestration.final_summary: true` reserves
+`summary_fraction: 0.1` of the original API, turn and time allowances for final synthesis.
+The research roles divide the remaining allowance: by default, planning receives 10 percent,
+regional work 60 percent and integration 30 percent of their research share.
+
+For example, a $25 total API allowance assigns up to $5 to the baseline, $2.50 to synthesis
+and $17.50 to research. These are portions of the $25, not additional budgets. The usual
+per-session cap can lower an individual allocation. Python calls reserve 20 percent for the
+baseline and leave 80 percent for research because synthesis has no tools. Turn and time
+allocations reserve both shares and leave 70 percent for research. Configurations with other
+fractions use the same accounting. Disabling baseline generation, or supplying a frozen
+`baseline_entry`, releases the baseline share. Disabling synthesis releases its share.
+
+The baseline has an explicit `orchestration.baseline_submissions: 2` allowance for its one
+session, including a checkpoint and an improved candidate. This is separate from the existing
+research submission quota and does not reduce a worker's or integrating lead's submission slots.
 `orchestration.regional_submissions` sets each worker's formal submission allowance per cycle;
 the integrating lead receives the remaining `session.submissions` after all workers' shares.
 The configuration must leave at least one submission for integration. The planning session
@@ -278,16 +312,11 @@ declared verification allowance, not a set of uncounted evaluations. The profile
 API budget. Other configurations retain the default of one submission per worker unless they
 override it; saved configurations without the new option keep that original allocation.
 
-For new research runs, `orchestration.final_summary: true` reserves `summary_fraction: 0.1` of the
-API, turn and time allowances for final synthesis. Planning, regional work and integration divide the
-remaining 90 percent in the same 10/60/30 proportions. Thus a configured $60 API allowance reserves
-up to $6 for synthesis and up to $54 for research; it does not add another $6. Disabling final synthesis
-restores the original allocation. Python-call and submission totals are unchanged because synthesis
-cannot use those tools.
-
-At five cycles, the shared research profile therefore allows thirty submissions in total; a
-configuration with four submissions per cycle still allows twenty.
-One shared API spending log covers every role, retry and resume. Session identifiers are unique.
+At five cycles, the shared research profile allows thirty research submissions plus the two
+baseline submissions; a configuration with four research submissions per cycle allows twenty
+research submissions plus the baseline's explicit quota. No synthesis submissions are added.
+One shared API spending log covers the baseline, every research role, synthesis, retry and resume.
+Session identifiers are unique.
 Atomic reservations enforce the parent run, cycle and role caps when workers run simultaneously.
 Unreported spending is conservatively counted at the reserved cap. As in the original backend,
 the provider's cap may be exceeded by the final answer that reaches it; this is not a prepayment
@@ -342,7 +371,41 @@ checkable explanations. It does not ask the researcher assistant to expose priva
 These clarifications do not guarantee that a provider will accept a request. A refusal is not
 handled by silently changing the model or retrying the same blocked work indefinitely.
 
-## Generic comparison program
+## Automatic global baseline and supplied comparisons
+
+The default for new research configurations is:
+
+```yaml
+orchestration:
+  baseline_agent: true
+  baseline_fraction: 0.2
+  baseline_submissions: 2
+  baseline_entry: null
+```
+
+One agent works on the complete input distribution of the declared control model. It receives
+the ordinary model definition, weights, entry language and reward, together with the neutral
+requirement that its computation remain valid for arbitrary weights. It is not told what the
+target was trained to do or that its own parameter checkpoint is a control. This session does
+not assign regional workers.
+
+Only formal submissions are eligible for the baseline. A candidate must cover the full domain
+and agree with every checked output on the session's checkpoint, a separate selection checkpoint,
+and the remaining control checkpoints. The controller selects and freezes the program using
+these control measurements before evaluating it on the trained target. Sample agreement on a
+finite set of checkpoints is empirical validation, not a proof over all possible parameters.
+
+If no formally submitted candidate passes, the pipeline records a failed baseline and stops
+visibly before target research. It does not substitute an unsubmitted draft or silently report
+a completed comparison. A completed baseline phase and its frozen entry are reused on resume;
+its session quotas and spending records are retained after interruption.
+
+The same frozen global program is evaluated on the target's full domain and each regional claim.
+For each comparison, both programs use the same target weights, input scope, sample, reward,
+operation prices and setup workload. The baseline's tables, if any, are rebuilt from the target's
+weights and charged under that policy. Regional scores describe this global baseline restricted
+to the region; there is no separate search for an optimized regional baseline. Development
+comparisons and final fresh-input or second-checkpoint comparisons remain separate.
 
 An existing frozen entry can be supplied without starting another model run:
 
@@ -351,19 +414,22 @@ orchestration:
   baseline_entry: /absolute/path/to/baseline_entry.json
 ```
 
-The entry is snapshotted, then evaluated on each encountered scope using that task's weights,
-inputs, reward and workload policy. Its development and final measurements are separate. The
-researchers see it under the neutral name `comparison_entry`.
+This overrides automatic generation and its resource reservation. The supplied entry is
+snapshotted, then evaluated under the same within-scope policy. Importing JSON alone does not
+establish how it was found or whether it is valid for arbitrary weights. Researchers see either
+kind of frozen program under the neutral name `comparison_entry`.
 
-Automatic `--with-baseline` and baseline-run generation are not supported for the new archive
-layout. Those commands fail with an explanation instead of silently comparing incompatible
-single-agent and regional experiments. Existing baseline runs continue to work in the original
-mode.
+Set `orchestration.baseline_agent: false` to explicitly omit generation when no comparison entry
+is supplied. The report then records the missing comparison. Old saved configurations without
+`baseline_agent` retain their original behavior on resume and do not acquire a paid phase.
+Normal `run` and `resume` perform the configured automatic phase without an extra command.
+The original single-agent mode's baseline commands retain their existing behavior.
 
-An imported program does not, by itself, establish that an independent search was run on randomly
-generated parameter controls. These are separate experiments. See `RANDOM_BASELINES.md` for the
-distinction between a same-target generic comparison, an independent matched control search, and
-transfer of one frozen interpretation.
+This single-agent baseline has a different objective and resource allocation from multi-agent
+discovery. It is a known generic comparator, not a matched-budget multi-agent control search.
+A positive reward gap can include generic optimizations that the baseline agent did not find.
+Evaluating the discovered interpretation itself on random parameters is also a separate test.
+See `RANDOM_BASELINES.md` for these distinctions.
 
 ## Development, locking and reports
 
@@ -381,6 +447,8 @@ The run folder contains:
 | `multi_agent/sessions/` | Separate prompts, tool records, programs and responses |
 | `multi_agent/artifacts/` | Immutable saved drafts, addressed by content hash |
 | `multi_agent/archive.json` | Submissions, per-domain selections, comparison scores and separate draft provenance |
+| `multi_agent/baseline.json` | Baseline source, validation outcome, selection and provenance |
+| `multi_agent/baseline_entry.json` | The frozen global comparison program, when available |
 | `multi_agent/lock.json` | Frozen global and regional portfolio |
 | `multi_agent/audits/` | Fresh-input and second-network measurements after locking |
 | `locked_entry.json` | The selected global program, if one was submitted successfully |
@@ -395,7 +463,7 @@ The report describes empirical agreement; an agent's explanation is not treated 
 
 After the controller locks candidates and completes their final checks, the lead receives a fixed
 evidence packet containing the selected programs, their receipts, scopes and workload conventions,
-the final audits, supplied comparison measurements, and earlier researchers' notes. Notes are explicitly
+the final audits, baseline provenance and comparison measurements, and earlier researchers' notes. Notes are explicitly
 unverified evidence. The summary uses the same configured model and account as the research roles.
 
 The requested synthesis explains:
@@ -405,12 +473,15 @@ The requested synthesis explains:
 - Each material region's scope probability, conditional coverage, fidelity, cost and workload.
 - Supporting measurements, recorded failures, assumptions, unresolved hypotheses and proof status.
 - Which arguments appear valid for general parameters and which depend on particular parameter values.
+- Global and regional reward gaps against the same frozen global baseline, with their matched conditions.
 - Available comparisons and missing control experiments, without inventing a control result.
 
 "Best" means the recorded selection among evaluated candidates under the fixed policy. The summary
-does not claim a global optimum or choose a new winner using final-audit results. A supplied comparison
-program is not automatically a verified arbitrary-weight method, and agreement on another checkpoint
-does not by itself identify a learned mechanism.
+does not claim a global optimum or choose a new winner using final-audit results. An imported comparison
+program has no automatic validity guarantee; a generated baseline has only the control validation
+actually recorded. The summary distinguishes the single-agent generic search from a matched
+multi-agent control and from transferring the discovered program to other parameters. Agreement on
+another checkpoint does not by itself identify a learned mechanism.
 
 The synthesis session exposes no tools or MCP servers. It cannot execute code, submit entries, assign
 regions or change the archive. Its output is commentary with evidence references, not a certificate.
