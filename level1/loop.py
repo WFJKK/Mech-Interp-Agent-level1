@@ -2,6 +2,8 @@
 
     python -m level1.loop run --config config/pilot/lin-a.yaml [--run-id X] [--sandbox hardened] [--fake DIR]
                               [--auth api_key] [--budget-usd 60]
+    python -m level1.loop run --config <config> --mode trained|baseline|both
+                              explicitly select the research controller's stages
     python -m level1.loop resume --run <run folder> [--budget-usd 80]
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop baseline --config <config> | --run <run folder>    the baseline for that shape and those
@@ -46,7 +48,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import budget, global_baseline, hygiene, lang, prompt, rewards, run_config
+from . import budget, global_baseline, hygiene, lang, prompt, research_modes, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
 from .session import RESEARCH_SUBMIT_TOOL, RESEARCH_TOOLS, Session, surface
@@ -213,7 +215,9 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
         out["research prompt template"] = (prompt.TEMPLATES / "research_v1.md").read_text()
         out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
         # These are operator-supplied tasks. Agent-generated discoveries are handled as history.
-        out["configured regional investigations"] = json.dumps((cfg.get("orchestration") or {}).get("initial_regions", []))
+        if ((cfg.get("research_task") or {}).get("role") != "baseline"
+                and research_modes.mode(cfg) != "baseline"):
+            out["configured regional investigations"] = json.dumps((cfg.get("orchestration") or {}).get("initial_regions", []))
     elif (cfg.get("research_task") or {}).get("role") == "summary":
         out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
     if sandbox_mode != "container":
@@ -232,14 +236,17 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         raise RuntimeError(f"{path} is a run already: resume it, or give the config another run_id")
     model = load_model(cfg["model"])
     model.network(cfg["network"])
-    control_cfg = global_baseline.preflight(cfg) if global_baseline.enabled(cfg) else None
+    control_cfg = global_baseline.preflight(cfg) if global_baseline.needs_validation(cfg) else None
     control_model = load_model(control_cfg["model"]) if control_cfg is not None else None
+    validation_models = global_baseline.validation_models(cfg) if control_cfg is not None else []
     second = (cfg.get("seed_check") or {}).get("network")
-    if second:
+    if second and research_modes.mode(cfg) != "baseline":
         model.network(second)
         if second == cfg["network"]:
             raise RuntimeError("the seed check needs another network than the rounds'")
-    make(cfg, log=out, fake_scripts=fake_scripts)  # a missing CLI or login fails here, before a run folder exists
+    verifier_only = research_modes.mode(cfg) == "baseline" and bool(cfg["orchestration"].get("baseline_entry"))
+    if not verifier_only:
+        make(cfg, log=out, fake_scripts=fake_scripts)  # fail before a run folder exists
     path.mkdir(parents=True, exist_ok=True)
     log = Log(path, out)
     verifier = Verifier(model, cfg["network"], cfg)
@@ -249,12 +256,16 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     if itself["status"] != "scored" or itself["parts"]["fidelity"] != 1.0 or itself["parts"]["cost"] != 1.0:
         raise RuntimeError(f"the network written as an entry does not come out at fidelity 1 and cost 1: {describe(itself)}")
     sb = choose(cfg, protected_paths(cfg, model, path))
-    if (cfg.get("orchestration") or {}).get("enabled"):
+    if research_modes.mode(cfg) == "baseline":
+        # No trained research prompt is sent in this mode. The comparison prompt
+        # is checked below only when an investigator will actually be called.
+        first_prompt = ""
+    elif (cfg.get("orchestration") or {}).get("enabled"):
         first_prompt = prompt.build_multi(cfg, model, 0, "lead", "Plan the regional investigations.", "", [])
     else:
         first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
-    if control_model is not None:
+    if global_baseline.enabled(cfg):
         from . import multi_agent
 
         plan = {"role": "baseline", "scope": {"kind": "all"}, "cycle": 0, "worker_count": 1,
@@ -286,19 +297,27 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
         **({"scope": itself["scope"]} if "scope" in itself else {}),
         **({"global_baseline_control": {"model": control_cfg["model"], "network": control_cfg["network"],
                                        "trusted_hash": trusted_hash(control_model)}} if control_model is not None else {}),
+        **({"global_baseline_validation_models": [{"model": str(m.path.relative_to(REPO_ROOT)),
+                                                   "trusted_hash": trusted_hash(m)} for m in validation_models]}
+           if validation_models else {}),
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
         + (f"every one of {verifier.n_inputs():,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        mode = research_modes.mode(cfg)
+        log(f"workflow mode: {mode}; " + {"trained": "trained research only; no baseline search",
+            "baseline": "one global baseline; verifier checks only on the other checkpoints",
+            "both": "validated global baseline followed by trained research"}[mode])
     if cfg["backend"] == "claude_code" and cfg["auth"] == "api_key":
         b = cfg["budget"]
         if (cfg.get("orchestration") or {}).get("enabled"):
             log(f"billed to the API key in {cfg['api_key_env']}: ${float(b['run_usd']):.2f} shared run allowance; "
                 "cycles and role sessions receive portions of it, recorded in spend.jsonl. "
                 "A final response can exceed its attempt cap.")
-            if control_model is not None:
+            if global_baseline.enabled(cfg):
                 cap = min(float(b["round_usd"]), float(b["run_usd"]) * global_baseline.fraction(cfg))
-                log(f"one global baseline agent runs first, with ${cap:.2f} reserved within that allowance; "
-                    "its frozen program will be compared on every claimed domain")
+                log(f"one global baseline agent receives up to ${cap:.2f} within that allowance; "
+                    "its program must pass the saved validation policy before acceptance")
         else:
             log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
                 f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
@@ -338,6 +357,14 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
                                "resume with --accept-changes to go on all the same (the log will say so)")
         log("the baseline's trusted files changed since the run began; going on as asked",
             baseline_trusted_hash=trusted_hash(load_model(control["model"])))
+    for item in run.get("global_baseline_validation_models", []):
+        current_hash = trusted_hash(load_model(item["model"]))
+        if current_hash != item["trusted_hash"]:
+            if not accept_changes:
+                raise RuntimeError("a baseline validation model changed since this run began; "
+                                   "resume with --accept-changes only after reviewing its saved checks")
+            log("a baseline validation model changed since the run began; going on as asked",
+                validation_model=item["model"], trusted_hash=current_hash)
     if (cfg.get("orchestration") or {}).get("enabled"):
         from . import multi_agent
 
@@ -504,7 +531,7 @@ def run_baseline(cfg: dict, fake_scripts=None, out=print, prices: str | None = N
 
     if (cfg.get("orchestration") or {}).get("enabled"):
         raise RuntimeError("research runs execute their one-agent global baseline inside run/resume; "
-                           "use a new configuration with orchestration.baseline_agent: true, or supply baseline_entry")
+                           "use run --config <config> --mode baseline for baseline only, or --mode both")
 
     if (prices or lang.PRICES) != lang.PRICES:
         raise RuntimeError(f"the run was measured under {prices}, and this code prices under {lang.PRICES}: no baseline "
@@ -548,9 +575,9 @@ def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | No
     from . import baseline
 
     if (cfg.get("orchestration") or {}).get("enabled"):
-        if not global_baseline.enabled(cfg) and not cfg["orchestration"].get("baseline_entry"):
+        if not global_baseline.required(cfg):
             raise RuntimeError("this saved research configuration has no baseline phase; start a new run with "
-                               "orchestration.baseline_agent: true, or configure baseline_entry before starting")
+                               "--mode both or --mode baseline; a trained-only run keeps its saved stages")
         if resume:
             return drive(Path(resume), fake_scripts=fake_scripts, out=out,
                          accept_changes=accept_changes, budget_usd=budget_usd)
@@ -631,6 +658,8 @@ def main(argv=None) -> int:
     r.add_argument("--sandbox", help="auto, hardened, container, landlock, seatbelt or process (default: the config's)")
     r.add_argument("--auth", choices=("login", "api_key"), help="who pays for the rounds (default: the config's)")
     r.add_argument("--budget-usd", type=float, help="api_key: what the whole run may spend, in dollars (default: the config's)")
+    r.add_argument("--mode", choices=research_modes.MODES,
+                   help="enable the research controller: trained research only, one global baseline only, or both")
     r.add_argument("--with-baseline", action="store_true", help="run the baseline of this shape and these conditions alongside, "
                    "unless it is on record (level1/baseline.py)")
     s = sub.add_parser("resume")
@@ -671,10 +700,14 @@ def main(argv=None) -> int:
                 over["budget"] = {"run_usd": args.budget_usd}
             if args.fake:
                 over["backend"] = "fake"
+            if args.mode is not None:
+                over["orchestration"] = {"enabled": True, "mode": args.mode}
             cfg = run_config.load(args.config, over)
             if args.with_baseline:
                 return 0 if run_with_baseline(cfg, fake_scripts=args.fake) == "finished" else 2
-            start(cfg, fake_scripts=args.fake)
+            path = start(cfg, fake_scripts=args.fake)
+            if cfg.get("orchestration", {}).get("enabled"):
+                return 0 if (path / "multi_agent/lock.json").is_file() else 2
             return 0
         if args.cmd == "resume":
             if args.with_baseline:

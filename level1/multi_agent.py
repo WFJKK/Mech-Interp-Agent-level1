@@ -22,7 +22,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import artifacts, budget, global_baseline, hygiene, lang, prompt, regions, report, rewards, synthesis
+from . import artifacts, budget, global_baseline, hygiene, lang, prompt, regions, report, research_modes, rewards, synthesis
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session
@@ -55,6 +55,16 @@ def _options(cfg: dict) -> dict:
 
 def _state_path(path: Path) -> Path:
     return Path(path) / ROOT / "state.json"
+
+
+def _check_saved_workflow(path: Path, cfg: dict) -> None:
+    if _state_path(path).exists():
+        saved = read_json(_state_path(path))
+        if saved.get("mode", research_modes.mode(cfg)) != research_modes.mode(cfg):
+            raise RuntimeError("the saved workflow mode changed; resume with its original configuration or start a new run")
+        version = research_modes.validation_version(cfg)
+        if saved.get("baseline_validation_version", version) != version:
+            raise RuntimeError("the saved baseline validation policy changed; use its original configuration or start a new run")
 
 
 def _archive_path(path: Path) -> Path:
@@ -146,6 +156,8 @@ def _scope_cfg(cfg: dict, scope: dict) -> dict:
 
 def _baselines(path: Path, cfg: dict) -> dict | None:
     """Read the frozen global comparison, or snapshot an operator-supplied one."""
+    if research_modes.mode(cfg) == "trained":
+        return None
     target = Path(path) / ROOT / "baseline_entry.json"
     if target.exists():
         entry = read_json(target)
@@ -157,6 +169,10 @@ def _baselines(path: Path, cfg: dict) -> dict | None:
         return entry
     source = _options(cfg).get("baseline_entry")
     if not source:
+        return None
+    if research_modes.validation_version(cfg) >= 2:
+        # New supplied entries take the same validation route as generated ones.
+        # Until it succeeds there is no comparison to carry into research.
         return None
     source = Path(source).expanduser()
     if not source.is_absolute():
@@ -213,8 +229,13 @@ def archive_summary(archive: dict, limit: int) -> str:
                         "\n".join(row(cid) for cid in ids[:limit]))
     for key, receipt in archive["baseline_scores"].items():
         if receipt["status"] == "scored":
+            parts = receipt["parts"]
+            exact = (parts.get("coverage") == 1.0 and parts.get("n_inputs", 0) > 0
+                     and parts.get("n_agree") == parts.get("n_in_region") == parts.get("n_inputs"))
             sections.append(f"Frozen comparison on {key}: reward {receipt['reward']:.6f}, "
-                            f"fidelity {receipt['parts']['fidelity']}, cost {rewards.cost_of(receipt['parts'])}.")
+                            f"fidelity {parts['fidelity']}, cost {rewards.cost_of(parts)}. "
+                            + ("Full coverage and agreement on these checked inputs." if exact else
+                               "It failed full coverage or agreement here; do not treat its reward gap as a validated generic improvement."))
     drafts = artifacts.describe(archive)
     if drafts:
         sections.append(drafts)
@@ -240,8 +261,6 @@ def _carried(path: Path, cfg: dict, archive: dict) -> dict:
 def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, int, float, float]:
     """Tool quotas sum to at most the old run's quota, rather than multiplying it."""
     opt, session = _options(cfg), cfg["session"]
-    planning, regional = float(opt["planning_fraction"]), float(opt["regional_fraction"])
-    global_fraction = 1.0 - planning - regional
     total_api, per_session = float(cfg["budget"]["run_usd"]), float(cfg["budget"]["round_usd"])
     summary = synthesis.fraction(cfg)
     baseline_share = global_baseline.fraction(cfg)
@@ -252,6 +271,8 @@ def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, in
     if role == "summary":
         cap = min(per_session, total_api * summary)
         return 0, 0, cap, cap
+    planning, regional = float(opt["planning_fraction"]), float(opt["regional_fraction"])
+    global_fraction = 1.0 - planning - regional
     total_api *= 1.0 - summary - baseline_share
     python_calls = session["python_calls"] * (1.0 - baseline_share)
     if cycle == 0:
@@ -551,11 +572,13 @@ def drive(path, fake_scripts=None, out=print, budget_usd=None) -> str:
 
 def _drive(path, fake_scripts=None, out=print) -> str:
     path = Path(path)
+    run = read_json(path / "run.json")
+    cfg = run["config"]
+    _check_saved_workflow(path, cfg)
     if (path / ROOT / "lock.json").exists():
         _finish(path, out=out, fake_scripts=fake_scripts)
         return "finished"
-    run = read_json(path / "run.json")
-    cfg, model = run["config"], load_model(run["config"]["model"])
+    model = load_model(cfg["model"])
     directory = path / ROOT
     directory.mkdir(parents=True, exist_ok=True)
     _baselines(path, cfg)
@@ -563,7 +586,9 @@ def _drive(path, fake_scripts=None, out=print) -> str:
     if _state_path(path).exists():
         state = read_json(_state_path(path))
     else:
-        state = {"version": 1, "next_index": 0, "sessions": {}, "cycles": [], "stop_reason": None}
+        state = {"version": 1, "mode": research_modes.mode(cfg), "next_index": 0,
+                 "baseline_validation_version": research_modes.validation_version(cfg),
+                 "sessions": {}, "cycles": [], "stop_reason": None}
         if global_baseline.enabled(cfg):
             baseline_plan = _new_plan(state, "baseline", 0, ALL,
                                       "Develop a full-domain predictor exact for any parameter values, with low measured cost.",
@@ -597,6 +622,10 @@ def _drive(path, fake_scripts=None, out=print) -> str:
             if (folder / "record.json").exists() or ((folder / "meta.json").exists() and (folder / "response.md").exists()):
                 run_one(plan)
         refusal_barrier()
+        if global_baseline.needs_validation(cfg) and _options(cfg).get("baseline_entry"):
+            result = global_baseline.validate_provided(path, cfg, out=out)
+            if result.get("status") != "established":
+                raise StopRun("the supplied global baseline was not established: " + str(result.get("reason", "validation failed")))
         if global_baseline.enabled(cfg):
             if "baseline" not in state:
                 raise StopRun("this persisted research plan has no baseline phase; start a new run with the updated configuration")
@@ -607,6 +636,12 @@ def _drive(path, fake_scripts=None, out=print) -> str:
             if result.get("status") != "established":
                 raise StopRun("the global baseline was not established: " + str(result.get("reason", "no validated global program")))
             refusal_barrier()
+        if research_modes.mode(cfg) == "baseline":
+            state["stop_reason"] = "the requested global baseline is established; no trained research was requested"
+            write_json(_archive_path(path), archive)
+            write_json(_state_path(path), state)
+            _finish(path, out=out, fake_scripts=fake_scripts)
+            return "finished"
         _comparison(path, cfg, model, archive, ALL)
         write_json(_archive_path(path), archive)
         if "planning" not in state:
@@ -739,11 +774,16 @@ def _finish(path, out=print, fake_scripts=None) -> dict:
     path = Path(path)
     run = read_json(path / "run.json")
     cfg, model = run["config"], load_model(run["config"]["model"])
-    if global_baseline.enabled(cfg):
+    _check_saved_workflow(path, cfg)
+    if global_baseline.needs_validation(cfg):
         status = _baseline_status(path, cfg)
         if status.get("status") != "established" or _baselines(path, cfg) is None:
             write_report(path)
             raise RuntimeError("the required global baseline is not established; resume the saved baseline phase before finishing research")
+        if research_modes.validation_version(cfg) >= 2:
+            global_baseline.verify_frozen(path, cfg)
+    if research_modes.mode(cfg) == "baseline":
+        return _finish_baseline(path, cfg, out)
     archive = read_archive(path)
     frozen_path = path / ROOT / "lock.json"
     if frozen_path.exists():
@@ -785,6 +825,31 @@ def _finish(path, out=print, fake_scripts=None) -> dict:
     return lock
 
 
+def _finish_baseline(path: Path, cfg: dict, out=print) -> dict:
+    """Complete the standalone verifier result without inventing a research winner."""
+    status = _baseline_status(path, cfg)
+    entry = _baselines(path, cfg)
+    if status.get("status") != "established" or entry is None:
+        raise RuntimeError("the required global baseline is not established; resume its saved phase")
+    digest = lang.entry_hash(entry)
+    frozen_path = path / ROOT / "lock.json"
+    if frozen_path.exists():
+        frozen = read_json(frozen_path)
+        if frozen.get("mode") != "baseline" or frozen.get("baseline_entry_sha256") != digest:
+            raise RuntimeError("the baseline-only completion differs from its frozen program")
+    else:
+        frozen = {"version": 1, "mode": "baseline", "global": None, "regional": {}, "candidates": [],
+                  "baseline_entry_sha256": digest, "at": now()}
+        write_json(frozen_path, frozen)
+    lock = {"locked": False, "completed": True, "mode": "baseline", "orchestration": "regional_global",
+            "baseline_established": True, "baseline_entry_sha256": digest,
+            "reason": "Baseline-only workflow completed; no trained research candidate was requested."}
+    write_json(path / "lock.json", lock)
+    write_report(path)
+    out(f"global baseline completed: {path / ROOT / 'baseline_entry.json'}; no trained research sessions ran")
+    return lock
+
+
 def _synthesize(path: Path, cfg: dict, model, frozen: dict, archive: dict, fake_scripts, out) -> dict:
     """The sole post-lock agent has no research tools and cannot enter the archive."""
     if not synthesis.enabled(cfg):
@@ -817,15 +882,18 @@ def _synthesize(path: Path, cfg: dict, model, frozen: dict, archive: dict, fake_
 
 
 def _baseline_status(path: Path, cfg: dict) -> dict:
+    if research_modes.mode(cfg) == "trained":
+        return {"source": None, "status": "not_configured",
+                "reason": "Trained-only mode requested no baseline search or comparison."}
     saved = path / ROOT / "baseline.json"
     if saved.exists():
         return read_json(saved)
     if (path / ROOT / "baseline_entry.json").exists():
         return {"source": "provided", "status": "provided",
                 "reason": "A frozen comparison supplied under the saved configuration."}
-    if global_baseline.enabled(cfg):
-        return {"source": "single_agent_search", "status": "pending",
-                "reason": "The one-agent global baseline must be established before research begins."}
+    if global_baseline.required(cfg):
+        return {"source": "provided" if _options(cfg).get("baseline_entry") else "single_agent_search",
+                "status": "pending", "reason": "The global baseline must pass the saved validation policy before acceptance."}
     return {"source": None, "status": "not_configured",
             "reason": "This saved configuration has no automatic baseline search or supplied program."}
 
@@ -844,7 +912,9 @@ def write_report(path) -> None:
     if audit_dir.exists():
         audits = {target.stem: read_json(target) for target in sorted(audit_dir.glob("*.json"))}
     api_budget = budget.state(path, run["config"]["budget"]) if run["config"]["auth"] == "api_key" else None
-    result = {"orchestration": "regional_global", "network": run["config"]["network"],
+    mode = research_modes.mode(run["config"])
+    result = {"orchestration": "regional_global", "mode": mode,
+              "completed": (path / ROOT / "lock.json").is_file(), "network": run["config"]["network"],
               "archive": archive, "state": state, "sessions": records, "audits": audits}
     baseline_status = _baseline_status(path, run["config"])
     result["baseline"] = baseline_status
@@ -852,12 +922,26 @@ def write_report(path) -> None:
     result["lead_summary"] = summary
     if api_budget is not None:
         result["api_budget"] = api_budget
+    result["comparisons"] = {
+        "development": {candidate["id"]: synthesis.comparison_result(
+            candidate["selection"], archive["baseline_scores"].get(candidate["scope_id"]))
+            for candidate in archive["candidates"]},
+        "final": {cid: {label: synthesis.comparison_result(audit.get(label), audit.get(f"{label}_baseline"))
+                        for label in ("fresh", "held_out") if label in audit} for cid, audit in audits.items()}}
     write_json(path / "report.json", result)
-    lines = ["# Regional research and global integration", "", f"Network: `{run['config']['network']}`.", "",
+    if mode == "baseline":
+        _write_baseline_report(path, result)
+        return
+    policy = ("Full coverage and agreement were required on the declared control and trained checkpoints."
+              if baseline_status.get("trained_checkpoints_used_for_acceptance") else
+              "This record does not establish acceptance on the declared trained checkpoints.")
+    lines = ["# Regional research and global integration", "", f"Workflow mode: `{mode}`.", "",
+             f"Network: `{run['config']['network']}`.", "",
              "The same reward is measured separately within each declared scope. Regional rewards do not select the global program.",
              "All findings here are measured claims unless an independent certificate is supplied.", "",
              "## Global baseline", "", f"Status: `{baseline_status['status']}`.", "",
              str(baseline_status.get("reason") or "The frozen program passed the recorded parameter checks."), "",
+             policy, "",
              "One frozen global program is scored on the target network within each claim's scope, using the same inputs and workload as the candidate. Regional comparisons do not launch additional baseline agents.", "",
              "A single-agent comparison search has different resources from the research team. A reward gap over this known program can include generic optimizations; it does not by itself measure an effect of training.", "",
              "## Global selection", "", f"Selected candidate: `{archive['global']['best'] or 'none'}`.", "",
@@ -869,7 +953,8 @@ def write_report(path) -> None:
             continue
         p, key = receipt["parts"], candidate["scope_id"]
         comparison = archive["baseline_scores"].get(key)
-        gap = f"{receipt['reward'] - comparison['reward']:+.6f}" if comparison and comparison["status"] == "scored" else ""
+        matched = result["comparisons"]["development"][candidate["id"]]
+        gap = f"{matched['reward_gap']:+.6f}" if matched["valid"] else "unavailable"
         fidelity = "none" if p["fidelity"] is None else f"{p['fidelity']:.6f}"
         cost = rewards.cost_of(p)
         cost = "none" if cost is None else f"{cost:.6f}"
@@ -892,12 +977,14 @@ def write_report(path) -> None:
             if receipt and receipt["status"] == "scored":
                 comparison = audit.get(f"{label}_baseline")
                 if comparison and comparison.get("status") == "scored":
-                    details = (f"{comparison['parts']['fidelity']} | {comparison['reward']:.6f} | "
-                               f"{receipt['reward'] - comparison['reward']:+.6f}")
+                    matched = result["comparisons"]["final"][cid][label]
+                    gap = f"{matched['reward_gap']:+.6f}" if matched["valid"] else "unavailable (comparison invalid)"
+                    details = f"{comparison['parts']['fidelity']} | {comparison['reward']:.6f} | {gap}"
                 else:
                     details = "unavailable | unavailable | unavailable"
                 lines.append(f"| {cid} | {label} | {receipt['network']} | {receipt['parts']['fidelity']} | {receipt['reward']:.6f} | {details} |")
-    lines += ["", "Comparison gaps are differences between the recorded rewards. If the comparison fails full coverage or agreement on a target check, its score is not evidence of a validated generic baseline on that check."]
+    lines += ["", "A comparison gap is reported only when the baseline has full coverage and exact agreement on the matching target check. "
+              "Other raw receipts are retained, but an invalid comparison has no validated improvement figure."]
     lines += ["", "## Execution", "", f"Completed cycles: {sum(c['status'] == 'completed' for c in state.get('cycles', []))}.",
               f"Stop reason: {state.get('stop_reason') or 'research is in progress'}.", "",
               "The raw session receipts, fixed-development comparisons and frozen final checks are kept separately. Final checks never feed research sessions or archive selection. A separate tool-less lead synthesis may describe them after locking.", ""]
@@ -909,6 +996,43 @@ def write_report(path) -> None:
     if api_budget is not None:
         lines += [f"Counted API spending: ${api_budget['spent']:.2f} of the experiment's ${api_budget['run_usd']:.2f} budget, "
                   f"from the shared spending ledger. {budget.accounting_note(api_budget)}", ""]
+    atomic_write(path / "report.md", "\n".join(lines))
+
+
+def _write_baseline_report(path: Path, result: dict) -> None:
+    """A standalone result is complete without a research winner or a lead synthesis."""
+    status = result["baseline"]
+    lines = ["# Global baseline", "", "Workflow mode: `baseline`.", "",
+             f"Status: `{status['status']}`. Completed: `{result['completed']}`.", "",
+             str(status.get("reason") or "Validation has not completed."), "",
+             "This workflow runs one global investigator, or verifies a supplied program. "
+             "It does not run trained research, regional investigators or a lead synthesis.", "",
+             "Validation checks on trained checkpoints are verifier computations, not additional agent sessions.", "",
+             "Agreement on the checked inputs is empirical evidence, not a proof for arbitrary inputs or weights.", ""]
+    if status.get("entry_sha256"):
+        lines += [f"Frozen program hash: `{status['entry_sha256']}`.", "",
+                  "Program: `multi_agent/baseline_entry.json`. Validation record: `multi_agent/baseline.json`.", ""]
+    if status.get("trained_checkpoints_used_for_acceptance"):
+        lines += ["Acceptance required full coverage and agreement on all declared control and trained checkpoints. "
+                  "Candidate rewards on trained checkpoints did not determine their ranking.", ""]
+    else:
+        lines += ["This record does not establish trained-checkpoint acceptance.", ""]
+    for title, key in (("Control checks", "control_receipts"), ("Trained checkpoint checks", "trained_receipts")):
+        lines += [f"## {title}", "", "| Checkpoint | Status | Coverage | Fidelity | Reward |",
+                  "| --- | --- | ---: | ---: | ---: |"]
+        rows = status.get(key) or {}
+        for name, receipt in rows.items():
+            parts = receipt.get("parts") or {}
+            reward = receipt.get("reward")
+            reward = f"{reward:.6f}" if isinstance(reward, (int, float)) else "unavailable"
+            lines.append(f"| {name} | {receipt.get('status')} | {parts.get('coverage')} | {parts.get('fidelity')} | {reward} |")
+        if not rows:
+            lines.append("| none recorded | pending or unsuccessful | | | |")
+        lines.append("")
+    api_budget = result.get("api_budget")
+    if api_budget is not None:
+        lines += [f"Counted API spending: ${api_budget['spent']:.2f} of ${api_budget['run_usd']:.2f}. "
+                  + budget.accounting_note(api_budget), ""]
     atomic_write(path / "report.md", "\n".join(lines))
 
 

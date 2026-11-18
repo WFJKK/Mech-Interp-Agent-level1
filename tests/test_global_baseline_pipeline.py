@@ -35,7 +35,7 @@ def prepare(tmp_path, *, supplied=False, baseline_kind="reference", old_config=F
         write_json(source, reference)
         cfg["orchestration"]["baseline_entry"] = str(source)
     if old_config:
-        for key in ("baseline_agent", "baseline_fraction", "baseline_submissions"):
+        for key in ("mode", "baseline_agent", "baseline_fraction", "baseline_submissions", "baseline_validation_version"):
             cfg["orchestration"].pop(key, None)
     path = run_config.run_path(cfg)
     path.mkdir(parents=True)
@@ -320,3 +320,200 @@ def test_manual_finish_cannot_bypass_a_required_unestablished_baseline(tmp_path,
     assert not (path / "lock.json").exists()
     assert not (path / "multi_agent/lock.json").exists()
     assert not (path / "multi_agent/summary").exists()
+
+
+@pytest.mark.parametrize("mode,roles", [
+    ("trained", ["lead", "regional", "regional", "lead", "summary"]),
+    ("baseline", ["baseline"]),
+    ("both", ["baseline", "lead", "regional", "regional", "lead", "summary"]),
+])
+def test_explicit_workflow_modes_run_exactly_the_requested_stages(tmp_path, mode, roles):
+    path, cfg, scripts = prepare(tmp_path, orchestration={"mode": mode})
+    messages = []
+    assert multi_agent.drive(path, fake_scripts=scripts, out=messages.append) == "finished"
+    state = read_json(path / "multi_agent/state.json")
+    assert state["mode"] == mode
+    plans = sorted(state["sessions"].values(), key=lambda row: row["index"])
+    assert [plan["role"] for plan in plans] == roles
+    report = read_json(path / "report.json")
+    assert report["mode"] == mode and report["completed"] is True
+    if mode == "trained":
+        assert report["baseline"]["status"] == "not_configured"
+        assert not (path / global_baseline.ENTRY).exists()
+        assert not multi_agent.read_archive(path)["baseline_scores"]
+    else:
+        record = read_json(path / global_baseline.FILE)
+        assert record["status"] == "established" and record["validation_policy_version"] == 2
+        assert record["trained_checkpoints_used_for_acceptance"] is True
+        assert record["trained_rewards_used_for_selection"] is False
+        assert len(record["trained_receipts"]) == 4
+    if mode == "baseline":
+        assert not multi_agent.read_archive(path)["candidates"]
+        assert not (path / "lead_summary.md").exists()
+        assert not (path / "multi_agent/summary").exists()
+        assert not (path / "locked_entry.json").exists()
+        assert report["lead_summary"]["status"] == "disabled"
+        assert read_json(path / "lock.json")["completed"] is True
+        assert read_json(path / "lock.json")["locked"] is False
+        assert "no trained research sessions ran" in messages[-1]
+        assert "## Trained checkpoint checks" in (path / "report.md").read_text()
+
+
+def test_baseline_only_uses_its_full_allocation_without_research_requirements(tmp_path):
+    path, cfg, scripts = prepare(tmp_path, session={"submissions": 0},
+        orchestration={"mode": "baseline", "workers": None, "planning_fraction": None,
+                       "regional_fraction": None, "summary_fraction": None, "final_summary": None})
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    state = read_json(path / "multi_agent/state.json")
+    plan = state["sessions"][state["baseline"]]
+    allocation = multi_agent.role_config(cfg, plan)
+    assert allocation["budget"]["round_usd"] == min(cfg["budget"]["run_usd"], cfg["budget"]["round_usd"])
+    assert allocation["session"]["python_calls"] == cfg["session"]["python_calls"] * cfg["rounds_max"]
+    assert allocation["session"]["max_turns"] == cfg["session"]["max_turns"] * cfg["rounds_max"]
+    assert allocation["session"]["seconds"] == cfg["session"]["seconds"] * cfg["rounds_max"]
+    assert allocation["session"]["submissions"] == cfg["orchestration"]["baseline_submissions"]
+
+
+def test_baseline_only_start_pins_every_validation_model_and_ignores_unused_research_settings(tmp_path):
+    _, cfg, scripts = prepare(tmp_path, seed_check={"network": "lin-c-s0"}, session={"submissions": 0},
+        orchestration={"mode": "baseline", "workers": None, "initial_regions": None,
+                       "planning_fraction": None, "regional_fraction": None, "summary_fraction": None})
+    cfg["run_id"] = "standalone-start"
+    path = loop.start(cfg, fake_scripts=scripts, out=lambda *_: None)
+    run = read_json(path / "run.json")
+    assert {item["model"] for item in run["global_baseline_validation_models"]} == {
+        "models/lin-e", "models/lin-c", "models/lin-a-1to4"}
+    assert all(item["trusted_hash"] for item in run["global_baseline_validation_models"])
+    state = read_json(path / "multi_agent/state.json")
+    assert [p["role"] for p in state["sessions"].values()] == ["baseline"]
+    assert read_json(path / "report.json")["completed"] is True
+
+
+def test_baseline_only_resume_reuses_completed_program_and_checks(tmp_path, monkeypatch):
+    path, cfg, scripts = prepare(tmp_path, orchestration={"mode": "baseline"})
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    names = [global_baseline.FILE, global_baseline.ENTRY, global_baseline.CHECKS, "multi_agent/lock.json"]
+    before = {name: (path / name).read_bytes() for name in names}
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("a completed standalone baseline must not ask an agent again")
+
+    monkeypatch.setattr(FakeBackend, "respond", no_backend)
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    assert all((path / name).read_bytes() == content for name, content in before.items())
+
+
+def test_baseline_only_can_validate_a_supplied_program_without_an_agent(tmp_path, monkeypatch):
+    path, cfg, scripts = prepare(tmp_path, supplied=True, orchestration={"mode": "baseline"})
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("checking a supplied standalone program requires no agent")
+
+    monkeypatch.setattr(FakeBackend, "respond", no_backend)
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    state = read_json(path / "multi_agent/state.json")
+    assert state["sessions"] == {}
+    record = read_json(path / global_baseline.FILE)
+    assert record["status"] == "established" and record["source"] == "provided"
+    assert record["trained_checkpoints_used_for_acceptance"] is True
+
+
+def test_invalid_supplied_program_stops_before_research(tmp_path, monkeypatch):
+    path, cfg, scripts = prepare(tmp_path, supplied=True)
+    model = load_model(cfg["model"])
+    graph = lang.Graph(model.load_weights(cfg["network"]), model.n_ctx)
+    write_json(cfg["orchestration"]["baseline_entry"], graph.entry(predict=graph.token(0)))
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("failed supplied comparison must stop before research")
+
+    monkeypatch.setattr(FakeBackend, "respond", no_backend)
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "stopped"
+    assert read_json(path / global_baseline.FILE)["status"] == "failed"
+    assert not (path / global_baseline.ENTRY).exists()
+    assert not (path / "multi_agent/lock.json").exists()
+
+
+@pytest.mark.parametrize("action", [multi_agent.drive, multi_agent.finish])
+def test_completed_baseline_mode_cannot_change_into_paid_research(tmp_path, monkeypatch, action):
+    path, cfg, scripts = prepare(tmp_path, orchestration={"mode": "baseline"})
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    run = read_json(path / "run.json")
+    run["config"]["orchestration"]["mode"] = "both"
+    write_json(path / "run.json", run)
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("a changed saved mode must fail before any new paid stage")
+
+    monkeypatch.setattr(FakeBackend, "respond", no_backend)
+    with pytest.raises(RuntimeError, match="saved workflow mode changed"):
+        action(path, fake_scripts=scripts, out=lambda *_: None)
+
+
+@pytest.mark.parametrize("action", [multi_agent.drive, multi_agent.finish])
+def test_completed_baseline_rechecks_its_frozen_acceptance_evidence(tmp_path, monkeypatch, action):
+    path, cfg, scripts = prepare(tmp_path, orchestration={"mode": "baseline"})
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
+    baseline = read_json(path / global_baseline.FILE)
+    baseline["trained_receipts"].pop(next(iter(baseline["trained_receipts"])))
+    write_json(path / global_baseline.FILE, baseline)
+    names = [global_baseline.FILE, global_baseline.ENTRY, "multi_agent/lock.json", "lock.json"]
+    before = {name: (path / name).read_bytes() for name in names}
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("verifying a completed baseline must not ask an agent")
+
+    monkeypatch.setattr(FakeBackend, "respond", no_backend)
+    with pytest.raises(RuntimeError, match="validation evidence changed"):
+        action(path, fake_scripts=scripts, out=lambda *_: None)
+    assert all((path / name).read_bytes() == value for name, value in before.items())
+
+
+def test_failed_supplied_validation_cannot_be_downgraded_on_resume(tmp_path, monkeypatch):
+    path, cfg, scripts = prepare(tmp_path, supplied=True)
+    model = load_model(cfg["model"])
+    graph = lang.Graph(model.load_weights(cfg["network"]), model.n_ctx)
+    write_json(cfg["orchestration"]["baseline_entry"], graph.entry(predict=graph.token(0)))
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "stopped"
+    failed = (path / global_baseline.FILE).read_bytes()
+    run = read_json(path / "run.json")
+    run["config"]["orchestration"]["baseline_validation_version"] = 1
+    write_json(path / "run.json", run)
+
+    def no_backend(*args, **kwargs):
+        pytest.fail("a changed validation policy must not introduce a new paid stage")
+
+    monkeypatch.setattr(FakeBackend, "respond", no_backend)
+    with pytest.raises(RuntimeError, match="saved baseline validation policy changed"):
+        multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None)
+    assert (path / global_baseline.FILE).read_bytes() == failed
+
+
+def test_a_later_inexact_comparison_has_no_reported_validated_gap(completed, tmp_path):
+    import copy
+    import shutil
+
+    original, cfg, _, _ = completed
+    path = tmp_path / "report-check"
+    shutil.copytree(original, path)
+    archive = multi_agent.read_archive(path)
+    candidate = archive["candidates"][0]
+    comparator = archive["baseline_scores"][candidate["scope_id"]]
+    comparator["parts"]["n_agree"] -= 1
+    comparator["parts"]["fidelity"] = comparator["parts"]["n_agree"] / comparator["parts"]["n_in_region"]
+    write_json(path / "multi_agent/archive.json", archive)
+    audit_path = path / "multi_agent/audits" / (candidate["id"] + ".json")
+    audit = read_json(audit_path)
+    changed = copy.deepcopy(audit["fresh_baseline"])
+    changed["parts"]["n_agree"] -= 1
+    changed["parts"]["fidelity"] = changed["parts"]["n_agree"] / changed["parts"]["n_in_region"]
+    audit["fresh_baseline"] = changed
+    write_json(audit_path, audit)
+    multi_agent.write_report(path)
+    result = read_json(path / "report.json")["comparisons"]
+    for match in (result["development"][candidate["id"]], result["final"][candidate["id"]]["fresh"]):
+        assert match["valid"] is False and match["reward_gap"] is None
+        assert match["raw_reward_difference"] is not None
+    row = next(row for row in (path / "report.md").read_text().splitlines()
+               if row.startswith(f"| {candidate['id']} | fresh |"))
+    assert "unavailable (comparison invalid)" in row
