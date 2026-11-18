@@ -354,19 +354,33 @@ class Session:
         return out
 
     def _checkpoint(self) -> dict | None:
-        """A formal receipt, rather than a mutable draft or local score, satisfies the integration gate."""
+        """A formal receipt, rather than a mutable draft or local score, satisfies the session's gate."""
         from .regions import scope_id
 
         research = self.state.get("research_task") or {}
         allowance = research.get("checkpoint_python_calls")
-        if research.get("role") != "lead" or research.get("cycle", 0) <= 0 or allowance is None:
+        baseline = research.get("role") == "baseline"
+        integration = research.get("role") == "lead" and research.get("cycle", 0) > 0
+        if not (baseline or integration) or allowance is None:
             return None  # persisted sessions without this policy retain their original behavior
         assigned = self.state["verifier"].get("scope")
         sid = scope_id(assigned)
         initial = min(int(allowance), self.state["budgets"]["run_python"])
         receipts = [r for r in self.receipts() if scope_id(r.get("claim_scope", assigned)) == sid]
-        scored = next((r for r in receipts if r.get("status") == "scored" and r.get("reward") is not None), None)
-        repaired = sum(r.get("status") == "refused" for r in receipts)
+
+        def qualifies(receipt):
+            if receipt.get("status") != "scored" or receipt.get("reward") is None:
+                return False
+            if not baseline:
+                return True
+            parts = receipt.get("parts") or {}
+            count = parts.get("n_inputs", 0)
+            return (count > 0 and parts.get("coverage") == 1.0
+                    and parts.get("n_in_region") == count and parts.get("n_agree") == count)
+
+        scored = next((r for r in receipts if qualifies(r)), None)
+        repaired = sum(r.get("status") == "refused" or
+                       (baseline and r.get("status") == "scored" and not qualifies(r)) for r in receipts)
         bootstrap = int(bool(self.state.get("checkpoint_bootstrap_used"))
                         or (self.state["used"]["run_python"] >= initial and not self.entries()))
         remaining_submissions = self.state["budgets"]["submit_entry"] - self.state["used"]["submit_entry"]

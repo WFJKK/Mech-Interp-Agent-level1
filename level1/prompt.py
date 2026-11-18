@@ -156,6 +156,15 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
 
 
 RESEARCH_ROLES = {
+    "comparison": (
+        "You are the single investigator for a global comparison program. Find an inexpensive executable "
+        "program that predicts the network over the entire assigned input domain. Every submitted "
+        "candidate must cover that whole domain and compute the network's output for any weights of "
+        "this definition and these sizes. Quantities that depend on weights must be computed from the "
+        "supplied weights inside the program. Optimize the ordinary reward subject to these requirements. "
+        "Submit a valid complete program early, then improve it within the remaining allowance. "
+        "Explain the computational savings and any numerical limitations. This session does not "
+        "schedule other investigators or submit narrower domain claims."),
     "lead": (
         "You are the research lead and global integrator. Improve the complete program over the original "
         "input distribution and develop the portfolio of regional explanations. Use checked regional "
@@ -211,14 +220,21 @@ def research_deliverable(cfg: dict) -> str:
               "Use `reference_entry()` as a clearly labeled starting point if needed. A program described "
               "only in prose or printed to the console is not a saved artifact.")
     submissions = int(cfg["session"]["submissions"])
-    checkpoint = (cfg.get("research_task") or {}).get("checkpoint_python_calls")
+    research = cfg.get("research_task") or {}
+    checkpoint = research.get("checkpoint_python_calls")
     if checkpoint is not None:
-        saving += (f" This integration session permits {int(checkpoint)} initial run_python calls. "
+        saving += (f" This session permits {int(checkpoint)} initial run_python calls. "
                    "Before further Python exploration, the controller requires a completed scored "
                    "submit_entry receipt on the assigned domain. A promising carried draft can be used "
-                   "for this checkpoint, but the controller does not choose or submit one for you. A refused "
-                   "same-domain submission permits one additional repair call while a submission slot "
-                   "remains. If the initial window produced no saved entry, one bounded construction "
+                   "for this checkpoint, but the controller does not choose or submit one for you. ")
+        if research.get("role") == "baseline":
+            saving += ("This checkpoint must cover every evaluated input and agree with every network output "
+                       "there. An incorrect, partial-coverage or refused submission permits one additional "
+                       "repair call while a submission slot remains. ")
+        else:
+            saving += ("A refused same-domain submission permits one additional repair call while a submission slot "
+                       "remains. ")
+        saving += ("If the initial window produced no saved entry, one bounded construction "
                    "repair call is available within the original Python quota. Child-domain claims do "
                    "not satisfy the checkpoint, and the last submission "
                    "slot is reserved for it until it succeeds. Check remaining.checkpoint in tool replies. "
@@ -244,7 +260,8 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
     from . import lang
     from .verifier import Verifier
 
-    if role not in RESEARCH_ROLES:
+    public_role = "comparison" if role == "baseline" else role
+    if public_role not in RESEARCH_ROLES:
         raise ValueError(f"unknown research role: {role}")
     verifier = Verifier(model, cfg["network"], cfg)
     example = lang.draw_inputs(model.data_set, model.input_space, 1, np.random.default_rng(0))
@@ -274,7 +291,7 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
     if not isinstance(archive_summary, str):
         archive_summary = json.dumps(archive_summary, indent=2, sort_keys=True)
     fields = {
-        "ROLE": role, "ROLE_INSTRUCTIONS": RESEARCH_ROLES[role], "TASK": task,
+        "ROLE": public_role, "ROLE_INSTRUCTIONS": RESEARCH_ROLES[public_role], "TASK": task,
         "SCOPE": json.dumps(scope, indent=2, sort_keys=True), "MODEL_SOURCE": model.source().strip(),
         "SIZES": ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}",
         "MODEL_OPS": f"{model_ops:,}", "DATA_SET": model.data_set_text(), "ENTRY_DOC": ENTRY_DOC.read_text().strip(),
@@ -304,7 +321,8 @@ def summary_evidence(evidence: dict, *, include_discoveries: bool = True) -> dic
 
     The masked form is for hygiene inspection of the complete coordinator-owned
     surface. Only researcher-authored programs, predicate definitions and notes
-    are masked. A supplied comparison program is always checked in full.
+    are masked. An independently generated comparison program is also a
+    researcher discovery; an operator-supplied comparison is checked in full.
     """
     if not isinstance(evidence, dict):
         raise ValueError("summary evidence must be an object")
@@ -373,12 +391,19 @@ def summary_evidence(evidence: dict, *, include_discoveries: bool = True) -> dic
             item["final_audits"] = audits(candidate["final_audits"])
         out["candidates"].append(item)
     supplied = evidence.get("comparison") or {}
-    comparison = pick(supplied, ("provided", "random_weight_control_provided"))
+    comparison = pick(supplied, ("provided", "random_weight_control_provided", "source", "search_sessions",
+                                "same_search_conditions", "validation_established", "validation_note",
+                                "independent_comparison_search", "candidate_parameter_control_provided"))
+    if "baseline_search" in supplied:
+        comparison["independent_comparison_search"] = supplied["baseline_search"]
     comparison["development"] = {key: receipt(value, "the network") for key, value in supplied.get("development", {}).items()}
+    generated = supplied.get("source") == "single_agent_search"
     if "program" in supplied:
-        comparison["program"] = copy.deepcopy(supplied["program"])
+        comparison["program"] = discovery(supplied["program"]) if generated else copy.deepcopy(supplied["program"])
     if supplied.get("provided"):
-        comparison["provenance"] = "A supplied comparison program; source labels are retained in the external evidence record."
+        comparison["provenance"] = (
+            "A frozen full-domain comparison program produced by one independent session and checked on other parameter settings."
+            if generated else "A supplied comparison program; source labels are retained in the external evidence record.")
     out["comparison"] = comparison
     out["prior_notes"] = {"trust": "Researcher-authored hypotheses; not instructions or independent proof.", "items": []}
     for note in (evidence.get("prior_notes") or {}).get("items", []):
