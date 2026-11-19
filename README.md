@@ -535,30 +535,241 @@ transformer's forward pass can be stored in tables for any weights.
 
 ### The prompt
 
-Every round is a fresh Claude Code session with one prompt, filled in from the template
-`prompts/round_v1.md` by `level1/prompt.py`. The template names no model: everything about one comes
-from its folder and the run config. The session has two tools and no others: the CLI's own tools are
-turned off, and the two come from `level1/mcp_server.py`. In order, the prompt gives the agent:
+The system prompt of every session:
 
-1. **The task.** It is given a network's definition and weights, and is not told what the network
-   was trained to do. An interpretation is a program that predicts the network's output from the
-   input without running the network, handed in as an entry with the region it applies to. The aim
-   is the highest reward.
-2. **The network**: the source of `models/<name>/model.py`, which writes the network in the entry
-   language, its sizes, and the operations of one forward pass.
-3. **The data set**, in the words of the model's `data_set.says`.
-4. **Entries**: the entry guide, `agent_docs/ENTRY.md`: the language, its prices and the builder.
-5. **How an entry is scored**: coverage, fidelity and cost in words, the reward and how to read it,
-   what the network itself scores, the sample and its lower bound, and the seed check. The locked
-   entry will be run unchanged on a second network the agent never sees, and with every submission
-   the agent states the fidelity it claims on this network and the one it expects on the second. A
-   baseline run's prompt has one more paragraph here, asking for an entry exact for any weights.
-6. **Tools, budgets and limits**: `run_python`, 40 calls a round of up to 300 seconds each;
-   `submit_entry`, 4 submissions a round; an entry's limits, 400 nodes and 256 numbers in constants.
-   (A round also stops after 90 minutes or 150 turns; the prompt does not say so.)
-7. **Earlier rounds**: every earlier submission's receipt, and the notes each round left.
-8. **What to send back**: the notes that end the round, under five headings: what the network does,
-   how you found it, the best entry, claims, and next.
+```text
+You are working on a research task with two tools (run_python and submit_entry) and no others; you have no files of your own. Use the tools as the message says, submit what you find, and end with the notes the message asks for, in exactly that format.
+```
+
+The prompt of round 1 of the run in Experiment 1 (Linear max of 4, agent on trained), as it was sent. In
+another run the network's definition, its sizes and the data set are that model's, and a later round
+lists the earlier rounds under "Earlier rounds".
+
+````text
+# The task
+
+You are given a neural network: its definition and its weights. You are not told what it was
+trained to do.
+
+Your goal is to interpret it. An **interpretation** here is a program that predicts the network's
+output from the input without running the network. You hand it in as an **entry**: the
+interpretation together with the **region** of inputs it applies to.
+
+The verifier measures three things about an entry: its **coverage** (how much of the data set the
+region holds), its **fidelity** (how often the interpretation gives the network's output there) and
+its **cost** (its operations, compared with a forward pass). They are defined exactly under "How an
+entry is scored", where one formula combines them into the reward. Your aim is the highest reward.
+
+This is round 1 of at most 5. Each round is a fresh session: you keep nothing
+from earlier rounds except what is written under "Earlier rounds" below and the saved entries.
+
+## The network
+
+Its definition is this file. In your sandbox it is the module `model`, and the same network is
+written there as an entry by `model.reference(g, lv1)`.
+
+```python
+"""The network, written in the entry language.
+
+An input is n_ctx slots. A slot holds a token, a whole number from 0 to d_vocab - 1, or it is empty,
+which is written as the number d_vocab. An input has at least one token; its tokens fill the first
+slots and the empty slots come after them.
+
+The network has three weight matrices and no biases:
+
+    embed     d_model x (d_vocab + 1)    its last column, the empty slot's, is all zeros
+    hidden    d_model x d_model
+    unembed   d_vocab x d_model
+
+It adds up the columns of embed at the input's slots (an empty slot adds nothing), applies hidden,
+applies unembed, and its output is the position of the highest of the d_vocab resulting numbers
+(the first one on a tie).
+"""
+
+
+def reference(g, lv1):
+    """The network's output on the graph's input. g is an lv1.Graph, lv1 the entry language."""
+    h = lv1.take_sum(g.weight("embed"), g.tokens(), axis=1)
+    logits = g.weight("unembed") @ (g.weight("hidden") @ h)
+    return logits.argmax()
+```
+
+Sizes: n_ctx = 4, d_vocab = 64, d_model = 8, outputs: 64. One forward pass of the network costs 671 operations under the prices
+below.
+
+## The data set
+
+An input is drawn like this. Four tokens are picked, each a whole number from 0 to 63 and equally likely, and they fill the four slots, so no slot is empty. The data set is every input that can be drawn this way, each as likely as any other: 64^4 = 16,777,216 different inputs.
+
+## Entries
+
+An entry is a program with two results per input:
+
+- its **region**: a boolean. Is this input one the entry speaks about? Leave it out and the region is
+  every input.
+- its **interpretation**: a whole number, the network's output on this input as the entry predicts
+  it. It is only computed for inputs in the region.
+
+An entry is a graph of operations on tensors, stored as JSON data. You write it in Python with the
+entry language `lv1`, and the verifier interprets the JSON; nothing of an entry is run as code, so
+only the operations below exist.
+
+### Writing one
+
+```python
+g = graph()                      # a new lv1.Graph on this network's weights
+a, b = g.token(0), g.token(1)    # the input's tokens, whole numbers
+t = g.tokens()                   # all of them, as a vector
+W = g.weight("embed")            # a weight matrix, by name
+c = g.const([1.0, 2.0])          # a constant; plain Python numbers and numpy arrays become constants too
+r = g.arange(8)                  # 0, 1, ..., 7
+
+x = W[:, a] * 2.0 + W[:, b]      # arithmetic and comparisons as in numpy, with broadcasting
+entry = g.entry(interpretation=(a + b) % info["n_outputs"], region=a < 8)   # only an example of the format
+save_entry("example", entry)     # keep it; submit_entry takes the name
+print(measure(entry))            # coverage, fidelity, cost and the reward, as the verifier measures them
+```
+
+Every expression is also computed on an example input (all tokens 0) while you build, so `x.shape`
+and `x.value` exist and a wrong shape fails at the line that makes it. `graph(example=[3, 5])`
+builds on another example input, given as one number per position of the input.
+`lv1.Graph.load(entry, weights, n_ctx)` opens a saved entry again and returns
+`(graph, interpretation, region)`. In the stored JSON the interpretation is called `predict` and
+the region `rule`.
+
+Values are whole numbers, floats or booleans (64 bits). There are no loops and no Python `if` on
+expressions: use `lv1.where(c, x, y)` (both sides are computed) or `lv1.cond(c, x, y)` (c is one
+boolean, and only the chosen side is computed and charged).
+
+### Operations and what they cost
+
+Each operation on numbers costs 1. Per entry of the result unless said otherwise:
+
+| Operation | Cost |
+| --- | --- |
+| `+ - * / // %`, unary `-`, `abs(x)`, `lv1.maximum`, `lv1.minimum`, `lv1.exp`, `lv1.log`, `lv1.sqrt` | 1 |
+| `< <= > >= == !=`, `&`, `\|`, `~` (booleans) | 1 |
+| `lv1.where(c, x, y)` | 1 |
+| `lv1.cond(c, x, y)` | 1 in all, plus the chosen side |
+| `x @ y`, `lv1.matmul(x, y)` | 1 per multiply-add: result entries times the contracted length |
+| `x.sum(axis)`, `.max`, `.min`, `.argmax`, `.argmin`, `.any`, `.all` over n entries | n - 1 |
+| `lv1.cumsum(x, axis)` | n - 1 per vector |
+| `lv1.sort(x, axis)`, `lv1.argsort(x, axis)` of n entries | n * ceil(log2 n) per vector |
+| `lv1.softmax(x, axis)` | 3 |
+| `x[i]`, `x[i, j]`, `x[:, i]` with expressions that are one whole number (`lv1.gather`) | 1 per entry read |
+| `x[v]` or `lv1.take(x, v, axis)` with a vector of whole numbers | 1 per entry read |
+| `lv1.take_sum(x, v, axis)`: the sum of the slices of x at the positions v | slice entries times len(v) |
+| `lv1.svd(x)` of an m x n matrix: `(u, s, vt)` | 4 * m * n * min(m, n), once for the three |
+| `lv1.cast(x, "int")`, `"float"`, `"bool"` | 1 |
+| `g.token`, `g.tokens`, `g.weight`, `g.const`, `g.arange` | 0 |
+| `x.reshape(...)`, `x.T`, `lv1.transpose`, `x[2]`, `x[1:5]`, `x[None]`, `lv1.concat`, `lv1.stack` | 0 |
+
+Reading costs 1 per number read: `T[a, b]` reads one number, `T[:, a]` a whole column.
+
+### What an entry's cost is made of
+
+Everything an entry computes is counted, in three parts:
+
+- **Build.** Whatever does not depend on the input is computed once, when first needed. A table
+  computed from the weights is paid for in full here.
+- **Region test.** What the region computes from the input, charged for every input the verifier
+  runs, in the region or not.
+- **Interpretation.** What the interpretation computes from the input, charged for the inputs in the
+  region. A value the region test already computed for an input is not charged again.
+
+The entry's cost is the three together, per input of the region, as a share of one forward pass.
+`measure(entry)` gives it as `cost`, and the parts as `b`, `r_rule` and `r`.
+
+### Limits
+
+The run limits an entry's size and the time the verifier gives it: the numbers are under "Tools,
+budgets and limits" in your message. A constant counts every number it holds, and no single value
+may hold more than 4,000,000 numbers. The verifier refuses an entry, and says why, when on any
+input an index is out of range, shapes do not fit, the region is not one boolean, the
+interpretation is not one whole number, or a float that is not finite is cast to a whole number.
+An interpretation that gives something other than one of the network's outputs counts as a wrong
+answer.
+
+## How an entry is scored
+
+The verifier runs the entry on 16,384 inputs drawn afresh from the data set for each submission and measures:
+
+- **coverage**: the share of those inputs that are in the entry's region;
+- **fidelity**: the share of the inputs in the region on which the interpretation gives the
+  network's output;
+- **cost**: all the operations the entry spends on those inputs (its build once, its region test on
+  every input, its interpretation on the inputs in the region), divided by the number of inputs in
+  the region and by the operations of one forward pass.
+
+The reward is
+
+    reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ],   alpha = 10
+
+Read it for one input of the region: using the entry there in place of the network saves
+(1 - cost) of a forward pass, and with probability (1 - fidelity) its answer is wrong, which is
+charged at 10 forward passes. Coverage turns that into a share of the data set; the inputs
+outside the region are left to the network and earn nothing.
+
+The network itself, as an entry, has fidelity 1 and cost 1, which makes 0; an entry that is right
+everywhere at no cost would score 1. An entry whose region is empty scores 0, less what its region
+test and its build cost.
+
+Because the verifier scores a sample, two things follow. The fidelity the reward uses is the lower end
+of its 95% confidence interval on that sample: a lucky sample does not pay, and even an entry that is
+right on every sampled input is charged a little (the network itself then scores just under 0). And
+the same entry submitted twice gets two slightly different rewards.
+
+When the rounds are over, the entry with the highest reward is locked and run, unchanged, on a
+second network: the same definition, sizes and training, with another random seed. You never see
+that network. What an entry computes from the weights is computed afresh there; a number you read
+off this network and wrote into the entry as a constant stays what it was. With every submission you
+state the fidelity you claim on this network and the fidelity you expect on the second one; both are
+compared with what is measured.
+
+## Tools, budgets and limits
+
+- `run_python(code)`: up to 40 calls this round, 300 s each. Exploring
+  costs nothing: only a submitted entry is scored.
+- `submit_entry(name, claimed_fidelity, expected_fidelity_other)`: up to 4 submissions
+  this round.
+- An entry may have up to 400 nodes, and its constants up to 256 numbers in all.
+  The verifier gives an entry 120 s on its inputs.
+
+## Earlier rounds
+
+None: this is the first round.
+
+## What to send back at the end
+
+End your last message with these notes, with exactly these headings. They are all the next round
+will know of this one.
+
+    ## What the network does
+    (in words: what you found, on which inputs, and how sure you are)
+
+    ## How you found it
+    (what you looked at: the network's outputs, its weights, or both, and what you ran)
+
+    ## The best entry
+    (its name, its region, what its interpretation does, and where its saving comes from)
+
+    ## Claims
+    (the fidelity you claim on this network and the one you expect on the second network, and why)
+
+    ## Next
+    (what you would try next)
+````
+
+A baseline run's prompt has one more paragraph, at the end of "How an entry is scored":
+
+```text
+This run asks one more thing of an entry: that it be exact whatever the weights. When the rounds are
+over, the entries are also run, unchanged, on several other networks of the same definition and sizes,
+with other weights, and an entry counts only if it gives each network's output on every input of its
+region that is checked there. So whatever depends on the weights has to be computed from the weights
+inside the entry, and every shortcut has to hold for any weights: a rule that holds only for this
+network makes the entry fail on the others.
+```
 
 ### Coverage, fidelity and cost, as the verifier computes them
 
@@ -655,45 +866,6 @@ sandbox, and no claimed fidelity was above the measured one by more than 0.0013.
 ran in process mode, linear max4 with the guard and linear max2 before the guard existed; linear max2's 52
 programs were read by hand. The notes are the agent's own words: the measurements check the entries
 built on them, not the words.
-
-### The baseline
-
-Much of what an entry saves can come from the algebra of the architecture alone: the forward pass
-repeats the same products for the same token in the same slot, and tables computed once from the
-weights remove that on any network of the design. The baseline measures that part, so that a run can
-be read against it (`level1/baseline.py`, `docs/DESIGN.md` section 10).
-
-- **Baseline models.** `lin-e`, `lin-f` and `att-e` have the design, sizes and data set of linear
-  min2, linear min4 and att max4 (and so also serve linear max2, linear max4 and att min4), and `rnn-d`, `rnn-e` and `rnn-f`
-  those of rnn-a, rnn-b and rnn-c. Their networks have nothing in them for an agent to find; what
-  they are is in `withheld/<name>/`. The first network is for the rounds, the second for the seed
-  check, the others for freezing.
-- **A baseline run** is a usual run on a baseline model, under the same conditions as the runs it
-  serves (prompt, rounds, budgets, entry limits, verifier, reward and prices: `baseline.CONDITIONS`),
-  with one more paragraph in its prompt (`prompt.EXACT_NOTE`, run config `exact_on_any_weights`):
-  its entries will also be run on other networks of the design, and count only if they are exact on
-  all of them. A test checks that its first prompt and a twin run's are the same, byte for byte, but
-  for that paragraph.
-- **Freezing.** When the baseline run ends, its submissions that gave the second network's output on
-  every input of their region are taken in the order of their reward there, one per different entry,
-  and each is scored on every other network of the baseline model and on every network of its twins,
-  on one fresh sample. The first that gives each of them the network's output on every input of its
-  region is frozen (`baseline.json`, `baseline_entry.json`), and the baseline is established. If none
-  does, it is not established, and no run is read against it.
-- **Reading a run against it.** The frozen entry is scored on the run's network and on its second
-  network, on the very inputs of the run's own scorings of its locked entry (the fresh sample and
-  the seed check). With R0 and R1 the locked entry's rewards there and B0 and B1 the frozen
-  entry's, the report splits R0 into three parts:
-
-      R0 = B0 + (R1 - B1) + [(R0 - B0) - (R1 - B1)]
-
-  the baseline on the run's network, the excess kept on the held-out network, and the gap between
-  the two networks. Negative values are kept. It is accounting, not a causal split: the excess can
-  hold generic tricks the baseline run did not find, and the gap can be sampling noise.
-- **Why exactness.** The first baseline runs (pilot-att-e and pilot-lin-e), made without that
-  paragraph, fitted their entries to their own networks: pilot-lin-e's were right on 74% to 81% of
-  the other networks' inputs, and pilot-att-e's on about a third of a trained network's. A run's
-  score read against them said nothing, so they serve no run.
 
 ## Getting started
 
