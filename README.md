@@ -295,9 +295,25 @@ Agent on trained against pure max: the gap is now much larger than in Experiment
 0.384, where it was 0.974 against 0.970. We are outside the training distribution. Off 4 tokens the
 network departs from the largest token, on 5.6% of all inputs, so the task alone no longer predicts it.
 
-What the agent on trained submitted: one program that first finds out how many tokens the input has
-(6 operations) and then treats each number of tokens separately. On the first seed, with 20,000 inputs
-per number of tokens:
+What the agent on trained submitted: one program of 400 steps. 105 of the steps are branch points
+("if this holds, take that step's result, otherwise the other one's"), and for an input only the steps
+on its path are run and counted. With `M = U · H · E` as before, the score of an output is
+`s(o) = M[o,t₁] + … + M[o,tₙ]`, and m is the largest token.
+
+- Counting the tokens: three checks "is this slot empty?", each followed by a branch point. 6
+  operations.
+- 1 token: the answer is read from a table of the network's answer to each single token,
+  `T[t] = argmax over o of M[o,t]`, built once. 1 operation.
+- 4 tokens: `answer = max(m, floor)`, the entry of Experiment 1, read from a table. 3 operations for m
+  and 1 for the table.
+- 2 or 3 tokens: the same. For some values of m the entry also holds a second candidate; then it
+  computes s(o) for both candidates and answers the higher.
+- 5 to 8 tokens: 5 or 6 more comparisons, on m and on the ratio `(t₁ + … + tₙ) / (m + 1)`, lead to one
+  of 98 short lists C of candidate outputs, 2 to about 9 of the 64. The entry computes s(o) only for
+  those and answers the highest, `answer = argmax over o in C of s(o)`. With 8 candidates and 8 tokens
+  that is 64 operations for the scores.
+
+On the first seed, with 20,000 inputs per number of tokens:
 
 | Tokens | What the entry does | Operations per input | Fidelity |
 | ---: | --- | ---: | ---: |
@@ -312,6 +328,23 @@ per number of tokens:
 
 Which outputs are on a list, and the second candidates for 2 and 3 tokens, were read off the first
 network.
+
+##### Is the network explained?
+
+On the first seed:
+
+| Part of the behaviour | Share of inputs | Short description |
+| --- | ---: | --- |
+| Answers the largest token, with the floor | 96.4% | yes: one rule |
+| Answers to a single token that depart from it | 0.8% | yes: a table of 64 answers, from the weights |
+| Departures on 2 and 3 tokens | 0.07% | a few second candidates, read off this network |
+| Departures on 5 to 8 tokens that the entry catches | 2.65% | none: the entry computes the exact scores of a short list, and the lists are read off this network |
+| Not predicted | 0.09% | none |
+
+So we have explained the network up to about 2.7% of inputs. For 2.65% the entry predicts the network,
+but only by computing part of it, with lists of candidates read off this one network. For 0.09% we
+have no prediction at all. On the second seed those lists catch much less, and 1.1% of inputs are not
+predicted.
 
 ### Experiment 3: AlgZoo
 
