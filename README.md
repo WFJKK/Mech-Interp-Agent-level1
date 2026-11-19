@@ -107,6 +107,24 @@ is initialised depends on the model, and we say it in each experiment's section.
 
 ### Experiment 1: linear + attention models on trained input only
 
+#### Linear max of 4
+
+##### Architecture and training
+
+- Sizes: 64 tokens, 4 slots per input, width 8.
+- Weights: three matrices and no biases: an embedding (8 × 64), a hidden matrix (8 × 8) and an
+  unembedding (64 × 8).
+- Task: output the largest of the four tokens.
+- Inputs: four tokens, each uniformly random from 0 to 63, drawn fresh at every step.
+- Loss and optimiser: cross-entropy with AdamW (learning rate 0.001, betas 0.9 and 0.999, weight decay
+  0.01), batch 1,024, float32.
+- Starting weights: uniform in ±1/√k, where k is the number of inputs to the matrix (64 for the
+  embedding, 8 for the other two).
+- Stopping: training ran in blocks of 10,000 steps until accuracy over all 64⁴ inputs gained less than
+  0.05 percentage points over 20,000 steps.
+- Networks: two, from seeds 0 and 1 (80,000 and 70,000 steps). They give the largest token on 99.83%
+  and 99.79% of all inputs.
+
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
 ### Experiment 3: AlgZoo
