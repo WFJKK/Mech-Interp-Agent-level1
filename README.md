@@ -181,6 +181,39 @@ It misses the other two thirds, 0.11% of inputs. There the tokens at the top are
 often with two tokens one below the largest, and the network answers one below the largest token (57%
 of the missed inputs), two below (15%) or up to four above (20%). The entry answers the largest token.
 
+The agent on baseline found no rule. On the untrained network the largest token, the smallest, sums
+and others each agree with the network on about 1 input in 64. So its entry is the network's own
+calculation, exact for any weights, only done with less work. It saves in three steps.
+
+One table. The network multiplies by three matrices, the embedding E, the hidden matrix H and the
+unembedding U. The entry multiplies them together once, `M = U · H · E`, a table of 64 × 64 numbers.
+The score of an output o is then a sum of four numbers from the table, one per token, and the network
+answers the o with the highest score:
+
+    s(o) = M[o,t₁] + M[o,t₂] + M[o,t₃] + M[o,t₄]
+
+Pair sums. For every pair of tokens (a, b) the entry stores once `P[a,b][o] = M[o,a] + M[o,b]`, sorted
+from highest to lowest. For an input it splits the four tokens into two pairs, and then
+
+    s(o) = P[t₁,t₂][o] + P[t₃,t₄][o]
+
+Early stop. Write A₁ ≥ A₂ ≥ … for the sorted values of the first pair and B₁ ≥ B₂ ≥ … for those of the
+second. The entry computes s(o) only for the K highest outputs of each pair. Every other output has
+
+    s(o) ≤ A[K+1] + B[K+1]
+
+so if the best score found is above this bound, it is the network's answer and the entry stops.
+Otherwise K grows, from 2 up to 17. Rarely, on about 0.15% of the inputs of its own network, the bound
+never settles it and all 64 scores are added up.
+
+On the first trained seed this takes about 55 operations per input. The tables take 1.0 million
+operations, done once per network, which adds 61 per input over the 16,384 scored. Together that is
+about 116 operations, 0.174 of a forward pass.
+
+None of these steps uses anything a network has learned, which is why the entry is exact on trained
+and untrained networks alike. The agent on trained replaces all of it by
+`max(t₁, t₂, t₃, t₄, floor)`.
+
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
 ### Experiment 3: AlgZoo
