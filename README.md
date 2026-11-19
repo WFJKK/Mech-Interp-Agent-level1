@@ -159,29 +159,8 @@ still comes out far ahead.
 
 Agent on trained against pure max of 4: the two are close, 0.974 against 0.970. But the agent's entry
 is not just the max. Its cost is 0.0064 against 0.0045, about 1.4 times as much, so it does slightly
-more: one more step per input, a floor that it works out from the weights (see below). That buys a
+more: one more step per input, a floor that it works out from the weights. That buys a
 little fidelity, 99.87% against 99.82%.
-
-**Discovered mechanism**
-
-- Agent on trained: the network outputs the largest of its four tokens, with a floor. It never answers
-  below a certain token, 10 on the first seed and 11 on the second. The entry is the larger of the
-  largest token and that floor, and the floor is computed once from the weights, as the smallest answer
-  the network gives to a single token from 0 to 7. This takes 4 operations per input, against 671 for
-  a forward pass. The agent found the rule in round 1: it compared the network's outputs on a sample
-  with simple functions of the tokens, and the largest matched on 99.8%. It then multiplied the three
-  matrices into one 64 × 64 table, saw that the column of each token peaks at that token, and counted
-  the rule's mistakes on every input. It could not predict the remaining disagreements, about 0.1% of
-  inputs, with anything cheap; in most of them the network answers one or two below the largest token.
-- Agent on baseline: it found no rule. On the untrained network no simple function of the tokens fits
-  (the largest, the smallest, sums and others each agree on about 1 input in 64). Its entry is the
-  network's own calculation, exact for any weights, made cheaper by the network being linear. The
-  score of an output is the sum of four numbers, one per token, read from the 64 × 64 table of the
-  three matrices multiplied together. The entry adds these up for every pair of tokens once and sorts
-  them. For an input it splits the four tokens into two pairs, looks only at the highest few outputs
-  of each pair and stops as soon as a bound shows which output wins; on about 0.15% of inputs it has to
-  add up everything. This takes about 115 operations per input on the trained networks, half of it
-  the tables built once.
 
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
