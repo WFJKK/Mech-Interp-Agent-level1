@@ -131,18 +131,21 @@ The baseline's untrained networks are the trainer's starting weights, kept as dr
 as above. There are six of them, from six other seeds (2000 to 2005); the baseline agent works on one,
 and its entry must be exact on all six and on the two trained networks.
 
-On 16,384 sampled inputs per network; one forward pass is 671 operations.
+Each score below is measured on 16,384 inputs drawn at random from the data set (all 64⁴ inputs of
+four tokens), a separate draw for each network. One forward pass costs 671 operations.
 
 | Entry | Network | Coverage | Fidelity | Cost | Reward |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.002 |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023<sup>1</sup> |
 | Trained run, locked | first seed | 1 | 99.87% | 0.0064 | 0.974 |
 | Trained run, locked | second seed | 1 | 99.92% | 0.0064 | 0.980 |
 | Baseline | first seed | 1 | 100% | 0.174 | 0.824 |
 | Baseline | second seed | 1 | 100% | 0.171 | 0.827 |
 
-Brute force saves nothing, so its reward is 0 but for the small charge every entry pays for being
-measured on a sample.
+<sup>1</sup> Not 0, because the reward uses the 95% lower bound of the fidelity and not the measured
+fidelity. 16,384 right answers out of 16,384 give a lower bound of 99.977%, and the missing 0.023% is
+charged like wrong answers, at 10 forward passes each. Every entry measured on a sample pays this same
+0.0023.
 
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
