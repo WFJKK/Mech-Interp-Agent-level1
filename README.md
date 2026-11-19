@@ -135,7 +135,8 @@ is initialised depends on the model, and we say it in each experiment's section.
   (hands an entry to the verifier, which scores it).
 - Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
-- Inference: about 9.6 million forward passes (agent on trained); agent on baseline: count pending.
+- Inference: about 9.6 million forward passes (agent on trained), more than 11 million (agent on baseline;
+  103 of its 159 programs counted).
 
 ##### Scores
 
@@ -414,7 +415,7 @@ on exactly 4.
   (hands an entry to the verifier, which scores it).
 - Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
-- Inference: count pending (agent on trained), count pending (agent on baseline).
+- Inference: about 36 million forward passes (agent on trained), about 4.4 million (agent on baseline).
 
 ##### Scores
 
@@ -473,7 +474,7 @@ standard normal, and the reward uses the 95% lower bound of that share.
   (hands an entry to the verifier, which scores it).
 - Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
-- Inference: about 120 million forward passes (agent on trained); agent on baseline: count pending.
+- Inference: about 120 million forward passes (agent on trained), about 16 million (agent on baseline).
 
 ##### Scores
 
@@ -514,7 +515,7 @@ standard normal, and the reward uses the 95% lower bound of that share.
   (hands an entry to the verifier, which scores it).
 - Hyperparameters: money cap $20 a round and $80 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
-- Inference: about 230 million forward passes (agent on trained); agent on baseline: count pending.
+- Inference: about 225 million forward passes (agent on trained), about 0.5 million (agent on baseline).
 
 ##### Scores
 
@@ -548,7 +549,7 @@ standard normal, and the reward uses the 95% lower bound of that share.
   (hands an entry to the verifier, which scores it).
 - Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
-- Inference: count pending (agent on trained).
+- Inference: about 90 million forward passes (agent on trained).
 
 ##### Scores
 
