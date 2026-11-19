@@ -137,8 +137,8 @@ four tokens), a separate draw for each network. One forward pass costs 671 opera
 | Entry | Network | Coverage | Fidelity | Cost | Reward | log₂ speed-up<sup>2</sup> |
 | --- | --- | ---: | ---: | ---: | ---: | ---: |
 | Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023<sup>1</sup> | 0.00 |
-| Pure max of 4 (the largest token) | first seed | 1 | 99.82% | 0.0045 | 0.970 | 5.06 |
-| Pure max of 4 (the largest token) | second seed | 1 | 99.85% | 0.0045 | 0.973 | 5.21 |
+| Pure max of 4 | first seed | 1 | 99.82% | 0.0045 | 0.970 | 5.06 |
+| Pure max of 4 | second seed | 1 | 99.85% | 0.0045 | 0.973 | 5.21 |
 | Agent on trained | first seed | 1 | 99.87% | 0.0064 | 0.974 | 5.27 |
 | Agent on trained | second seed | 1 | 99.92% | 0.0064 | 0.980 | 5.64 |
 | Agent on baseline | first seed | 1 | 100% | 0.174 | 0.824 | 2.51 |
