@@ -125,6 +125,21 @@ is initialised depends on the model, and we say it in each experiment's section.
 - Networks: two, from seeds 0 and 1 (80,000 and 70,000 steps). They give the largest token on 99.83%
   and 99.79% of all inputs.
 
+##### Scores
+
+On 16,384 sampled inputs per network; one forward pass is 671 operations.
+
+| Entry | Network | Coverage | Fidelity | Cost | Reward |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.002 |
+| Trained run, locked | first seed | 1 | 99.87% | 0.0064 | 0.974 |
+| Trained run, locked | second seed | 1 | 99.92% | 0.0064 | 0.980 |
+| Baseline | first seed | 1 | 100% | 0.174 | 0.824 |
+| Baseline | second seed | 1 | 100% | 0.171 | 0.827 |
+
+Brute force saves nothing, so its reward is 0 but for the small charge every entry pays for being
+measured on a sample.
+
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
 ### Experiment 3: AlgZoo
