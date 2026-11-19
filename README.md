@@ -223,6 +223,31 @@ So we have explained the network up to 0.11% of inputs. For those we know where 
 inputs whose top tokens are close together, but we have no explanation for them apart from running the
 network.
 
+#### Attention max of 4
+
+##### Architecture and training
+
+- Sizes: 64 tokens, 4 slots per input, width 32.
+- Architecture: a transformer with one layer and one attention head, and nothing else: no MLP, no
+  layer norm, no biases. Each slot has a learned position embedding, and the output is read at the last
+  token. This is the network of Gross et al.
+- Weights: a token embedding (64 × 32), a position embedding (4 × 32), the query, key, value and output
+  matrices of the head (32 × 32 each) and an unembedding (32 × 64).
+- Task: output the largest of the four tokens.
+- Inputs: four tokens, each uniformly random from 0 to 63, drawn fresh at every step.
+- Loss and optimiser: cross-entropy at the last position with AdamW (learning rate 0.001, weight decay
+  0.01), batch 512, float32.
+- Starting weights: uniform in ±1/√k, where k is the first dimension of the matrix (64 for the token
+  embedding, 4 for the position embedding, 32 for the others).
+- Stopping: after 4,000 steps.
+- Networks: two, from seeds 0 and 1. They give the largest token on 99.992% and 99.996% of all inputs.
+
+##### Scores
+
+##### Evaluation
+
+##### Is the network explained?
+
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
 We have seen that for a network evaluated on its training input distribution, the agent could
@@ -346,6 +371,26 @@ but only from cases it saved or by computing part of it, both read off this one 
 have no prediction at all. On the second seed the saved cases and lists catch much less: of the
 departures on 2 and 3 tokens the entry gets 0 of 18 and 24 of 130, and 1.1% of all inputs are not
 predicted.
+
+#### Attention max of 4
+
+##### Architecture and training
+
+The same as in Experiment 1: the same two networks, with the same architecture and training. Here they
+are asked about inputs of 1 to 4 tokens, each number of tokens equally likely, while they were trained
+on exactly 4.
+
+##### Scores
+
+| Entry | Network | Coverage | Fidelity | Cost | Reward |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023 |
+| Pure max | first seed | 1 | 76.57% | 0.0005 | -1.4089 |
+| Pure max | second seed | 1 | 91.54% | 0.0005 | 0.1098 |
+| Agent on trained | first seed | 1 | 100% | 0.0089 | 0.9887 |
+| Agent on trained | second seed | 1 | 100% | 0.0071 | 0.9905 |
+| Agent on baseline | first seed | 1 | 100% | 0.0404 | 0.9573 |
+| Agent on baseline | second seed | 1 | 100% | 0.0404 | 0.9573 |
 
 ### Experiment 3: AlgZoo
 
