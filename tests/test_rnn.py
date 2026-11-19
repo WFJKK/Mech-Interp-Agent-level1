@@ -295,18 +295,21 @@ def test_the_agent_is_not_told_what_the_networks_are(name):
 
 
 def test_what_the_networks_are_is_said_in_withheld_and_the_tests_only():
+    """Outside the withheld folder, the tests and the README, no file of the repository says what these
+    networks are. The README names and describes the models for people (CLAUDE.md) and is never on the
+    agent's side, which the hygiene check of the agent's surface covers."""
     r = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=REPO, capture_output=True, text=True)
     files = [Path(f) for f in r.stdout.splitlines()] if r.returncode == 0 and r.stdout.strip() else []
     if not files:
         pytest.skip("no git to list the repository's files")
     texts = {}
     for rel in files:
-        if rel.parts[0] not in ("withheld", "tests") and rel.suffix != ".npz" and (REPO / rel).is_file():
+        if rel.parts[0] not in ("withheld", "tests") and rel.as_posix() != "README.md" and rel.suffix != ".npz" and (REPO / rel).is_file():
             try:
                 texts[rel.as_posix()] = (REPO / rel).read_text()
             except UnicodeDecodeError:
                 pass
-    assert "config/pilot/rnn-a.yaml" in texts and "models/rnn-c/config.yaml" in texts and "README.md" in texts
+    assert "config/pilot/rnn-a.yaml" in texts and "models/rnn-c/config.yaml" in texts and "README.md" not in texts
     assert "config/pilot/rnn-g.yaml" in texts and "models/rnn-g/config.yaml" in texts
     words = TASK_WORDS + ["second biggest", "second highest", "next largest", "alignment.org"]
     assert hygiene.hits(texts, words) == []
