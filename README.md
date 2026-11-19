@@ -127,6 +127,10 @@ is initialised depends on the model, and we say it in each experiment's section.
 
 ##### Scores
 
+The baseline's untrained networks are the trainer's starting weights, kept as drawn: uniform in ±1/√k
+as above. There are six of them, from six other seeds (2000 to 2005); the baseline agent works on one,
+and its entry must be exact on all six and on the two trained networks.
+
 On 16,384 sampled inputs per network; one forward pass is 671 operations.
 
 | Entry | Network | Coverage | Fidelity | Cost | Reward |
