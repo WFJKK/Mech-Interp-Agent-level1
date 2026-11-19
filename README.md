@@ -99,10 +99,10 @@ models. While our goal is "heuristic understanding", naturally the "reward funct
 how well the agent can "predict" the output. Hence, we expect that part of the hill-climbing will
 amount to inference optimisation in a sense. For that reason we always compare to a baseline of the
 agent working on an untrained model of the same architecture. The baseline agent gets the same prompt
-and rounds, with one more paragraph that asks for an interpretation exact for any weights; its best
-entry that is exact on every other untrained network and on every trained network of the architecture
-is then run unchanged on the trained network, on the same inputs as the trained run's entry, and the
-two rewards are compared. (How an untrained network is initialised depends on the model, and we say
+and rounds, with one more paragraph that asks for an interpretation exact for any weights. For a
+baseline entry to be valid, we demand that it is exact on every other network of the architecture,
+both trained and untrained; the best valid entry is then run unchanged on the trained network, on the
+same inputs as the trained run's entry, and the two rewards are compared. (How an untrained network is initialised depends on the model, and we say
 it in each experiment's section.)
 
 ### Experiment 1: linear + attention models on trained input only
