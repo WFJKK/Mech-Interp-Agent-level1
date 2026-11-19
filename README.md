@@ -151,6 +151,17 @@ charged like wrong answers, at 10 forward passes each. Every entry measured on a
 
 ##### Evaluation
 
+Agent on trained against agent on baseline: in reward the difference looks small, 0.974 against 0.824
+on the first seed, because both are already close to 1. In cost it is large. The agent on trained
+needs 0.0064 of a forward pass per input and the agent on baseline 0.174, which is 27 times as much.
+The baseline's entry is never wrong and the agent's is wrong on about 0.1% of inputs, and the agent's
+still comes out far ahead.
+
+Agent on trained against pure max of 4: the two are close, 0.974 against 0.970. But the agent's entry
+is not just the max. Its cost is 0.0064 against 0.0045, about 1.4 times as much, so it does slightly
+more: one more step per input, a floor that it works out from the weights (see below). That buys a
+little fidelity, 99.87% against 99.82%.
+
 **Discovered mechanism**
 
 - Agent on trained: the network outputs the largest of its four tokens, with a floor. It never answers
