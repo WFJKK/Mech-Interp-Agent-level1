@@ -392,6 +392,16 @@ on exactly 4.
 | Agent on baseline | first seed | 1 | 100% | 0.0404 | 0.9573 |
 | Agent on baseline | second seed | 1 | 100% | 0.0404 | 0.9573 |
 
+##### Evaluation
+
+Agent on trained against agent on baseline: in reward the two are close here, 0.989 against 0.957,
+where for linear max of 4 they were far apart, 0.913 against 0.689. Counted in work, the picture is
+the same for both networks. Here the agent on trained needs 116 operations per input and the agent on
+baseline 525, which is 4.5 times as much. For the linear network it was 51 against 217, which is 4.2
+times as much. So the agent gains about as much from the trained network in both cases. The rewards
+differ because a forward pass costs 12,987 operations here and 703 there, and most of the
+transformer's forward pass can be stored in tables for any weights.
+
 ### Experiment 3: AlgZoo
 
 ## More implementation details
