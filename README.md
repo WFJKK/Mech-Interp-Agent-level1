@@ -572,9 +572,8 @@ The system prompt of every session:
 You are working on a research task with two tools (run_python and submit_entry) and no others; you have no files of your own. Use the tools as the message says, submit what you find, and end with the notes the message asks for, in exactly that format.
 ```
 
-The prompt of round 1 of the run in Experiment 1 (Linear max of 4, agent on trained), as it was sent. In
-another run the network's definition, its sizes and the data set are that model's, and a later round
-lists the earlier rounds under "Earlier rounds".
+Every round's prompt is one template, `prompts/round_v1.md`, the same for every model. Its slots, written
+`{{...}}`, are filled in for the run:
 
 ````text
 # The task
@@ -591,13 +590,160 @@ region holds), its **fidelity** (how often the interpretation gives the network'
 its **cost** (its operations, compared with a forward pass). They are defined exactly under "How an
 entry is scored", where one formula combines them into the reward. Your aim is the highest reward.
 
-This is round 1 of at most 5. Each round is a fresh session: you keep nothing
+This is round {{ROUND}} of at most {{ROUNDS_MAX}}. Each round is a fresh session: you keep nothing
 from earlier rounds except what is written under "Earlier rounds" below and the saved entries.
 
 ## The network
 
 Its definition is this file. In your sandbox it is the module `model`, and the same network is
 written there as an entry by `model.reference(g, lv1)`.
+
+```python
+{{MODEL_SOURCE}}
+```
+
+Sizes: {{SIZES}}. One forward pass of the network costs {{MODEL_OPS}} operations under the prices
+below.
+
+## The data set
+
+{{DATA_SET}}
+
+## Entries
+
+{{ENTRY_DOC}}
+
+## How an entry is scored
+
+The verifier runs the entry on {{INPUTS_NOTE}} and measures:
+
+- **coverage**: the share of those inputs that are in the entry's region;
+- **fidelity**: the share of the inputs in the region on which the interpretation gives the
+  network's output;
+- **cost**: all the operations the entry spends on those inputs (its build once, its region test on
+  every input, its interpretation on the inputs in the region), divided by the number of inputs in
+  the region and by the operations of one forward pass.
+
+The reward is
+
+    {{REWARD_FORMULA}}
+
+{{REWARD_EXPLANATION}}
+
+The network itself, as an entry, has fidelity 1 and cost 1, which makes 0; an entry that is right
+everywhere at no cost would score 1. An entry whose region is empty scores 0, less what its region
+test and its build cost.
+{{SAMPLE_NOTE}}
+When the rounds are over, the entry with the highest reward is locked and run, unchanged, on a
+second network: the same definition, sizes and training, with another random seed. You never see
+that network. What an entry computes from the weights is computed afresh there; a number you read
+off this network and wrote into the entry as a constant stays what it was. With every submission you
+state the fidelity you claim on this network and the fidelity you expect on the second one; both are
+compared with what is measured.{{EXACT_NOTE}}
+
+## Tools, budgets and limits
+
+- `run_python(code)`: up to {{PYTHON_CALLS}} calls this round, {{PYTHON_SECONDS}} s each. Exploring
+  costs nothing: only a submitted entry is scored.
+- `submit_entry(name, claimed_fidelity, expected_fidelity_other)`: up to {{SUBMISSIONS}} submissions
+  this round.
+- An entry may have up to {{MAX_NODES}} nodes, and its constants up to {{MAX_CONST}} numbers in all.
+  The verifier gives an entry {{VERIFIER_SECONDS}} s on its inputs.
+
+## Earlier rounds
+
+{{HISTORY}}
+
+## What to send back at the end
+
+End your last message with these notes, with exactly these headings. They are all the next round
+will know of this one.
+
+    ## What the network does
+    (in words: what you found, on which inputs, and how sure you are)
+
+    ## How you found it
+    (what you looked at: the network's outputs, its weights, or both, and what you ran)
+
+    ## The best entry
+    (its name, its region, what its interpretation does, and where its saving comes from)
+
+    ## Claims
+    (the fidelity you claim on this network and the one you expect on the second network, and why)
+
+    ## Next
+    (what you would try next)
+````
+
+#### Slots filled the same way in every run
+
+- `{{ROUND}}`, `{{ROUNDS_MAX}}`: the round's number, and 5.
+- `{{ENTRY_DOC}}`: the entry guide, [`agent_docs/ENTRY.md`](agent_docs/ENTRY.md): the entry language, what
+  each operation costs, and an entry's limits.
+- `{{INPUTS_NOTE}}`: "16,384 inputs drawn afresh from the data set for each submission".
+- `{{REWARD_FORMULA}}`: `reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ],   alpha = 10`
+- `{{REWARD_EXPLANATION}}`:
+
+  > Read it for one input of the region: using the entry there in place of the network saves
+  > (1 - cost) of a forward pass, and with probability (1 - fidelity) its answer is wrong, which is
+  > charged at 10 forward passes. Coverage turns that into a share of the data set; the inputs
+  > outside the region are left to the network and earn nothing.
+
+- `{{SAMPLE_NOTE}}`:
+
+  > Because the verifier scores a sample, two things follow. The fidelity the reward uses is the lower end
+  > of its 95% confidence interval on that sample: a lucky sample does not pay, and even an entry that is
+  > right on every sampled input is charged a little (the network itself then scores just under 0). And
+  > the same entry submitted twice gets two slightly different rewards.
+
+- `{{PYTHON_CALLS}}`, `{{PYTHON_SECONDS}}`, `{{SUBMISSIONS}}`: 40, 300 and 4.
+- `{{MAX_NODES}}`, `{{MAX_CONST}}`, `{{VERIFIER_SECONDS}}`: 400, 256 and 120.
+- `{{HISTORY}}`: in round 1, "None: this is the first round." In a later round, every earlier submission with its
+  receipt, and the notes each earlier round left.
+- `{{EXACT_NOTE}}`: nothing. In a baseline run, this paragraph:
+
+  > This run asks one more thing of an entry: that it be exact whatever the weights. When the rounds are
+  > over, the entries are also run, unchanged, on several other networks of the same definition and sizes,
+  > with other weights, and an entry counts only if it gives each network's output on every input of its
+  > region that is checked there. So whatever depends on the weights has to be computed from the weights
+  > inside the entry, and every shortcut has to hold for any weights: a rule that holds only for this
+  > network makes the entry fail on the others.
+
+#### Slots each model fills in
+
+A baseline run fills them exactly as the run it is compared with.
+
+| Model | `{{SIZES}}` | `{{MODEL_OPS}}` |
+| --- | --- | ---: |
+| Linear max of 4, Experiment 1 | n_ctx = 4, d_vocab = 64, d_model = 8, outputs: 64 | 671 |
+| Linear max of 4, Experiment 2 | n_ctx = 8, d_vocab = 64, d_model = 8, outputs: 64 | 703 |
+| Attention max of 4 | n_ctx = 4, d_vocab = 64, d_model = 32, d_head = 32, outputs: 64 | 12,987 |
+| RNN second argmax of 3 numbers | n_ctx = 3, d_hidden = 4, outputs: 3 | 78 |
+| RNN second argmax of 10 numbers (both sections) | n_ctx = 10, d_hidden = 16, outputs: 10 | 2,937 |
+
+`{{DATA_SET}}`:
+
+- Linear max of 4, Experiment 1:
+
+  > An input is drawn like this. Four tokens are picked, each a whole number from 0 to 63 and equally likely, and they fill the four slots, so no slot is empty. The data set is every input that can be drawn this way, each as likely as any other: 64^4 = 16,777,216 different inputs.
+
+- Linear max of 4, Experiment 2:
+
+  > An input is drawn like this. First a number of tokens is picked from 1 to 8, each equally likely. Then that many tokens are picked, each a whole number from 0 to 63 and equally likely. The tokens fill the first slots and the remaining slots are empty (64). The data set is every input that can be drawn this way, each counted as often as it is drawn: about 2.8 x 10^14 different inputs, far more with eight tokens than with one, yet every number of tokens makes up an eighth of the data set.
+
+- Attention max of 4:
+
+  > An input is drawn like this. First a number of tokens is picked from 1, 2, 3 and 4, each equally likely. Then that many tokens are picked, each a whole number from 0 to 63 and equally likely. The tokens fill the first slots and the remaining slots are empty (64). The data set is every input that can be drawn this way, each counted as often as it is drawn: about 17 million different inputs, most of them filling every slot, yet every number of tokens makes up a quarter of the data set.
+
+- RNN second argmax of 3 numbers:
+
+  > An input is three real numbers, x_0, x_1 and x_2, each drawn on its own from the standard normal distribution (mean 0, standard deviation 1). The data set is every input that can be drawn this way, each weighted by how likely it is to be drawn. There are infinitely many, so the verifier scores a sample.
+
+- RNN second argmax of 10 numbers (both sections):
+
+  > An input is ten real numbers, x_0 to x_9, each drawn on its own from the standard normal distribution (mean 0, standard deviation 1). The data set is every input that can be drawn this way, each weighted by how likely it is to be drawn. There are infinitely many, so the verifier scores a sample.
+
+`{{MODEL_SOURCE}}`, the linear network (Experiments 1 and 2):
 
 ```python
 """The network, written in the entry language.
@@ -625,181 +771,83 @@ def reference(g, lv1):
     return logits.argmax()
 ```
 
-Sizes: n_ctx = 4, d_vocab = 64, d_model = 8, outputs: 64. One forward pass of the network costs 671 operations under the prices
-below.
-
-## The data set
-
-An input is drawn like this. Four tokens are picked, each a whole number from 0 to 63 and equally likely, and they fill the four slots, so no slot is empty. The data set is every input that can be drawn this way, each as likely as any other: 64^4 = 16,777,216 different inputs.
-
-## Entries
-
-An entry is a program with two results per input:
-
-- its **region**: a boolean. Is this input one the entry speaks about? Leave it out and the region is
-  every input.
-- its **interpretation**: a whole number, the network's output on this input as the entry predicts
-  it. It is only computed for inputs in the region.
-
-An entry is a graph of operations on tensors, stored as JSON data. You write it in Python with the
-entry language `lv1`, and the verifier interprets the JSON; nothing of an entry is run as code, so
-only the operations below exist.
-
-### Writing one
+`{{MODEL_SOURCE}}`, the attention network:
 
 ```python
-g = graph()                      # a new lv1.Graph on this network's weights
-a, b = g.token(0), g.token(1)    # the input's tokens, whole numbers
-t = g.tokens()                   # all of them, as a vector
-W = g.weight("embed")            # a weight matrix, by name
-c = g.const([1.0, 2.0])          # a constant; plain Python numbers and numpy arrays become constants too
-r = g.arange(8)                  # 0, 1, ..., 7
+"""The network, written in the entry language.
 
-x = W[:, a] * 2.0 + W[:, b]      # arithmetic and comparisons as in numpy, with broadcasting
-entry = g.entry(interpretation=(a + b) % info["n_outputs"], region=a < 8)   # only an example of the format
-save_entry("example", entry)     # keep it; submit_entry takes the name
-print(measure(entry))            # coverage, fidelity, cost and the reward, as the verifier measures them
+An input is n_ctx slots. A slot holds a token, a whole number from 0 to d_vocab - 1, or it is empty,
+which is written as the number d_vocab. An input has at least one token; its tokens fill the first
+slots and the empty slots come after them.
+
+The network is a transformer with one layer, one attention head and no MLP, no layer norm and no biases.
+Its weights:
+
+    embed     (d_vocab + 1) x d_model   a row per token; the last row, an empty slot's, is all zeros
+    pos       n_ctx x d_model            a row per slot
+    query     d_model x d_head
+    key       d_model x d_head
+    value     d_model x d_head
+    out       d_head x d_model
+    unembed   d_model x d_vocab
+
+Each slot's vector is its token's row of embed plus its own row of pos. The network is read at the slot of
+the last token given: that slot's vector times query, divided by the square root of d_head, is scored
+against every given slot's vector times key (a dot product per slot; empty slots take no part); the softmax
+of the scores weights the given slots' vectors times value; the sum, times out, is added to the read slot's
+vector; that times unembed gives d_vocab numbers, and the output is the position of the highest (the first
+one on a tie).
+"""
+
+import math
+
+
+def reference(g, lv1):
+    """The network's output on the graph's input. g is an lv1.Graph, lv1 the entry language."""
+    t = g.tokens()
+    embed, pos = g.weight("embed"), g.weight("pos")
+    n_ctx, empty = pos.shape[0], embed.shape[0] - 1
+    x = lv1.take(embed, t, axis=0) + pos                     # a vector per slot
+    n = (t != empty).sum()                                    # the number of tokens given
+    read = x[n - 1]                                           # the slot of the last token given
+    q = (read @ g.weight("query")) * (1 / math.sqrt(g.weight("query").shape[1]))
+    scores = (x @ g.weight("key")) @ q
+    scores = lv1.where(g.arange(n_ctx) < n, scores, -1e30)    # empty slots take no part
+    head = lv1.softmax(scores) @ (x @ g.weight("value"))
+    logits = (read + head @ g.weight("out")) @ g.weight("unembed")
+    return logits.argmax()
 ```
 
-Every expression is also computed on an example input (all tokens 0) while you build, so `x.shape`
-and `x.value` exist and a wrong shape fails at the line that makes it. `graph(example=[3, 5])`
-builds on another example input, given as one number per position of the input.
-`lv1.Graph.load(entry, weights, n_ctx)` opens a saved entry again and returns
-`(graph, interpretation, region)`. In the stored JSON the interpretation is called `predict` and
-the region `rule`.
+`{{MODEL_SOURCE}}`, the RNNs (all three):
 
-Values are whole numbers, floats or booleans (64 bits). There are no loops and no Python `if` on
-expressions: use `lv1.where(c, x, y)` (both sides are computed) or `lv1.cond(c, x, y)` (c is one
-boolean, and only the chosen side is computed and charged).
+```python
+"""The network, written in the entry language.
 
-### Operations and what they cost
+An input is n_ctx real numbers, x_0 to x_(n_ctx - 1). The network reads them one at a time, in that order.
+In an entry, g.token(t) is x_t, as a float, and g.tokens() is all of them; the output is still a whole number.
 
-Each operation on numbers costs 1. Per entry of the result unless said otherwise:
+The network is a recurrent network with one layer of d_hidden units, a ReLU and no biases. Its weights:
 
-| Operation | Cost |
-| --- | --- |
-| `+ - * / // %`, unary `-`, `abs(x)`, `lv1.maximum`, `lv1.minimum`, `lv1.exp`, `lv1.log`, `lv1.sqrt` | 1 |
-| `< <= > >= == !=`, `&`, `\|`, `~` (booleans) | 1 |
-| `lv1.where(c, x, y)` | 1 |
-| `lv1.cond(c, x, y)` | 1 in all, plus the chosen side |
-| `x @ y`, `lv1.matmul(x, y)` | 1 per multiply-add: result entries times the contracted length |
-| `x.sum(axis)`, `.max`, `.min`, `.argmax`, `.argmin`, `.any`, `.all` over n entries | n - 1 |
-| `lv1.cumsum(x, axis)` | n - 1 per vector |
-| `lv1.sort(x, axis)`, `lv1.argsort(x, axis)` of n entries | n * ceil(log2 n) per vector |
-| `lv1.softmax(x, axis)` | 3 |
-| `x[i]`, `x[i, j]`, `x[:, i]` with expressions that are one whole number (`lv1.gather`) | 1 per entry read |
-| `x[v]` or `lv1.take(x, v, axis)` with a vector of whole numbers | 1 per entry read |
-| `lv1.take_sum(x, v, axis)`: the sum of the slices of x at the positions v | slice entries times len(v) |
-| `lv1.svd(x)` of an m x n matrix: `(u, s, vt)` | 4 * m * n * min(m, n), once for the three |
-| `lv1.cast(x, "int")`, `"float"`, `"bool"` | 1 |
-| `g.token`, `g.tokens`, `g.weight`, `g.const`, `g.arange` | 0 |
-| `x.reshape(...)`, `x.T`, `lv1.transpose`, `x[2]`, `x[1:5]`, `x[None]`, `lv1.concat`, `lv1.stack` | 0 |
+    input       d_hidden x 1
+    recurrent   d_hidden x d_hidden
+    readout     n_outputs x d_hidden
 
-Reading costs 1 per number read: `T[a, b]` reads one number, `T[:, a]` a whole column.
+Its state h, a vector of d_hidden numbers, starts at zero. At each position t, in order, it becomes
 
-### What an entry's cost is made of
+    h = relu(input x_t + recurrent h)
 
-Everything an entry computes is counted, in three parts:
+where relu sets every negative number to zero. After the last position, readout h gives n_outputs numbers,
+and the output is the position of the highest (the first one on a tie).
+"""
 
-- **Build.** Whatever does not depend on the input is computed once, when first needed. A table
-  computed from the weights is paid for in full here.
-- **Region test.** What the region computes from the input, charged for every input the verifier
-  runs, in the region or not.
-- **Interpretation.** What the interpretation computes from the input, charged for the inputs in the
-  region. A value the region test already computed for an input is not charged again.
 
-The entry's cost is the three together, per input of the region, as a share of one forward pass.
-`measure(entry)` gives it as `cost`, and the parts as `b`, `r_rule` and `r`.
-
-### Limits
-
-The run limits an entry's size and the time the verifier gives it: the numbers are under "Tools,
-budgets and limits" in your message. A constant counts every number it holds, and no single value
-may hold more than 4,000,000 numbers. The verifier refuses an entry, and says why, when on any
-input an index is out of range, shapes do not fit, the region is not one boolean, the
-interpretation is not one whole number, or a float that is not finite is cast to a whole number.
-An interpretation that gives something other than one of the network's outputs counts as a wrong
-answer.
-
-## How an entry is scored
-
-The verifier runs the entry on 16,384 inputs drawn afresh from the data set for each submission and measures:
-
-- **coverage**: the share of those inputs that are in the entry's region;
-- **fidelity**: the share of the inputs in the region on which the interpretation gives the
-  network's output;
-- **cost**: all the operations the entry spends on those inputs (its build once, its region test on
-  every input, its interpretation on the inputs in the region), divided by the number of inputs in
-  the region and by the operations of one forward pass.
-
-The reward is
-
-    reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ],   alpha = 10
-
-Read it for one input of the region: using the entry there in place of the network saves
-(1 - cost) of a forward pass, and with probability (1 - fidelity) its answer is wrong, which is
-charged at 10 forward passes. Coverage turns that into a share of the data set; the inputs
-outside the region are left to the network and earn nothing.
-
-The network itself, as an entry, has fidelity 1 and cost 1, which makes 0; an entry that is right
-everywhere at no cost would score 1. An entry whose region is empty scores 0, less what its region
-test and its build cost.
-
-Because the verifier scores a sample, two things follow. The fidelity the reward uses is the lower end
-of its 95% confidence interval on that sample: a lucky sample does not pay, and even an entry that is
-right on every sampled input is charged a little (the network itself then scores just under 0). And
-the same entry submitted twice gets two slightly different rewards.
-
-When the rounds are over, the entry with the highest reward is locked and run, unchanged, on a
-second network: the same definition, sizes and training, with another random seed. You never see
-that network. What an entry computes from the weights is computed afresh there; a number you read
-off this network and wrote into the entry as a constant stays what it was. With every submission you
-state the fidelity you claim on this network and the fidelity you expect on the second one; both are
-compared with what is measured.
-
-## Tools, budgets and limits
-
-- `run_python(code)`: up to 40 calls this round, 300 s each. Exploring
-  costs nothing: only a submitted entry is scored.
-- `submit_entry(name, claimed_fidelity, expected_fidelity_other)`: up to 4 submissions
-  this round.
-- An entry may have up to 400 nodes, and its constants up to 256 numbers in all.
-  The verifier gives an entry 120 s on its inputs.
-
-## Earlier rounds
-
-None: this is the first round.
-
-## What to send back at the end
-
-End your last message with these notes, with exactly these headings. They are all the next round
-will know of this one.
-
-    ## What the network does
-    (in words: what you found, on which inputs, and how sure you are)
-
-    ## How you found it
-    (what you looked at: the network's outputs, its weights, or both, and what you ran)
-
-    ## The best entry
-    (its name, its region, what its interpretation does, and where its saving comes from)
-
-    ## Claims
-    (the fidelity you claim on this network and the one you expect on the second network, and why)
-
-    ## Next
-    (what you would try next)
-````
-
-A baseline run's prompt has one more paragraph, at the end of "How an entry is scored":
-
-```text
-This run asks one more thing of an entry: that it be exact whatever the weights. When the rounds are
-over, the entries are also run, unchanged, on several other networks of the same definition and sizes,
-with other weights, and an entry counts only if it gives each network's output on every input of its
-region that is checked there. So whatever depends on the weights has to be computed from the weights
-inside the entry, and every shortcut has to hold for any weights: a rule that holds only for this
-network makes the entry fail on the others.
+def reference(g, lv1):
+    """The network's output on the graph's input. g is an lv1.Graph, lv1 the entry language."""
+    w, rec = g.weight("input")[:, 0], g.weight("recurrent")
+    h = lv1.maximum(w * g.token(0), 0.0)  # the first position: the state before it is zero, and so is recurrent h
+    for t in range(1, g.n_ctx):
+        h = lv1.maximum(w * g.token(t) + rec @ h, 0.0)
+    return (g.weight("readout") @ h).argmax()
 ```
 
 ### Coverage, fidelity and cost, as the verifier computes them
