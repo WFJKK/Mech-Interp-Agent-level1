@@ -125,11 +125,12 @@ is initialised depends on the model, and we say it in each experiment's section.
 - Networks: two, from seeds 0 and 1 (80,000 and 70,000 steps). They give the largest token on 99.83%
   and 99.79% of all inputs.
 
-##### Price, runtime, agent
+##### Price, runtime, agent, internet
 
 - Price: $4.31 (agent on trained), $34.89 (agent on baseline).
 - Runtime: 14 min (agent on trained), 2 h 22 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Internet: not used (no web tools, and the agent's Python runs with the network blocked).
 
 ##### Scores
 
@@ -281,12 +282,13 @@ The same as in Experiment 1: the same two networks, with the same architecture a
 inputs differ. Here the networks have 8 slots and are asked about inputs of 1 to 8 tokens, each number
 of tokens equally likely, while they were trained on exactly 4.
 
-##### Price, runtime, agent
+##### Price, runtime, agent, internet
 
 - Price: $39.83 at API prices, run under a login and not charged (agent on trained), $19.91 (agent on
   baseline).
 - Runtime: 2 h 4 min (agent on trained), 1 h 9 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Internet: not used (no web tools, and the agent's Python runs with the network blocked).
 
 ##### Scores
 
@@ -393,11 +395,12 @@ The same as in Experiment 1: the same two networks, with the same architecture a
 are asked about inputs of 1 to 4 tokens, each number of tokens equally likely, while they were trained
 on exactly 4.
 
-##### Price, runtime, agent
+##### Price, runtime, agent, internet
 
 - Price: $29.42 (agent on trained), $41.63 (agent on baseline).
 - Runtime: 1 h 43 min (agent on trained), 2 h 13 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Internet: not used (no web tools, and the agent's Python runs with the network blocked).
 
 ##### Scores
 
@@ -442,11 +445,12 @@ transformer's forward pass can be stored in tables for any weights.
   second-largest on 98.4% of inputs) and the next best as second seed (94.5%). The baseline networks
   are ARC's saved starting weights of the same seeds.
 
-##### Price, runtime, agent
+##### Price, runtime, agent, internet
 
 - Price: $11.48 (agent on trained), $49.11 (agent on baseline).
 - Runtime: 38 min (agent on trained), 2 h 30 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Internet: not used (no web tools, and the agent's Python runs with the network blocked).
 
 ##### Scores
 
@@ -477,12 +481,13 @@ transformer's forward pass can be stored in tables for any weights.
   second-largest on 94.9% of inputs) and the next best as second seed (93.2%). The baseline networks
   are ARC's saved starting weights of the same seeds.
 
-##### Price, runtime, agent
+##### Price, runtime, agent, internet
 
 - Price: $22.47 (agent on trained), $33.76 plus one interrupted session of unreported cost, at most $20
   (agent on baseline).
 - Runtime: 1 h 22 min (agent on trained), 2 h 1 min without the interrupted session (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Internet: not used (no web tools, and the agent's Python runs with the network blocked).
 
 ##### Scores
 
@@ -507,11 +512,12 @@ transformer's forward pass can be stored in tables for any weights.
   this size, the first seed of the previous section (94.9%). The baseline is the one of the previous
   section.
 
-##### Price, runtime, agent
+##### Price, runtime, agent, internet
 
 - Price: $27.10 (agent on trained); the baseline is the run of the previous section.
 - Runtime: 1 h 33 min (agent on trained).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Internet: not used (no web tools, and the agent's Python runs with the network blocked).
 
 ##### Scores
 
