@@ -337,13 +337,14 @@ On the first seed:
 | --- | ---: | --- |
 | Answers the largest token, with the floor | 96.4% | yes: one rule |
 | Answers to a single token that depart from it | 0.8% | yes: a table of 64 answers, from the weights |
-| Departures on 2 and 3 tokens | 0.07% | a few second candidates, read off this network |
-| Departures on 5 to 8 tokens that the entry catches | 2.65% | none: the entry computes the exact scores of a short list, and the lists are read off this network |
+| Departures on 2 and 3 tokens | 0.06% | not explained, only stored: the entry saves these cases as seen on this network (for some values of the largest token, a second possible answer) and computes the exact score of both. That gets all 18 departures on 2 tokens right, and 163 of the 181 on 3 tokens |
+| Departures on 5 to 8 tokens that the entry catches | 2.65% | none. With many tokens the smaller ones can outvote the largest, and the entry has no rule for when. From the largest token and the sum of the tokens it picks one of 98 lists of outputs that were seen to win in such a case on this network, computes the network's exact score for each output on the list and answers the highest. So it predicts these inputs by redoing part of the network's own calculation |
 | Not predicted | 0.09% | none |
 
-So we have explained the network up to about 2.7% of inputs. For 2.65% the entry predicts the network,
-but only by computing part of it, with lists of candidates read off this one network. For 0.09% we
-have no prediction at all. On the second seed those lists catch much less, and 1.1% of inputs are not
+So we have explained the network up to about 2.8% of inputs. For 2.7% the entry predicts the network,
+but only from cases it saved or by computing part of it, both read off this one network. For 0.09% we
+have no prediction at all. On the second seed the saved cases and lists catch much less: of the
+departures on 2 and 3 tokens the entry gets 0 of 18 and 24 of 130, and 1.1% of all inputs are not
 predicted.
 
 ### Experiment 3: AlgZoo
