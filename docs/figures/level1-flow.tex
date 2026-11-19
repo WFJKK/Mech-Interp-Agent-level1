@@ -65,8 +65,8 @@
   steps 1 to 6 on a baseline model: the same design, networks with nothing in them to find. One more paragraph
   of the prompt asks for an entry exact for any weights};
 \node[meas, opt, text width=44mm, below=11mm of b1] (b2) {\tit{Freezing}
-  the best entry on the second network that is also exact on every other network of the baseline model;
-  if none is, there is no baseline};
+  the best entry on the second network that is also exact on every other network of the baseline model
+  and on every trained network of the same design; if none is, there is no baseline};
 
 % 6, 7, 8: below, across
 \node[fixed, text width=100mm, anchor=north] (p6) at ($(0,0 |- p5.south)+(0,-12mm)$) {\tit{6.\ End of round: save results}
