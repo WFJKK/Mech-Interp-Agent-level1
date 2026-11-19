@@ -262,6 +262,25 @@ of tokens equally likely, while they were trained on exactly 4.
 | Agent on baseline | first seed | 1 | 100% | 0.308 | 0.689 |
 | Agent on baseline | second seed | 1 | 100% | 0.308 | 0.690 |
 
+##### Evaluation
+
+The agent on baseline again found no rule, and its entry is again the network's own calculation, exact
+for any weights. It uses the table `M = U · H · E` and the pair sums `P[a,b][o] = M[o,a] + M[o,b]` of
+Experiment 1. An input of 1 or 2 tokens is answered from a table. For a longer input the entry pairs
+up the tokens, adds the pair sums,
+
+    s(o) = P[t₁,t₂][o] + P[t₃,t₄][o] + …
+
+and takes the highest of all 64 scores. That is 5 operations for 1 or 2 tokens, 197 for 3 or 4, 262 for
+5 or 6 and 327 for 7 or 8, plus 20 per input for the tables: 0.308 of a forward pass.
+
+It scores 0.69, against 0.82 for the baseline of Experiment 1, for two reasons. The inputs are longer,
+so there is more to add up. And this agent found a weaker method: it adds up all 64 scores for every
+input, where the baseline agent of Experiment 1 stopped as soon as a bound showed the winner. On
+4-token inputs alone it needs 197 operations where the other needs about 55, tables apart. So 0.69 is
+what this run reached and not the best an exact entry can do here, and the lead of the agent on
+trained has to be read with that in mind.
+
 ### Experiment 3: AlgZoo
 
 ## More implementation details
