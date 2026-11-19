@@ -225,6 +225,23 @@ network.
 
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
+We have seen that for a network evaluated on its training input distribution, the agent could
+discover a compressed interpretation that predicts the model's behaviour with high fidelity.
+Interestingly, with linear max of 4 we saw that the agent does not merely approximate the basic task,
+max_4, but also includes a cheap modification that mirrors some of the "easy" errors the network
+makes. In the following experiments we will ask for interpretations of the network on more inputs
+than it was trained on, so for linear max of 4 we will actually input up to 8 tokens. It is a priori
+not clear how the agent will think about this. Clearly, in the standard input space (i.e. 4 tokens)
+the model should have an interpretation close to max_4, whereas it will deviate away from that outside
+that space. We therefore expect that for 4 tokens we should have the cleanest explanation, whereas
+outside that space things will be less clear. One metric to evaluate an interpretation on is its
+coverage. Will it be beneficial with regard to the reward function for the agent to use max_4 on its
+input space and a different interpretation outside? As we will see below, this is what the agent does.
+It does not restrict itself to the 4-token inputs, which are only one eighth of the data set. It
+submits one interpretation that covers every input and treats each number of tokens separately: on 4
+tokens it is the max_4 with the floor from Experiment 1, and outside it uses other, more expensive
+interpretations.
+
 ### Experiment 3: AlgZoo
 
 ## More implementation details
