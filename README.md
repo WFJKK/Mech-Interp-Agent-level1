@@ -162,6 +162,24 @@ is not just the max. Its cost is 0.0064 against 0.0045, about 1.4 times as much,
 more: one more step per input, a floor that it works out from the weights. That buys a
 little fidelity, 99.87% against 99.82%.
 
+What follows is read from the run's report, which the pipeline writes at the end of every run. It
+prints the entry the agent submitted, which is the program the verifier scored. The shares of inputs
+below are counted over all 64⁴ inputs of the first seed.
+
+What the agent on trained submitted: its entry is a program of 11 operations. Per input it computes
+
+    answer = max(t₁, t₂, t₃, t₄, floor)
+
+The floor is one number, worked out once from the weights: the smallest answer the network gives to a
+single token from 0 to 7. It is 10 on the first seed and 11 on the second. It is needed because the
+network never answers below it: when all four tokens are below the floor, the network answers the
+floor and not the largest token. That is 0.06% of inputs, about a third of the network's mistakes (it
+gives the largest token on 99.83% of inputs). With the floor the entry predicts them.
+
+It misses the other two thirds, 0.11% of inputs. There the tokens at the top are close together, most
+often with two tokens one below the largest, and the network answers one below the largest token (57%
+of the missed inputs), two below (15%) or up to four above (20%). The entry answers the largest token.
+
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
 ### Experiment 3: AlgZoo
