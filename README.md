@@ -273,18 +273,23 @@ Agent on trained against agent on baseline: the difference is quite large, 0.913
 first seed. In cost, the agent on trained needs 0.073 of a forward pass per input and the agent on
 baseline 0.308, which is 4.2 times as much.
 
-The agent on baseline did not find the best exact entry, though. It again found no rule, and its entry
-is again the network's own calculation, exact for any weights. It uses the table `M = U · H · E` and
-the pair sums `P[a,b][o] = M[o,a] + M[o,b]` of Experiment 1. An input of 1 or 2 tokens is answered from
-a table. For a longer input the entry pairs up the tokens, adds the pair sums,
+The agent on baseline again found no rule, and its entry is again the network's own calculation, exact
+for any weights. It uses the table `M = U · H · E` and the pair sums `P[a,b][o] = M[o,a] + M[o,b]` of
+Experiment 1. An input of 1 or 2 tokens is answered from a table. For a longer input the entry pairs
+up the tokens, adds the pair sums,
 
     s(o) = P[t₁,t₂][o] + P[t₃,t₄][o] + …
 
 and takes the highest of all 64 scores. That is 5 operations for 1 or 2 tokens, 197 for 3 or 4, 262 for
-5 or 6 and 327 for 7 or 8, plus 20 per input for the tables. The baseline agent of Experiment 1 stopped
-as soon as a bound showed the winner, and this one adds up all 64 scores for every input: on 4-token
-inputs alone it needs 197 operations where the other needs about 55, tables apart. So 0.69 is what
-this run reached and not the best an exact entry can do here.
+5 or 6 and 327 for 7 or 8, plus 20 per input for the tables.
+
+It does not use the early stop of the baseline in Experiment 1. We checked whether that would have
+been better here, and it would not. The early stop needs every pair sum sorted, which costs about 50
+operations per input, and it only saves work on short inputs: about 135 operations on 3 or 4 tokens,
+some on 5 or 6, and nothing on 7 or 8, where it costs more than adding up all 64 scores. By our
+estimate an entry with the early stop needs between 211 and 227 operations per input, against 217 for
+the baseline agent's. So we found no better exact entry and take 0.69 as the baseline. It is lower
+than the 0.82 of Experiment 1 because the inputs are longer.
 
 Agent on trained against pure max: the gap is now much larger than in Experiment 1, 0.913 against
 0.384, where it was 0.974 against 0.970. We are outside the training distribution. Off 4 tokens the
