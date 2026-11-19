@@ -254,7 +254,7 @@ of tokens equally likely, while they were trained on exactly 4.
 
 | Entry | Network | Coverage | Fidelity | Cost | Reward |
 | --- | --- | ---: | ---: | ---: | ---: |
-| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023 |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023<sup>1</sup> |
 | Pure max | first seed | 1 | 94.42% | 0.021 | 0.384 |
 | Pure max | second seed | 1 | 94.37% | 0.021 | 0.380 |
 | Agent on trained | first seed | 1 | 99.92% | 0.073 | 0.913 |
@@ -262,24 +262,51 @@ of tokens equally likely, while they were trained on exactly 4.
 | Agent on baseline | first seed | 1 | 100% | 0.308 | 0.689 |
 | Agent on baseline | second seed | 1 | 100% | 0.308 | 0.690 |
 
+<sup>1</sup> Not 0, because the reward uses the 95% lower bound of the fidelity and not the measured
+fidelity. 16,384 right answers out of 16,384 give a lower bound of 99.977%, and the missing 0.023% is
+charged like wrong answers, at 10 forward passes each. Every entry measured on a sample pays this same
+0.0023.
+
 ##### Evaluation
 
-The agent on baseline again found no rule, and its entry is again the network's own calculation, exact
-for any weights. It uses the table `M = U · H · E` and the pair sums `P[a,b][o] = M[o,a] + M[o,b]` of
-Experiment 1. An input of 1 or 2 tokens is answered from a table. For a longer input the entry pairs
-up the tokens, adds the pair sums,
+Agent on trained against agent on baseline: the difference is quite large, 0.913 against 0.689 on the
+first seed. In cost, the agent on trained needs 0.073 of a forward pass per input and the agent on
+baseline 0.308, which is 4.2 times as much.
+
+The agent on baseline did not find the best exact entry, though. It again found no rule, and its entry
+is again the network's own calculation, exact for any weights. It uses the table `M = U · H · E` and
+the pair sums `P[a,b][o] = M[o,a] + M[o,b]` of Experiment 1. An input of 1 or 2 tokens is answered from
+a table. For a longer input the entry pairs up the tokens, adds the pair sums,
 
     s(o) = P[t₁,t₂][o] + P[t₃,t₄][o] + …
 
 and takes the highest of all 64 scores. That is 5 operations for 1 or 2 tokens, 197 for 3 or 4, 262 for
-5 or 6 and 327 for 7 or 8, plus 20 per input for the tables: 0.308 of a forward pass.
+5 or 6 and 327 for 7 or 8, plus 20 per input for the tables. The baseline agent of Experiment 1 stopped
+as soon as a bound showed the winner, and this one adds up all 64 scores for every input: on 4-token
+inputs alone it needs 197 operations where the other needs about 55, tables apart. So 0.69 is what
+this run reached and not the best an exact entry can do here.
 
-It scores 0.69, against 0.82 for the baseline of Experiment 1, for two reasons. The inputs are longer,
-so there is more to add up. And this agent found a weaker method: it adds up all 64 scores for every
-input, where the baseline agent of Experiment 1 stopped as soon as a bound showed the winner. On
-4-token inputs alone it needs 197 operations where the other needs about 55, tables apart. So 0.69 is
-what this run reached and not the best an exact entry can do here, and the lead of the agent on
-trained has to be read with that in mind.
+Agent on trained against pure max: the gap is now much larger than in Experiment 1, 0.913 against
+0.384, where it was 0.974 against 0.970. We are outside the training distribution. Off 4 tokens the
+network departs from the largest token, on 5.6% of all inputs, so the task alone no longer predicts it.
+
+What the agent on trained submitted: one program that first finds out how many tokens the input has
+(6 operations) and then treats each number of tokens separately. On the first seed, with 20,000 inputs
+per number of tokens:
+
+| Tokens | What the entry does | Operations per input | Fidelity |
+| ---: | --- | ---: | ---: |
+| 1 | reads the network's answer to that single token from a table | 7 | 100% |
+| 2 | the largest token with the floor of Experiment 1; for some values of the largest token it also holds a second candidate, computes the exact score of both and takes the higher | 11 | 100% |
+| 3 | the same | 13 | 100% |
+| 4 | the largest token with the floor, exactly the entry of Experiment 1 | 10 | 99.88% |
+| 5 | no rule: from the largest token and the sum of the tokens it picks a short list of outputs that can win, about 9 of the 64, computes their exact scores and takes the highest | 59 | 99.93% |
+| 6 | the same | 70 | 99.82% |
+| 7 | the same, with other lists | 94 | 99.89% |
+| 8 | the same | 109 | 99.77% |
+
+Which outputs are on a list, and the second candidates for 2 and 3 tokens, were read off the first
+network.
 
 ### Experiment 3: AlgZoo
 
