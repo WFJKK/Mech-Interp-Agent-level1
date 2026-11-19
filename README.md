@@ -209,6 +209,20 @@ This takes about 55 operations per input, plus 61 for the tables (1.0 million op
 network, spread over the 16,384 scored inputs): 0.174 of a forward pass. None of it uses anything a
 network has learned.
 
+##### Is the network explained?
+
+On the first seed, over all 64⁴ inputs:
+
+| Part of the behaviour | Share of inputs | Short description |
+| --- | ---: | --- |
+| Answers the largest token | 99.83% | yes: "max of 4" |
+| Answers the floor when all tokens are small | 0.06% | yes: one number from the weights |
+| Close-token mistakes | 0.11% | none found; they depend on the exact numbers in M |
+
+So we have explained the network up to 0.11% of inputs. For those we know where they are, among the
+inputs whose top tokens are close together, but we have no explanation for them apart from running the
+network.
+
 ### Experiment 2: linear + attention models on inputs beyond the trained ones
 
 ### Experiment 3: AlgZoo
