@@ -99,12 +99,7 @@ models. While our goal is "heuristic understanding", naturally the "reward funct
 how well the agent can "predict" the output. Hence, we expect that part of the hill-climbing will
 amount to inference optimisation in a sense. For that reason we always compare to a baseline of the
 agent working on the same architecture with nothing learned in it, i.e. a random baseline: networks
-drawn the way training starts and kept as drawn. Every weight is drawn independently and uniformly in
-$\pm 1/\sqrt{k}$, where $k$ is the number of inputs to its matrix (64 for a token embedding, 4 for the
-transformer's position embedding, and the width, 8 or 32, for the other matrices), from other seeds
-than the trained networks. Its agent is asked for an interpretation exact for any weights, which
-counts only if it is exact on four more such networks, so it cannot rely on the particular draw; only
-its cost depends on the weights.
+drawn the way training starts and kept as drawn.
 
 ### Experiment 1: evaluation on training inputs only
 
