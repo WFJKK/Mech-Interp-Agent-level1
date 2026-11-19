@@ -404,6 +404,89 @@ transformer's forward pass can be stored in tables for any weights.
 
 ### Experiment 3: AlgZoo
 
+#### RNN second argmax of 3 numbers
+
+##### Architecture and training
+
+- Sizes: 3 numbers per input, 4 hidden units, 3 outputs (the positions 0, 1 and 2).
+- Architecture: a recurrent network with one layer, a ReLU and no biases. It reads the numbers one at a
+  time, `h = relu(w · xₜ + R · h)`, starting from h = 0, and its output is the position of the highest
+  of `readout · h`. One forward pass is 78 operations.
+- Weights: input (4 × 1), recurrent (4 × 4) and readout (3 × 4), 32 numbers.
+- Task: output the position of the second-largest of the three numbers.
+- Inputs: three numbers, each from the standard normal distribution, drawn fresh at every step.
+- Loss and optimiser: cross-entropy with AdamW (learning rate 0.02, warmed up over 2¹⁴ steps and then
+  decayed to 1% of it, weight decay 0.001), batch 1,024, float32.
+- Starting weights: uniform in ±0.5.
+- Stopping: after 2²⁰ steps.
+- Networks: trained and published by ARC in AlgZoo, five seeds. We use the best one (it gives the
+  second-largest on 98.4% of inputs) and the next best as second seed (94.5%). The baseline networks
+  are ARC's saved starting weights of the same seeds.
+
+##### Scores
+
+| Entry | Network | Coverage | Fidelity | Cost | Reward |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023 |
+| Pure second argmax | first seed | 1 | 98.41% | 0.077 | 0.744 |
+| Pure second argmax | second seed | 1 | 94.45% | 0.077 | 0.332 |
+| Agent on trained | first seed | 0.973 | 99.60% | 0.108 | 0.818 |
+| Agent on trained | second seed | 0.972 | 95.62% | 0.108 | 0.409 |
+| Agent on baseline | first seed | 1 | 100% | 0.504 | 0.494 |
+| Agent on baseline | second seed | 1 | 100% | 0.515 | 0.483 |
+
+#### RNN second argmax of 10 numbers
+
+##### Architecture and training
+
+- Sizes: 10 numbers per input, 16 hidden units, 10 outputs (the positions 0 to 9).
+- Architecture: as for 3 numbers. One forward pass is 2,937 operations.
+- Weights: input (16 × 1), recurrent (16 × 16) and readout (10 × 16), 432 numbers.
+- Task: output the position of the second-largest of the ten numbers.
+- Inputs: ten numbers, each from the standard normal distribution, drawn fresh at every step.
+- Loss and optimiser: cross-entropy with AdamW (learning rate 0.01, warmed up over 2¹⁴ steps and then
+  decayed to 1% of it, weight decay 0.001), batch 1,024, float32.
+- Starting weights: uniform in ±0.25.
+- Stopping: after 2²⁰ steps.
+- Networks: trained and published by ARC in AlgZoo, five seeds. We use the best one (it gives the
+  second-largest on 94.9% of inputs) and the next best as second seed (93.2%). The baseline networks
+  are ARC's saved starting weights of the same seeds.
+
+##### Scores
+
+| Entry | Network | Coverage | Fidelity | Cost | Reward |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023 |
+| Pure second argmax | first seed | 1 | 94.84% | 0.014 | 0.436 |
+| Pure second argmax | second seed | 1 | 93.24% | 0.014 | 0.271 |
+| Agent on trained | first seed | 1 | 99.58% | 0.130 | 0.818 |
+| Agent on trained | second seed | 1 | 97.66% | 0.142 | 0.600 |
+| Agent on baseline | first seed | 1 | 100% | 0.743 | 0.255 |
+| Agent on baseline | second seed | 1 | 100% | 0.804 | 0.193 |
+
+#### RNN second argmax of 10 numbers, ARC's challenge network
+
+##### Architecture and training
+
+- Sizes, architecture, weights, task and inputs: as in the previous section.
+- Networks: the first is the 432-weight network that ARC's AlgZoo write-up analyses and sets as its
+  challenge. It is published next to the zoo, and its training recipe is not published with it. It
+  gives the second-largest on 95.3% of inputs. As the second network we use the zoo's best network of
+  this size, the first seed of the previous section (94.9%). The baseline is the one of the previous
+  section.
+
+##### Scores
+
+| Entry | Network | Coverage | Fidelity | Cost | Reward |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Brute force (the network itself) | both networks | 1 | 100% | 1 | -0.0023 |
+| Pure second argmax | first network | 1 | 95.27% | 0.014 | 0.480 |
+| Pure second argmax | second network | 1 | 94.84% | 0.014 | 0.436 |
+| Agent on trained | first network | 1 | 99.52% | 0.134 | 0.806 |
+| Agent on trained | second network | 1 | 98.86% | 0.145 | 0.724 |
+| Agent on baseline | first network | 1 | 100% | 0.728 | 0.270 |
+| Agent on baseline | second network | 1 | 100% | 0.743 | 0.255 |
+
 ## More implementation details
 
 ### The prompt
