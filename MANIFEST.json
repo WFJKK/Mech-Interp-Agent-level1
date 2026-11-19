@@ -1,0 +1,101 @@
+[
+ {
+  "run": "pilot-lin-b-4",
+  "zip": "pilot-lin-b-4.zip",
+  "files": 175,
+  "bytes_unpacked": 944891,
+  "bytes_zip": 345525,
+  "home_paths_replaced": 47,
+  "sha256": "0d894a96d35521206f2c082535ea19087dd04d541da3c17851d1388106d5c0a2"
+ },
+ {
+  "run": "pilot-lin-f-4-exact-0d0a5407",
+  "zip": "pilot-lin-f-4-exact-0d0a5407.zip",
+  "files": 471,
+  "bytes_unpacked": 6544794,
+  "bytes_zip": 1848587,
+  "home_paths_replaced": 53,
+  "sha256": "623175b2b5f3cf99c1dd29d965fed2b307a696b9c7d2b7ddf29659d77bbb9eca"
+ },
+ {
+  "run": "pilot-lin-b",
+  "zip": "pilot-lin-b.zip",
+  "files": 391,
+  "bytes_unpacked": 7911098,
+  "bytes_zip": 2032259,
+  "home_paths_replaced": 53,
+  "sha256": "90783ab8a43ba4e75e6260cdfd321c97f825f35bc6fedc5503ab3be737a62f7f"
+ },
+ {
+  "run": "pilot-lin-f-exact",
+  "zip": "pilot-lin-f-exact.zip",
+  "files": 260,
+  "bytes_unpacked": 3910574,
+  "bytes_zip": 1160576,
+  "home_paths_replaced": 61,
+  "sha256": "c286fe9acc86a2a5f12a6bc41b3565a866fb5e6dd53d2fe910d901e2064baf0e"
+ },
+ {
+  "run": "pilot-att-c",
+  "zip": "pilot-att-c.zip",
+  "files": 361,
+  "bytes_unpacked": 4659272,
+  "bytes_zip": 1425478,
+  "home_paths_replaced": 47,
+  "sha256": "f6835802b65bbdc0d17de80f025f34cda42eec52cf17ba677efdf40a61306fef"
+ },
+ {
+  "run": "pilot-att-e-exact",
+  "zip": "pilot-att-e-exact.zip",
+  "files": 423,
+  "bytes_unpacked": 7339482,
+  "bytes_zip": 1906015,
+  "home_paths_replaced": 61,
+  "sha256": "03a24dfda8db61e7f01e9651967629c5ca23766e7d54c2157c488eb77f30eff1"
+ },
+ {
+  "run": "pilot-rnn-b",
+  "zip": "pilot-rnn-b.zip",
+  "files": 257,
+  "bytes_unpacked": 1800874,
+  "bytes_zip": 669121,
+  "home_paths_replaced": 47,
+  "sha256": "2024812f259c4a3bdf04eb7091c87497a1d1a0d3e1356781474667e0ec602f12"
+ },
+ {
+  "run": "pilot-rnn-e-exact-0d0a5407",
+  "zip": "pilot-rnn-e-exact-0d0a5407.zip",
+  "files": 468,
+  "bytes_unpacked": 7575720,
+  "bytes_zip": 2211455,
+  "home_paths_replaced": 53,
+  "sha256": "75a3a5393e4a37bd54f8bbb15a29c088794fa4e8b7dcef5c0204bbb8835802be"
+ },
+ {
+  "run": "pilot-rnn-c",
+  "zip": "pilot-rnn-c.zip",
+  "files": 412,
+  "bytes_unpacked": 5178821,
+  "bytes_zip": 1387790,
+  "home_paths_replaced": 52,
+  "sha256": "fc257c0be6b70be9ca1bc20112ed49730a62b8cfc7ad799e7050859d0b6b0332"
+ },
+ {
+  "run": "pilot-rnn-f-exact-0d0a5407",
+  "zip": "pilot-rnn-f-exact-0d0a5407.zip",
+  "files": 348,
+  "bytes_unpacked": 6144871,
+  "bytes_zip": 1747272,
+  "home_paths_replaced": 71,
+  "sha256": "bf29477dc21c97ba5e45c549105c334744e85908791980174c4dd0c6dfff5774"
+ },
+ {
+  "run": "pilot-rnn-g",
+  "zip": "pilot-rnn-g.zip",
+  "files": 464,
+  "bytes_unpacked": 5286924,
+  "bytes_zip": 1488769,
+  "home_paths_replaced": 59,
+  "sha256": "1cf67c97742665a504b07b23e9e62c47d6aed4cf6b5e46cd1a4300fcaad0bca4"
+ }
+]
