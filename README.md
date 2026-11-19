@@ -814,6 +814,9 @@ Everything is written as it happens, so a run can stop and resume, and can be re
 - billed to an API key, every session's cap and cost (`spend.jsonl`);
 - the report: `report.md` and `report.json`.
 
+The complete records of the 11 runs behind the Results section are published, one archive per run, on
+the branch [`run-records`](https://github.com/WFJKK/Mech-Interp-Agent-level1/tree/run-records).
+
 ### Repository layout
 
     level1/            the pipeline
