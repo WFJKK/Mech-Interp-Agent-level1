@@ -242,6 +242,26 @@ submits one interpretation that covers every input and treats each number of tok
 tokens it is the max_4 with the floor from Experiment 1, and outside it uses other, more expensive
 interpretations.
 
+#### Linear max of 4
+
+##### Architecture and training
+
+The same as in Experiment 1: the same two networks, with the same architecture and training. Only the
+inputs differ. Here the networks have 8 slots and are asked about inputs of 1 to 8 tokens, each number
+of tokens equally likely, while they were trained on exactly 4.
+
+##### Scores
+
+| Entry | Network | Coverage | Fidelity | Cost | Reward |
+| --- | --- | ---: | ---: | ---: | ---: |
+| Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023 |
+| Pure max | first seed | 1 | 94.42% | 0.021 | 0.384 |
+| Pure max | second seed | 1 | 94.37% | 0.021 | 0.380 |
+| Agent on trained | first seed | 1 | 99.92% | 0.073 | 0.913 |
+| Agent on trained | second seed | 1 | 98.92% | 0.072 | 0.803 |
+| Agent on baseline | first seed | 1 | 100% | 0.308 | 0.689 |
+| Agent on baseline | second seed | 1 | 100% | 0.308 | 0.690 |
+
 ### Experiment 3: AlgZoo
 
 ## More implementation details
