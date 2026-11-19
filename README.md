@@ -100,8 +100,9 @@ how well the agent can "predict" the output. Hence, we expect that part of the h
 amount to inference optimisation in a sense. For that reason we always compare to a baseline of the
 agent working on an untrained model of the same architecture. The baseline agent gets the same prompt
 and rounds, with one more paragraph that asks for an interpretation exact for any weights. For a
-baseline entry to be valid, we demand that it is exact on every other network of the architecture,
-both trained and untrained; the best valid entry is then run unchanged on the trained network, on the
+baseline entry to be valid, we demand that it is exact, that is, that it has 100% fidelity, on every
+other network of the architecture, both trained and untrained; the best valid entry is then run
+unchanged on the trained network, on the
 same inputs as the trained run's entry, and the two rewards are compared. (How an untrained network
 is initialised depends on the model, and we say it in each experiment's section.)
 
@@ -125,12 +126,16 @@ is initialised depends on the model, and we say it in each experiment's section.
 - Networks: two, from seeds 0 and 1 (80,000 and 70,000 steps). They give the largest token on 99.83%
   and 99.79% of all inputs.
 
-##### Price, runtime, agent, internet
+##### Price, runtime, agent, internet, inference
 
 - Price: $4.31 (agent on trained), $34.89 (agent on baseline).
 - Runtime: 14 min (agent on trained), 2 h 22 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Agent tools: `run_python` (runs Python in a sandbox, with the network's weights) and `submit_entry`
+  (hands an entry to the verifier, which scores it).
+- Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
+- Inference: about 9.6 million forward passes (agent on trained); agent on baseline: count pending.
 
 ##### Scores
 
@@ -282,13 +287,18 @@ The same as in Experiment 1: the same two networks, with the same architecture a
 inputs differ. Here the networks have 8 slots and are asked about inputs of 1 to 8 tokens, each number
 of tokens equally likely, while they were trained on exactly 4.
 
-##### Price, runtime, agent, internet
+##### Price, runtime, agent, internet, inference
 
 - Price: $39.83 at API prices, run under a login and not charged (agent on trained), $19.91 (agent on
   baseline).
 - Runtime: 2 h 4 min (agent on trained), 1 h 9 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Agent tools: `run_python` (runs Python in a sandbox, with the network's weights) and `submit_entry`
+  (hands an entry to the verifier, which scores it).
+- Hyperparameters: money cap $20 a round and $60 a run (agent on baseline), none (agent on trained, run
+  under a login); 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
+- Inference: about 500 million forward passes (agent on trained), about 3.2 million (agent on baseline).
 
 ##### Scores
 
@@ -395,12 +405,16 @@ The same as in Experiment 1: the same two networks, with the same architecture a
 are asked about inputs of 1 to 4 tokens, each number of tokens equally likely, while they were trained
 on exactly 4.
 
-##### Price, runtime, agent, internet
+##### Price, runtime, agent, internet, inference
 
 - Price: $29.42 (agent on trained), $41.63 (agent on baseline).
 - Runtime: 1 h 43 min (agent on trained), 2 h 13 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Agent tools: `run_python` (runs Python in a sandbox, with the network's weights) and `submit_entry`
+  (hands an entry to the verifier, which scores it).
+- Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
+- Inference: count pending (agent on trained), count pending (agent on baseline).
 
 ##### Scores
 
@@ -426,6 +440,11 @@ transformer's forward pass can be stored in tables for any weights.
 
 ### Experiment 3: AlgZoo
 
+The inputs of these networks are real numbers, so there are infinitely many of them. Fidelity is then
+the share of inputs drawn from the data set on which the entry gives the network's output. As in the
+other experiments, each score is measured on 16,384 inputs drawn at random, here each number from a
+standard normal, and the reward uses the 95% lower bound of that share.
+
 #### RNN second argmax of 3 numbers
 
 ##### Architecture and training
@@ -445,12 +464,16 @@ transformer's forward pass can be stored in tables for any weights.
   second-largest on 98.4% of inputs) and the next best as second seed (94.5%). The baseline networks
   are ARC's saved starting weights of the same seeds.
 
-##### Price, runtime, agent, internet
+##### Price, runtime, agent, internet, inference
 
 - Price: $11.48 (agent on trained), $49.11 (agent on baseline).
 - Runtime: 38 min (agent on trained), 2 h 30 min (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Agent tools: `run_python` (runs Python in a sandbox, with the network's weights) and `submit_entry`
+  (hands an entry to the verifier, which scores it).
+- Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
+- Inference: about 120 million forward passes (agent on trained); agent on baseline: count pending.
 
 ##### Scores
 
@@ -481,13 +504,17 @@ transformer's forward pass can be stored in tables for any weights.
   second-largest on 94.9% of inputs) and the next best as second seed (93.2%). The baseline networks
   are ARC's saved starting weights of the same seeds.
 
-##### Price, runtime, agent, internet
+##### Price, runtime, agent, internet, inference
 
 - Price: $22.47 (agent on trained), $33.76 plus one interrupted session of unreported cost, at most $20
   (agent on baseline).
 - Runtime: 1 h 22 min (agent on trained), 2 h 1 min without the interrupted session (agent on baseline).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Agent tools: `run_python` (runs Python in a sandbox, with the network's weights) and `submit_entry`
+  (hands an entry to the verifier, which scores it).
+- Hyperparameters: money cap $20 a round and $80 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
+- Inference: about 230 million forward passes (agent on trained); agent on baseline: count pending.
 
 ##### Scores
 
@@ -512,12 +539,16 @@ transformer's forward pass can be stored in tables for any weights.
   this size, the first seed of the previous section (94.9%). The baseline is the one of the previous
   section.
 
-##### Price, runtime, agent, internet
+##### Price, runtime, agent, internet, inference
 
 - Price: $27.10 (agent on trained); the baseline is the run of the previous section.
 - Runtime: 1 h 33 min (agent on trained).
 - Agent: Claude Fable 5.1 (`claude-fable-5-1`), thinking effort high (Claude Code's `--effort high`).
+- Agent tools: `run_python` (runs Python in a sandbox, with the network's weights) and `submit_entry`
+  (hands an entry to the verifier, which scores it).
+- Hyperparameters: money cap $20 a round and $60 a run; 5 rounds; entry limits 400 nodes and 256 numbers in constants.
 - Internet: not used (no web tools, and the agent's Python runs with the network blocked).
+- Inference: count pending (agent on trained).
 
 ##### Scores
 
