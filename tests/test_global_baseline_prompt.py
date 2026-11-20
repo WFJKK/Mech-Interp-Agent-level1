@@ -39,7 +39,7 @@ def test_baseline_prompt_is_global_generic_and_does_not_disclose_control_identit
     assert "single investigator" in text
     assert "entire assigned input domain" in text
     assert "every evaluated input" in text
-    assert "No further investigations can be scheduled" in text
+    assert "No further tasks can be given out" in text
     assert "Your role in this session: **comparison**" in text
     assert "scope=" not in text and "scope_entry_name" not in text
     assert "You can declare a narrower evaluation domain" not in text
@@ -71,12 +71,12 @@ def test_research_roles_keep_their_narrower_domain_tools(tmp_path, role):
 
 def test_baseline_tools_reject_regional_assignments_and_claims_without_spending(tmp_path):
     session, _, _ = make_session(tmp_path)
-    assert "assign_region" not in session.TOOLS
+    assert "assign_task" not in session.TOOLS
     assert "scope" not in session.TOOLS["submit_entry"]["schema"]["properties"]
     with pytest.raises(ToolError, match="no tool"):
-        session.call("assign_region", {"scope": {"kind": "all"}, "task": "Another investigation."})
+        session.call("assign_task", {"scope": {"kind": "all"}, "task": "Another investigation."})
     with pytest.raises(ToolError, match="cannot assign"):
-        session.assign_region({"kind": "all"}, "Another investigation.")
+        session.assign_task("Another investigation.", {"kind": "all"})
     with pytest.raises(ToolError, match="does not take"):
         session.call("submit_entry", {"name": "reference", "claimed_fidelity": 1.0,
                                       "scope": {"kind": "lengths", "lengths": [2]}})

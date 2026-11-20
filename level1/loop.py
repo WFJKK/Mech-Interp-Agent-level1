@@ -220,6 +220,7 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
         if ((cfg.get("research_task") or {}).get("role") != "baseline"
                 and research_modes.mode(cfg) != "baseline"):
             out["configured regional investigations"] = json.dumps((cfg.get("orchestration") or {}).get("initial_regions", []))
+            out["configured initial tasks"] = json.dumps((cfg.get("orchestration") or {}).get("initial_tasks", []))
     elif (cfg.get("research_task") or {}).get("role") == "summary":
         out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
     if sandbox_mode != "container":

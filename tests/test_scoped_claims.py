@@ -167,7 +167,7 @@ def scoped_run(tmp_path_factory):
     fake = where / "scripts"
     fake.mkdir()
     scripts = [
-        {"calls": [{"tool": "assign_region", "args": {
+        {"calls": [{"tool": "assign_task", "args": {
             "scope": {"kind": "lengths", "lengths": [1, 2]}, "task": "Investigate this declared region.",
         }}], "response": "## What the network does\nOne regional task is assigned."},
         {"calls": [

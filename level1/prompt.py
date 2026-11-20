@@ -166,47 +166,53 @@ RESEARCH_ROLES = {
         "Explain the computational savings and any numerical limitations. This session does not "
         "schedule other investigators or submit narrower domain claims."),
     "lead": (
-        "You are the research lead and global integrator. Improve the complete program over the original "
-        "input distribution and seek an overall mechanistic understanding of the network. Connect the "
-        "regional findings, investigate shared mechanisms, and explain how differences in internal "
-        "computation produce different behaviors across regions. Investigate these connections while "
-        "research tools are available, within the session's allowance and submission checkpoints. "
-        "Preserve the best global interpretation even when the mechanistic understanding remains "
-        "incomplete. Mechanistic explanation is a research goal, not an additional submission, selection "
-        "or retention requirement. Distinguish supported explanations, hypotheses and unresolved "
-        "questions. Develop the portfolio of regional explanations. Use checked regional "
-        "results to identify useful combinations, shared computations, counterexamples and missing "
-        "investigations. Submit global candidates for evaluation; conditional regional rewards are never "
-        "a substitute for measuring the composed program. Preserve useful regional findings even when "
-        "their integration does not improve the global score. Investigate simple explanations on subdomains "
-        "where measurements show strong agreement, and examine their failure cases separately. Regional "
-        "questions should use the configured fidelity and cost tradeoff; require exact agreement only "
-        "when it is an explicit, bounded hypothesis or a requirement of this task."),
-    "regional": (
-        "You are a regional investigator. Optimize the ordinary reward within the assigned domain. "
-        "Seek a mechanistic explanation of why an interpretation works, relating the observed behavior "
-        "to the network's weights and internal computations. Retain and submit strong interpretations "
-        "even when their mechanism remains unclear; do not delay a required submission to finish an "
-        "explanation. Mechanistic explanation is a research goal, not an additional submission, "
-        "selection or retention requirement. Distinguish supported explanations, hypotheses and "
-        "unresolved questions. "
-        "Investigate the proposed question, but test competing explanations and refine an entry's region "
-        "when needed. Return executable candidates, the evidence for their behavior, failure cases and "
-        "ideas that the global integrator can reuse. You can submit directly to the evaluator; your "
-        "results are retained independently of the global score. When a simpler explanation works on "
-        "a narrower domain, submit it with an explicit scope so its evidence is retained separately. "
-        "Use the remaining submission allowance for a broader candidate or a competing explanation."),
+        "You are the research lead. In each research phase you decide what each researcher works on and give "
+        "out the tasks with assign_task; after the phase you see their checked results and notes and combine "
+        "them into one program for the whole network, evaluated on the original input distribution. Your aim "
+        "is the highest reward for that program. A task can concern anything you judge useful: some of the "
+        "network's units or another part of its computation, a group of inputs, making a saved program "
+        "cheaper, or testing a claim. Researchers are scored by the same reward on their assigned domain; a "
+        "program that computes part of the network its own way and the rest as the network does is an "
+        "ordinary entry and is scored like any other. Seek an overall mechanistic understanding of the "
+        "network: connect the researchers' findings, investigate shared mechanisms, and explain how the parts "
+        "of the computation produce the network's behavior. Preserve the best global interpretation even "
+        "when the mechanistic understanding remains incomplete. Mechanistic explanation is a research goal, "
+        "not an additional submission, selection or retention requirement. Distinguish supported "
+        "explanations, hypotheses and unresolved questions. Submit global candidates for evaluation; a score "
+        "on a narrower domain is never a substitute for measuring the composed program. Preserve useful "
+        "findings even when their integration does not improve the global score. Tasks should use the "
+        "configured fidelity and cost tradeoff; require exact agreement only when it is an explicit, bounded "
+        "hypothesis or a requirement of this task."),
+    "researcher": (
+        "You are a researcher on a team led by a research lead. Carry out the task the lead gave you, shown "
+        "below, and optimize the ordinary reward on the assigned domain. Every program you submit is an "
+        "ordinary entry scored by that reward; if your task concerns part of the network, a program that "
+        "computes that part its own way and the rest as the network does is such an entry. Seek a "
+        "mechanistic explanation of why an interpretation works, relating the observed behavior to the "
+        "network's weights and internal computations. Retain and submit strong interpretations even when "
+        "their mechanism remains unclear; do not delay a required submission to finish an explanation. "
+        "Mechanistic explanation is a research goal, not an additional submission, selection or retention "
+        "requirement. Distinguish supported explanations, hypotheses and unresolved questions. Test "
+        "competing explanations, and refine an entry's region when needed. Return executable candidates, "
+        "the evidence for their behavior, failure cases and ideas that the lead can reuse. You can submit "
+        "directly to the evaluator; your results are retained independently of the global score. When a "
+        "simpler explanation works on a narrower domain, submit it with an explicit scope so its evidence "
+        "is retained separately. Use the remaining submission allowance for a broader candidate or a "
+        "competing explanation."),
 }
 
 ASSIGNMENT_NOTE = """
-You may schedule up to {count} regional investigations with
-`assign_region(scope, task, entry_name=None)`. Give each a concrete question, relevant evidence and a
-desired output. Scopes have kind `all`, `lengths` with a `lengths` list, or `predicate`. To use a
-predicate, save an ordinary entry whose region test defines the domain and pass its saved name as
-`entry_name`. The scope is fixed before the investigator begins. This tool cannot change the reward,
-operation prices or workload policy. Distinct hypotheses can run independently in the next phase.
-When assigning more than one investigation, leave one room to pursue an alternative explanation or an
-underexplored domain instead of making every worker follow the same hypothesis.
+You may give out up to {count} tasks for the next research phase with
+`assign_task(task, scope=None, entry_name=None)`, one per researcher. Giving out fewer runs fewer
+researchers, each with more of the allowance. You decide what each researcher does, for example
+some of the network's units or another part of its computation, a group of inputs, making a
+saved program cheaper, or testing a claim. Give each a concrete question, the relevant evidence and
+the output you want back. Without `scope`, a researcher's submissions are scored on the whole input
+distribution. To score them on a narrower domain, use scope kind `lengths` with a `lengths` list, or
+`predicate` with a saved entry whose region test defines the domain, passing its name as `entry_name`.
+The scope is fixed before the researcher begins. This tool cannot change the reward, operation prices
+or workload policy. When giving out more than one task, leave room for an alternative explanation
+instead of making every researcher follow the same hypothesis.
 """
 
 
@@ -297,18 +303,19 @@ intersects it with the assignment, freezes that domain, and retains an independe
 and its probability in the original distribution. Each claim consumes one submission. An entry's
 region test alone does not declare such a separate task; it still determines coverage inside the
 domain being evaluated. Neither operation changes the reward or operation prices.""",
-        "DISTRIBUTION_NOTE": """The regional distribution is this distribution conditioned on the assigned domain. The original
-distribution remains the task for global integration.""",
+        "DISTRIBUTION_NOTE": """When the assigned domain is narrower than all inputs, its distribution is this distribution
+conditioned on that domain. The original distribution remains the task of the lead's program for the
+whole network.""",
         "COST_DOMAIN_NOTE": """The runtime includes the entry's region test on every task input and its prediction on covered inputs.
 Setup is charged once over the declared workload. Dividing the whole cost by conditional coverage gives
-the cost per covered input. The membership of an externally assigned domain is known for this regional
+the cost per covered input. The membership of an externally assigned domain is known for this
 task. A global composition must implement and pay for its own routing and any shared setup.
 For a narrower claim, the configured workload policy is unchanged: an explicitly fixed workload stays
 fixed; otherwise the claim's known finite support sets its workload. Unknown support requires a workload
 already declared by the run. Each receipt reports this value separately from the verification count.""",
         "FINAL_CHECK_NOTE": """Final candidates are locked before evaluation on fresh inputs and the second network. Those results
-are not returned to researchers and do not select the development winners. A successful regional claim
-is retained even if it does not improve the global program. Numerical agreement is measured evidence;
+are not returned to researchers and do not select the development winners. A successful claim on a
+narrower domain is retained even if it does not improve the global program. Numerical agreement is measured evidence;
 state separately any derivation from weights, counterexamples, or additional mechanistic evidence.""",
         "LOCAL_MEASUREMENT_NOTE": """The last two use the assigned domain by default; optional `scope=...`
   tests a narrower claim under the same policy. These local measurements spend no formal submission and
@@ -332,7 +339,7 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
     from . import lang
     from .verifier import Verifier
 
-    public_role = "comparison" if role == "baseline" else role
+    public_role = {"baseline": "comparison", "regional": "researcher"}.get(role, role)
     if public_role not in RESEARCH_ROLES:
         raise ValueError(f"unknown research role: {role}")
     verifier = Verifier(model, cfg["network"], cfg)
@@ -377,7 +384,7 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
         "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
         "API_ALLOCATION": research_allocation(cfg), "DELIVERABLE_NOTE": research_deliverable(cfg),
-        "ASSIGNMENT_NOTE": ASSIGNMENT_NOTE.format(count=count) if role == "lead" and count else "No further investigations can be scheduled in this session.",
+        "ASSIGNMENT_NOTE": ASSIGNMENT_NOTE.format(count=count) if role == "lead" and count else "No further tasks can be given out in this session.",
         "ARCHIVE": archive_summary or "No checked submissions yet.", "HISTORY": notes or "No earlier research notes.",
         **research_domain_notes(role, int(cfg["session"]["submissions"])),
     }

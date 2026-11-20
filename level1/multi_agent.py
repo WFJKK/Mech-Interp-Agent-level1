@@ -527,13 +527,15 @@ def _ingest(path: Path, cfg: dict, model, archive: dict, plan: dict, record: dic
 
 
 def _assignments(cfg: dict, record: dict) -> list[dict]:
-    limit = int(_options(cfg)["workers"])
-    proposed = record.get("assignments") or _options(cfg).get("initial_regions", [])
+    options = _options(cfg)
+    limit = int(options["workers"])
+    proposed = (record.get("assignments") or options.get("initial_tasks")
+                or options.get("initial_regions") or [])
     out = []
     for assignment in proposed[:limit]:
         if not isinstance(assignment, dict) or not isinstance(assignment.get("task"), str):
-            raise RuntimeError("a regional assignment needs a scope and a task")
-        out.append({"scope": regions.normalize_scope(assignment.get("scope")), "task": assignment["task"]})
+            raise RuntimeError("an assignment needs a task")
+        out.append({"scope": regions.normalize_scope(assignment.get("scope") or ALL), "task": assignment["task"]})
     return out
 
 
@@ -646,7 +648,7 @@ def _drive(path, fake_scripts=None, out=print) -> str:
         write_json(_archive_path(path), archive)
         if "planning" not in state:
             planning = _new_plan(state, "lead", 0, ALL,
-                                 "Choose bounded input regions to investigate and assign their research tasks.",
+                                 "Decide what each researcher works on in the first research phase, and give out the tasks.",
                                  int(_options(cfg)["workers"]), _snapshot(archive), [])
             state["planning"] = planning["id"]
             write_json(_state_path(path), state)
@@ -665,7 +667,7 @@ def _drive(path, fake_scripts=None, out=print) -> str:
                     last_lead = read_json(path / last["directory"] / "record.json")
                 assignments = _assignments(cfg, last_lead)
                 if not assignments:
-                    state["stop_reason"] = "the lead assigned no regional investigations and no initial regions are configured"
+                    state["stop_reason"] = "the lead gave out no tasks and no initial tasks are configured"
                     write_json(_state_path(path), state)
                     out(state["stop_reason"])
                     write_report(path)
@@ -679,7 +681,7 @@ def _drive(path, fake_scripts=None, out=print) -> str:
                 workers = [_new_plan(state, "regional", number, task["scope"], task["task"], len(assignments), snapshot, history)
                            for task in assignments]
                 lead = _new_plan(state, "lead", number, ALL,
-                                 "Use the regional findings to improve and compose global programs; plan the next investigations.",
+                                 "Use the researchers' findings to improve the program for the whole network; give out the next tasks.",
                                  len(workers))
                 pending = {"cycle": number, "workers": [worker["id"] for worker in workers], "lead": lead["id"],
                            "before": _signature(archive), "status": "planned"}

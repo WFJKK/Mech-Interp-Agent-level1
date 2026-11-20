@@ -30,9 +30,9 @@ def scripts(tmp_path, stopped=False):
     where = tmp_path / "fake-research"
     where.mkdir()
     planning = {"calls": [
-        {"tool": "assign_region", "args": {"scope": {"kind": "lengths", "lengths": [2]},
+        {"tool": "assign_task", "args": {"scope": {"kind": "lengths", "lengths": [2]},
                                              "task": "Find a compact predictor on this input class."}},
-        {"tool": "assign_region", "args": {"scope": {"kind": "lengths", "lengths": [1]},
+        {"tool": "assign_task", "args": {"scope": {"kind": "lengths", "lengths": [1]},
                                              "task": "Investigate a different input class."}},
     ], "response": "## What the network does\nTwo investigations are ready."}
     pair_worker = {"calls": [
@@ -249,7 +249,7 @@ def test_no_investigations_is_not_reported_as_complete(tmp_path):
     fake.mkdir()
     write_json(fake / "01.json", {"calls": [], "response": "No assignments."})
     assert multi_agent.drive(path, fake_scripts=fake, out=lambda *_: None) == "stopped"
-    assert "no regional investigations" in read_json(path / "multi_agent/state.json")["stop_reason"]
+    assert "gave out no tasks" in read_json(path / "multi_agent/state.json")["stop_reason"]
     assert not (path / "multi_agent/lock.json").exists()
 
 

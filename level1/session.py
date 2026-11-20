@@ -189,20 +189,23 @@ RESEARCH_SUBMIT_TOOL = {
 
 
 RESEARCH_TOOLS = {
-    "assign_region": {
+    "assign_task": {
         "description": (
-            "Assign a bounded investigation to a regional researcher. The scope is the fixed input domain of "
-            "the task, and the researcher optimizes the same reward conditioned on it. Use kind all, lengths "
-            "with a list of permitted lengths, or predicate with a saved entry whose region test defines the "
-            "scope. For predicate, pass that saved entry's name as entry_name. The task describes a question, "
-            "evidence to examine and expected output. This schedules work for the next research phase; it "
-            "does not run another researcher immediately. Assignments cannot alter reward parameters, prices "
-            "or workload policy. Their scopes and results are retained separately from the global task."),
+            "Give one researcher a task for the next research phase. You decide what the task is, for example "
+            "some of the network's units or another part of its computation, a group of inputs, making a saved "
+            "program cheaper, or testing a claim. Describe the question, the evidence to start from and what to "
+            "hand back. The researcher's submissions are ordinary entries scored by the same reward; a program "
+            "that computes part of the network its own way and the rest as the network does is such an entry. "
+            "Optional scope fixes the input domain on which the researcher's submissions are scored; without it "
+            "they are scored on the whole input distribution. Use kind lengths with a list of permitted lengths, "
+            "or predicate with a saved entry whose region test defines the domain, passing that entry's name as "
+            "entry_name. This schedules work for the next research phase; it does not run a researcher "
+            "immediately. Assignments cannot alter reward parameters, prices or workload policy."),
         "schema": {"type": "object", "properties": {
-            "scope": {"type": "object", "description": "An input domain: kind all, lengths or predicate."},
-            "task": {"type": "string", "description": "A focused research question and the evidence to return."},
+            "task": {"type": "string", "description": "What the researcher should do, the evidence to use and what to hand back."},
+            "scope": {"type": "object", "description": "Optional input domain for scoring: kind all, lengths or predicate. All inputs when omitted."},
             "entry_name": {"type": "string", "description": "For a predicate scope, the saved entry defining its region."}},
-            "required": ["scope", "task"]},
+            "required": ["task"]},
     },
 }
 
@@ -606,22 +609,25 @@ class Session:
                     pass  # a submission cut off before its receipt: it spent its budget and scored nothing
         return out
 
-    def assign_region(self, scope: dict, task: str, entry_name: str | None = None) -> dict:
-        """Validate and record an investigation. Its scope is frozen before any worker submissions."""
+    def assign_task(self, task: str, scope: dict | None = None, entry_name: str | None = None) -> dict:
+        """Validate and record a researcher's task. The lead decides what the task is; its scoring domain (all
+        inputs unless a scope is given) is frozen before any researcher submits."""
         from .regions import Scope, normalize_scope, scope_id
 
         t0 = time.monotonic()
-        args = {"scope": scope, "task": task, "entry_name": entry_name}
+        args = {"task": task, "scope": scope, "entry_name": entry_name}
+        if scope is None:
+            scope = {"kind": "all"}
         try:
             self._require_research()
             self._require_attempt_open()
             research = self.state.get("research_task") or {}
             limit = int(research.get("max_assignments", 0))
             if research.get("role") != "lead" or limit <= 0:
-                raise ToolError("this session cannot assign regional investigations")
+                raise ToolError("this session cannot assign tasks")
             assignments = self.state.get("assignments", [])
             if len(assignments) >= limit:
-                raise ToolError(f"this session has already assigned its {limit} investigations")
+                raise ToolError(f"this session has already assigned its {limit} tasks")
             if not isinstance(task, str) or not task.strip() or len(task) > MAX_TEXT:
                 raise ToolError("task must be nonempty text within the tool's output limit")
             if not isinstance(scope, dict):
@@ -656,10 +662,10 @@ class Session:
             write_json(self.state_path, self.state)
             out = {"status": "assigned", "assignment": record["assignment"], "scope_id": record["scope_id"],
                    "scope": resolved.metadata(), "remaining_assignments": limit - len(assignments) - 1}
-            self._log("assign_region", args, out, time.monotonic() - t0)
+            self._log("assign_task", args, out, time.monotonic() - t0)
             return out
         except ToolError as exc:
-            self._log("assign_region", args, {"error": str(exc)}, time.monotonic() - t0)
+            self._log("assign_task", args, {"error": str(exc)}, time.monotonic() - t0)
             raise
 
     def call(self, tool: str, arguments: dict) -> dict:

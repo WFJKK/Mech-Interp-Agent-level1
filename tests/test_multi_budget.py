@@ -186,11 +186,11 @@ def test_backend_releases_a_claim_when_the_cli_could_not_start(tmp_path):
 def test_backend_allows_only_the_tools_available_to_that_session(tmp_path):
     backend, session, where, calls = _fake_role(tmp_path, 0, [0.1])
     default = backend.command_line(where / "mcp.json")
-    assert "assign_region" not in default[default.index("--allowedTools") + 1]
-    session.TOOLS = {**session.TOOLS, "assign_region": {}}
+    assert "assign_task" not in default[default.index("--allowedTools") + 1]
+    session.TOOLS = {**session.TOOLS, "assign_task": {}}
     backend.respond("work", 0, where, session)
     allowed = calls[0][calls[0].index("--allowedTools") + 1]
-    assert allowed == "mcp__lv1__run_python,mcp__lv1__submit_entry,mcp__lv1__assign_region"
+    assert allowed == "mcp__lv1__run_python,mcp__lv1__submit_entry,mcp__lv1__assign_task"
 
 
 def test_open_reservations_and_finished_unreported_costs_are_distinct_in_logs(tmp_path):

@@ -21,8 +21,8 @@ def config(tmp_path, **changes):
 def test_lead_assigns_a_frozen_scope_but_workers_cannot(tmp_path):
     cfg = config(tmp_path, research_task={"role": "lead", "max_assignments": 2, "cycle": 0})
     lead = Session.create(tmp_path / "lead", cfg, cfg["network"], tmp_path / "run")
-    assert "assign_region" in lead.TOOLS
-    assigned = lead.call("assign_region", {"scope": {"kind": "lengths", "lengths": [2]},
+    assert "assign_task" in lead.TOOLS
+    assigned = lead.call("assign_task", {"scope": {"kind": "lengths", "lengths": [2]},
                                            "task": "Investigate a simple rule and its exceptions."})
     assert assigned["status"] == "assigned"
     reopened = Session(lead.path)
@@ -31,18 +31,18 @@ def test_lead_assigns_a_frozen_scope_but_workers_cannot(tmp_path):
     worker_cfg = copy.deepcopy(cfg)
     worker_cfg["research_task"] = {"role": "regional", "max_assignments": 0, "cycle": 1}
     worker = Session.create(tmp_path / "worker", worker_cfg, cfg["network"], tmp_path / "run")
-    assert "assign_region" not in worker.TOOLS
+    assert "assign_task" not in worker.TOOLS
     with pytest.raises(ToolError, match="no tool"):
-        worker.call("assign_region", {"scope": {"kind": "all"}, "task": "Change the task"})
+        worker.call("assign_task", {"scope": {"kind": "all"}, "task": "Change the task"})
     with pytest.raises(ToolError):
-        lead.assign_region({"kind": "all", "workload_size": 10**12}, "Discount setup")
+        lead.assign_task("Discount setup", {"kind": "all", "workload_size": 10**12})
     for invalid_kind in ([], {}):
         with pytest.raises(ToolError, match="scope.kind"):
-            lead.assign_region({"kind": invalid_kind}, "Invalid domain")
+            lead.assign_task("Invalid domain", {"kind": invalid_kind})
     assert len(read_json(lead.state_path)["assignments"]) == 1
-    lead.assign_region({"kind": "lengths", "lengths": [1]}, "An independent investigation")
+    lead.assign_task("An independent investigation", {"kind": "lengths", "lengths": [1]})
     with pytest.raises(ToolError, match="already assigned"):
-        lead.assign_region({"kind": "all"}, "One more")
+        lead.assign_task("One more", {"kind": "all"})
 
 
 def test_expired_attempt_cannot_assign_a_new_investigation(tmp_path, monkeypatch):
@@ -52,7 +52,7 @@ def test_expired_attempt_cannot_assign_a_new_investigation(tmp_path, monkeypatch
     lead.begin_attempt(10)
     monkeypatch.setattr("level1.session.time.time", lambda: 111.0)
     with pytest.raises(ToolError, match="wall-clock deadline"):
-        lead.assign_region({"kind": "all"}, "Too late to start.")
+        lead.assign_task("Too late to start.", {"kind": "all"})
     assert lead.state["assignments"] == []
 
 
@@ -75,7 +75,7 @@ def test_summary_session_has_no_tools_even_when_called_directly(tmp_path, monkey
     calls = {
         "run_python": {"code": "print('new research')"},
         "submit_entry": {"name": "saved", "claimed_fidelity": 1.0},
-        "assign_region": {"scope": {"kind": "all"}, "task": "Change the investigation"},
+        "assign_task": {"scope": {"kind": "all"}, "task": "Change the investigation"},
     }
     for name, arguments in calls.items():
         with pytest.raises(ToolError, match="no tool"):

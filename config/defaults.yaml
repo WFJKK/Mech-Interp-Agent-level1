@@ -40,7 +40,8 @@ orchestration:
   summary_fraction: 0.1              # share of original API, turn and time allowances; no extra run budget
   development_seed: 0                # fixed development inputs; final evaluation is separate
   archive_per_scope: 8               # entries shown in summaries; all records are retained
-  initial_regions: []                # optional [{scope: {...}, task: "..."}] if the lead proposes none
+  initial_tasks: []                  # optional [{task: "...", scope: {...}}] if the lead gives out none; scope defaults to all
+  initial_regions: []                # the older form of initial_tasks, scope required
   baseline_agent: true               # new research runs first ask one agent for a global generic program
   baseline_fraction: 0.2             # both mode: share of original allowances; baseline mode uses the full share
   baseline_submissions: 2            # this one session's submission quota; research submission quotas stay unchanged

@@ -143,7 +143,7 @@ def check_orchestration(cfg: dict) -> None:
     if cfg["verifier"].get("scope") is None:
         cfg["verifier"]["scope"] = {"kind": "all"}
     elif normalize_scope(cfg["verifier"]["scope"]) != {"kind": "all"}:
-        raise ConfigError("the orchestration's global task must use scope kind all; put regional scopes in initial_regions")
+        raise ConfigError("the orchestration's global task must use scope kind all; put narrower scopes in initial_tasks")
     cfg["verifier"]["sample_seed"] = seed
     if mode == "baseline":
         return  # workers, research fractions and synthesis have no stage in this mode
@@ -151,8 +151,8 @@ def check_orchestration(cfg: dict) -> None:
         if not isinstance(options.get(key, False), bool):
             raise ConfigError(f"orchestration.{key} must be true or false")
     workers = options.get("workers")
-    if isinstance(workers, bool) or not isinstance(workers, int) or workers not in (1, 2):
-        raise ConfigError("orchestration.workers must be 1 or 2")
+    if isinstance(workers, bool) or not isinstance(workers, int) or workers < 1:
+        raise ConfigError("orchestration.workers must be a positive whole number")
     regional_submissions = options.get("regional_submissions", 1)
     if isinstance(regional_submissions, bool) or not isinstance(regional_submissions, int) or regional_submissions < 1:
         raise ConfigError("orchestration.regional_submissions must be a positive whole number")
@@ -195,6 +195,18 @@ def check_orchestration(cfg: dict) -> None:
                           "workers * regional_submissions; increase submissions or lower regional_submissions")
     if int(cfg["session"]["python_calls"]) <= workers:
         raise ConfigError("session.python_calls must leave exploration calls for global integration")
+    tasks = options.get("initial_tasks", [])
+    if not isinstance(tasks, list):
+        raise ConfigError("orchestration.initial_tasks must be a list of task mappings")
+    for assignment in tasks:
+        if not isinstance(assignment, dict) or "task" not in assignment or not set(assignment) <= {"scope", "task"}:
+            raise ConfigError("each initial task needs a task and at most a scope")
+        if not isinstance(assignment["task"], str) or not assignment["task"].strip():
+            raise ConfigError("each initial task needs a nonempty task")
+        try:
+            assignment["scope"] = normalize_scope(assignment.get("scope") or {"kind": "all"})
+        except (ValueError, RuntimeError) as exc:
+            raise ConfigError(f"invalid initial task: {exc}") from None
     initial = options.get("initial_regions")
     if not isinstance(initial, list):
         raise ConfigError("orchestration.initial_regions must be a list of scope/task mappings")

@@ -55,9 +55,9 @@ def prepare(tmp_path, *, supplied=False, baseline_kind="reference", old_config=F
             calls.append({"tool": "submit_entry", "args": {"name": "control_only_program", "claimed_fidelity": 1.0}})
         controls.append({"calls": calls, "response": "## What the network does\n" + CONTROL_NOTE})
     planning = {"calls": [
-        {"tool": "assign_region", "args": {"scope": {"kind": "lengths", "lengths": [1, 2]},
+        {"tool": "assign_task", "args": {"scope": {"kind": "lengths", "lengths": [1, 2]},
                                              "task": "Investigate a compact predictor in this input class."}},
-        {"tool": "assign_region", "args": {"scope": {"kind": "lengths", "lengths": [3, 4]},
+        {"tool": "assign_task", "args": {"scope": {"kind": "lengths", "lengths": [3, 4]},
                                              "task": "Investigate this separate input class."}},
     ], "response": "## What the network does\nTwo regional investigations are ready."}
     reference_code = "g=graph()\nsave_entry('candidate',g.entry(predict=model.reference(g,lv1)))"

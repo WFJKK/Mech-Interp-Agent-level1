@@ -38,7 +38,7 @@ def python(code):
 
 
 def assignment(length):
-    return {"tool": "assign_region", "args": {"scope": {"kind": "lengths", "lengths": [length]},
+    return {"tool": "assign_task", "args": {"scope": {"kind": "lengths", "lengths": [length]},
                                                  "task": "Investigate this class using the saved draft."}}
 
 

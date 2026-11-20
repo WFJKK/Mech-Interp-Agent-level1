@@ -24,7 +24,7 @@ def prepare(tmp_path, summary_script=None, **overrides):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     items = [
-        {"calls": [{"tool": "assign_region", "args": {"scope": {"kind": "lengths", "lengths": [2]},
+        {"calls": [{"tool": "assign_task", "args": {"scope": {"kind": "lengths", "lengths": [2]},
                                                            "task": "Investigate this input class."}}],
          "response": "## What the network does\nInitial planning notes."},
         {"calls": [{"tool": "run_python", "args": {"code": "g=graph()\nsave_entry('local',g.entry(predict=lv1.maximum(g.token(0),g.token(1))))"}},
@@ -57,7 +57,7 @@ def completed(tmp_path_factory):
     path, cfg, scripts = prepare(tmp_path_factory.mktemp("summary"), {"response": ANSWER, "calls": [
         {"tool": "run_python", "args": {"code": "raise RuntimeError('must never execute')"}},
         {"tool": "submit_entry", "args": {"name": "global", "claimed_fidelity": 1}},
-        {"tool": "assign_region", "args": {"scope": {"kind": "all"}, "task": "Change the research plan."}},
+        {"tool": "assign_task", "args": {"scope": {"kind": "all"}, "task": "Change the research plan."}},
     ]})
     assert multi_agent.drive(path, fake_scripts=scripts, out=lambda *_: None) == "finished"
     return path, cfg, scripts
