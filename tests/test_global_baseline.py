@@ -138,7 +138,7 @@ def test_invalid_control_ids_fail_configuration_before_a_session(tmp_path, monke
 @pytest.mark.parametrize("value", [0, -1, True, 1.5, "3", None])
 def test_invalid_candidate_limit_fails_before_control_selection(tmp_path, monkeypatch, value):
     cfg = config(tmp_path)
-    cfg.setdefault("baseline", {})["candidates"] = value  # main's defaults no longer carry a baseline block
+    cfg["baseline"]["candidates"] = value
 
     def no_model_lookup(*args, **kwargs):
         pytest.fail("the invalid candidate limit should fail before selecting a control model")
