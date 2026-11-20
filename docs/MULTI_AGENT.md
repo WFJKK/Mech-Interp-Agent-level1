@@ -74,7 +74,7 @@ python -m level1.loop run --config config/experiments/lin-c-regional.yaml --mode
 
 The existing `CPL_ANTHROPIC_KEY` mechanism is used. All roles can use the same API account and model.
 Each role gets its own session, prompt, saved programs and logs. Setting `orchestration.parallel` to
-`false` runs the regional sessions sequentially with the same roles and allocations.
+`false` runs the researcher sessions sequentially with the same roles and allocations.
 
 A separate single-researcher control evaluates only one declared input domain:
 
@@ -151,7 +151,7 @@ session, as in the rest of this framework, not a team.
 
 In `both` mode, one global baseline session runs first. Its validated program is frozen before the target's
 research begins. An initial lead session then plans investigations. Each research cycle has
-regional sessions, an evaluation barrier and a lead session that integrates the findings and
+researcher sessions, an evaluation barrier and a lead session that integrates the findings and
 plans further work. Only the frozen comparison program and its target-scope measurements enter
 research context; the baseline's exploratory notes and unselected programs do not enter the
 regional archive.

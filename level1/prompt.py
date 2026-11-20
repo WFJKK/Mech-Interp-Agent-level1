@@ -180,9 +180,11 @@ RESEARCH_ROLES = {
         "not an additional submission, selection or retention requirement. Distinguish supported "
         "explanations, hypotheses and unresolved questions. Submit global candidates for evaluation; a score "
         "on a narrower domain is never a substitute for measuring the composed program. Preserve useful "
-        "findings even when their integration does not improve the global score. Tasks should use the "
-        "configured fidelity and cost tradeoff; require exact agreement only when it is an explicit, bounded "
-        "hypothesis or a requirement of this task."),
+        "findings even when their integration does not improve the global score. Use the researchers' checked "
+        "results to identify useful combinations, shared computations, counterexamples and missing tasks. "
+        "Investigate simple explanations on subdomains where measurements show strong agreement, and examine "
+        "their failure cases separately. Tasks should use the configured fidelity and cost tradeoff; require "
+        "exact agreement only when it is an explicit, bounded hypothesis or a requirement of this task."),
     "researcher": (
         "You are a researcher on a team led by a research lead. Carry out the task the lead gave you, shown "
         "below, and optimize the ordinary reward on the assigned domain. Every program you submit is an "

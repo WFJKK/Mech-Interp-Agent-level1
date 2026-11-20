@@ -1,4 +1,4 @@
-"""Regional research and global integration, with a shared measured archive.
+"""Team research and global integration, with a shared measured archive.
 
 This driver is opt-in. Its sessions use the ordinary backend, sandbox and verifier. A
 lead assigns bounded regional investigations, workers submit on those conditional
@@ -690,7 +690,7 @@ def _drive(path, fake_scripts=None, out=print) -> str:
             workers = [state["sessions"][sid] for sid in pending["workers"]]
             errors = []
             if _options(cfg)["parallel"] and len(workers) > 1:
-                out(f"cycle {pending['cycle']}: running {len(workers)} regional sessions")
+                out(f"cycle {pending['cycle']}: running {len(workers)} researcher sessions")
                 with ThreadPoolExecutor(max_workers=len(workers)) as pool:
                     futures = {pool.submit(_run_session, path, cfg, model, state, plan, fake_scripts, out): plan for plan in workers}
                     for future in as_completed(futures):
@@ -937,7 +937,7 @@ def write_report(path) -> None:
     policy = ("Full coverage and agreement were required on the declared control and trained checkpoints."
               if baseline_status.get("trained_checkpoints_used_for_acceptance") else
               "This record does not establish acceptance on the declared trained checkpoints.")
-    lines = ["# Regional research and global integration", "", f"Workflow mode: `{mode}`.", "",
+    lines = ["# Team research and global integration", "", f"Workflow mode: `{mode}`.", "",
              f"Network: `{run['config']['network']}`.", "",
              "The same reward is measured separately within each declared scope. Regional rewards do not select the global program.",
              "All findings here are measured claims unless an independent certificate is supplied.", "",
