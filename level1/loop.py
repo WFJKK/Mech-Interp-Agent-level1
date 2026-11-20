@@ -8,6 +8,8 @@
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop baseline --config <config> | --run <run folder>    the baseline for that shape and those
                                   conditions: found, or run, then frozen (level1/baseline.py)
+    python -m level1.loop baseline --again <baseline run folder>    a frozen baseline frozen again under the present
+                                  rule, next to its earlier record; the runs it serves are read against the new one
     run and resume also take --with-baseline: the run's baseline goes alongside, in a second process
     python -m level1.loop rescore --run <run folder> --name r_alpha --alpha 1    the records under another reward
                                   (--param KEY=VALUE for any other parameter of a reward)
@@ -568,6 +570,26 @@ def run_baseline(cfg: dict, fake_scripts=None, out=print, prices: str | None = N
     return p["path"]
 
 
+def freeze_again(path: Path, out=print) -> dict:
+    """Freeze a frozen baseline run again, under the present rule: a new record next to the earlier ones, which stay
+    as they are, and every finished run it serves read against the new one. Nothing is asked of an agent."""
+    from . import baseline, report
+
+    path = Path(path)
+    before = baseline.latest(path)
+    if before is None:
+        raise RuntimeError(f"{path} has no frozen baseline: `baseline --run` or `finish` freezes it the first time")
+    rec = baseline.freeze(path, out, again=True)
+    report.write(path)
+    out(f"the baseline run {path.name} is frozen again: {rec.get('chosen') or 'nothing'}, {rec.get('label')} ({rec.get('why')}); "
+        f"before, {before.get('chosen') or 'nothing'}, kept in {baseline.record_names(baseline.records(path) - 1)[0]}")
+    for other in baseline.runs_it_serves(path):
+        if baseline.compare(other, out).get("state") == "read":
+            report.write(other)
+            out(f"  {other.name} is read against it: {other / 'report.md'}")
+    return rec
+
+
 def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | None = None, accept_changes: bool = False,
                       budget_usd: float | None = None) -> str:
     """A run and its baseline side by side: the baseline in a second process (what it prints goes to console.txt in
@@ -675,6 +697,8 @@ def main(argv=None) -> int:
     which.add_argument("--config", help="a run config: the baseline for its conditions")
     which.add_argument("--run", help="a run folder: the baseline for its conditions")
     which.add_argument("--request", help=argparse.SUPPRESS)  # written by run --with-baseline for its second process
+    which.add_argument("--again", metavar="BASELINE_RUN", help="a frozen baseline run's folder: freeze it again under the present rule, "
+                       "next to its earlier record, and read the runs it serves against the new one")
     b.add_argument("--runs-dir")
     b.add_argument("--sandbox", help="as for run (default: the config's)")
     b.add_argument("--auth", choices=("login", "api_key"), help="as for run (default: the config's)")
@@ -721,6 +745,9 @@ def main(argv=None) -> int:
             return 0
         if args.cmd == "baseline":
             prices = None
+            if args.again:
+                freeze_again(Path(args.again))
+                return 0
             if args.request:
                 req = read_json(Path(args.request))
                 cfg, prices = req["config"], req.get("prices")

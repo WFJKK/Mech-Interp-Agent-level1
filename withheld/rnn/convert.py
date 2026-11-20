@@ -1,4 +1,4 @@
-"""Make the networks of the RNN models rnn-a to rnn-f from ARC's AlgZoo. Withheld from the agent, like everything here.
+"""Make the networks of the RNN models rnn-a to rnn-g from ARC's AlgZoo. Withheld from the agent, like everything here.
 
     python withheld/rnn/convert.py              writes the networks that are missing, checks the others
     python withheld/rnn/convert.py --from DIR   the same from another copy of the files
@@ -19,6 +19,14 @@ seeds, under the level-1 names input (rnn.weight_ih_l0), recurrent (rnn.weight_h
 (linear.weight), float32 as published. The fully trained ones (2^30 training sequences) make rnn-a, rnn-b and
 rnn-c; the same seeds before any training (0 sequences: AlgZoo saves the model as it starts) make their
 baseline models rnn-d, rnn-e and rnn-f.
+
+rnn-g is not five seeds of one size. Its first network is the 16-unit network AlgZoo's write-up analyses and sets as
+its challenge, published outside the zoo folder (alg_zoo/loading.py, example_2nd_argmax) and fetched on 17 November
+2026 by
+
+    curl -fO "https://storage.googleapis.com/arc-ml-public/alg/one_layer_16_hidden_94_acc_2nd_argmax.pth"
+
+Its second is the zoo's own pick of that size, rnn-c-s2's file, for the seed check (FILES).
 
 A network's file is written once. When it exists, its weights are compared with the conversion and left as they
 are: models/<name>/config.yaml holds its sha256, and the tests convert again and compare.
@@ -42,8 +50,10 @@ TRAINED, UNTRAINED = 2**30, 0
 MODELS = {  # level-1 name: (hidden units, numbers per input, training sequences)
     "rnn-a": (2, 2, TRAINED), "rnn-b": (4, 3, TRAINED), "rnn-c": (16, 10, TRAINED),
     "rnn-d": (2, 2, UNTRAINED), "rnn-e": (4, 3, UNTRAINED), "rnn-f": (16, 10, UNTRAINED),
+    "rnn-g": (16, 10, TRAINED),
 }
 SEEDS = range(5)
+FILES = {"rnn-g": ["one_layer_16_hidden_94_acc_2nd_argmax.pth", "2nd_argmax_16_10_1073741824_2.pth"]}  # a model of named files
 NAMES = {"rnn.weight_ih_l0": "input", "rnn.weight_hh_l0": "recurrent", "linear.weight": "readout"}
 DTYPES = {"FloatStorage": np.float32, "DoubleStorage": np.float64, "HalfStorage": np.float16, "LongStorage": np.int64,
           "IntStorage": np.int32}
@@ -98,7 +108,14 @@ def load_state_dict(path) -> dict:
     return {k: v.astype(v.dtype.newbyteorder("=")) for k, v in out.items()}
 
 
+def numbers(name: str) -> list:
+    """The numbers of a model's networks: the five seeds, or one per file for a model of named files."""
+    return list(range(len(FILES[name]))) if name in FILES else list(SEEDS)
+
+
 def source(name: str, seed: int, folder: Path = PTH) -> Path:
+    if name in FILES:
+        return Path(folder) / FILES[name][seed]
     d, n, sequences = MODELS[name]
     return Path(folder) / f"2nd_argmax_{d}_{n}_{sequences}_{seed}.pth"
 
@@ -128,7 +145,7 @@ def main(argv=None):
     for name in MODELS:
         zoo = REPO / "models" / name / "zoo"
         zoo.mkdir(parents=True, exist_ok=True)
-        for seed in SEEDS:
+        for seed in numbers(name):
             w = convert(name, seed, Path(args.folder))
             out = zoo / f"{name}-s{seed}.npz"
             if out.exists():

@@ -1,6 +1,6 @@
-"""The baseline models lin-e, lin-f and att-e: networks of the shapes of lin-c, lin-d and att-c (and of lin-a-1to4,
-lin-b and att-d, which share them) that were never trained, drawn the way their twins' trainers start
-(withheld/<name>/draw.py). A run on one is a usual run in everything the agent is given, so what it achieves
+"""The baseline models lin-e, lin-f, lin-f-4 and att-e: networks of the shapes of lin-c, lin-d, lin-b-4 and att-c
+(and of lin-a-1to4, lin-b and att-d, which share them) that were never trained, drawn the way their twins'
+trainers start (withheld/<name>/draw.py). A run on one is a usual run in everything the agent is given, so what it achieves
 there owes nothing to learning: it is the baseline that runs of that shape are read against."""
 
 import importlib.util
@@ -21,7 +21,7 @@ from level1.verifier import Verifier
 pytestmark = pytest.mark.filterwarnings("ignore:(divide by zero|overflow|invalid value) encountered in matmul:RuntimeWarning")
 
 REPO = Path(__file__).resolve().parent.parent
-BASELINES = {"lin-e": ("lin-c", "lin-a-1to4"), "lin-f": ("lin-d", "lin-b"), "att-e": ("att-c", "att-d")}
+BASELINES = {"lin-e": ("lin-c", "lin-a-1to4"), "lin-f": ("lin-d", "lin-b"), "lin-f-4": ("lin-b-4",), "att-e": ("att-c", "att-d")}
 NETWORKS = [f"s{i}" for i in range(6)]
 # What these networks are, in the words the agent must never meet. They are said in withheld/ and here only.
 UNTRAINED_WORDS = ["untrained", "not trained", "never trained", "before training", "random weights", "randomly initialized",
@@ -124,13 +124,16 @@ def test_the_agent_is_not_told_what_the_networks_are(name):
 
 
 def test_what_the_networks_are_is_said_in_withheld_and_the_tests_only():
+    """Outside the withheld folder, the tests and the README, no file of the repository says what these
+    networks are. The README names and describes the models for people (CLAUDE.md) and is never on the
+    agent's side, which the hygiene check of the agent's surface covers."""
     r = subprocess.run(["git", "ls-files", "--cached", "--others", "--exclude-standard"], cwd=REPO, capture_output=True, text=True)
     files = [Path(f) for f in r.stdout.splitlines()] if r.returncode == 0 and r.stdout.strip() else []
     if not files:
         pytest.skip("no git to list the repository's files")
     texts = {}
     for rel in files:
-        if rel.parts[0] not in ("withheld", "tests") and rel.suffix != ".npz" and (REPO / rel).is_file():
+        if rel.parts[0] not in ("withheld", "tests") and rel.as_posix() != "README.md" and rel.suffix != ".npz" and (REPO / rel).is_file():
             try:
                 texts[rel.as_posix()] = (REPO / rel).read_text()
             except UnicodeDecodeError:

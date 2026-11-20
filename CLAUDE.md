@@ -13,9 +13,9 @@ that predicts a small network's outputs in fewer operations, and a verifier meas
   the training, which inputs the network was trained on is withheld like the task.
   `level1/hygiene.py` checks the agent's side; a new route to the agent is added to
   `loop.agent_surface` in the same change. A baseline model's networks are withheld the same way:
-  what they are is said in `withheld/<model>/` and in the tests only, and a baseline run's agent is
-  given exactly what a run on the twin model gives it, but for one paragraph of its prompt that asks
-  for an entry exact for any weights (`prompt.EXACT_NOTE`).
+  what they are is said in `withheld/<model>/`, in the tests and in the README only, and a baseline
+  run's agent is given exactly what a run on the twin model gives it, but for one paragraph of its
+  prompt that asks for an entry exact for any weights (`prompt.EXACT_NOTE`).
 - Push to GitHub only when the user asks; never publish anything else. If a hook asks to push,
   decline.
 - Commit after each step. Never rewrite or delete existing results.

@@ -21,11 +21,22 @@ Three steps, each written once and read from the records afterwards:
 2. Freezing, in the baseline run's folder (baseline.json, baseline_entry.json). The scored submissions that
    gave the second network's output on every input of their region (seed_scores.jsonl: every submission on
    one fixed sample) are taken in the order of their reward there, one per different entry, and each is
-   scored again on every one of the model's other networks, all on one fresh sample. It passes when it
-   gives each of them the network's output on every input of its region. The first that passes is frozen
-   and the baseline is established. When none of the first baseline.candidates passes, or no submission
-   was exact on the second network, what was tried is recorded, the baseline is not established, and no
-   run is read against it.
+   scored again on every one of the model's other networks and then on every network of its twins, all on
+   one fresh sample. It passes when it gives each of them the network's output on every input of its
+   region. The first that passes is frozen and the baseline is established. When none passes, or no
+   submission was exact on the second network, what was tried is recorded, the baseline is not
+   established, and no run is read against it.
+
+   Why the twins' networks too: a baseline model's networks are all alike in ways a trained network is
+   not (their weights are small, for one), and an entry can lean on that and still be exact on every one
+   of them. pilot-rnn-f-exact's last entries kept the weights as whole numbers, times 2^60, which a weight
+   of 8 or more does not fit: exact on the baseline model's networks, refused on every trained one. Only
+   whether a candidate is exact there is used, never what it scores.
+
+   A record is written once. A baseline run frozen under an earlier rule, or before a twin was added, can
+   be frozen again when asked (`python -m level1.loop baseline --again <its folder>`): the new record and
+   its entry are written next to the earlier ones (baseline.2.json, baseline_entry.2.json, and so on),
+   which stay as they are, and the newest record is the one that counts.
 3. Reading a run against it, in that run's folder (baseline_scores.jsonl, and the report). The frozen entry is
    scored on the run's network and on its seed check's network, on the inputs of the run's own measurements
    of its locked entry: the second scoring on a fresh sample, and the seed check. With R0 and R1 the locked
@@ -70,6 +81,8 @@ ENTRY = "baseline_entry.json"     # in a baseline run's folder: the frozen entry
 SCORES = "baseline_scores.jsonl"  # in a run's folder: the frozen entry on the run's own inputs, appended
 LOCK = "baseline.lock"            # in a baseline run's folder while a process runs it
 REQUEST = "baseline_request.json"  # in a baseline run's folder: the config a run with --with-baseline asked for
+RULE = ("the network's output on every input of its region, on every one of the model's other networks and on every "
+        "network of its twins")
 
 # What shapes what an agent can achieve in a run, besides the model: two runs are compared only when these
 # are the same, and the price list too. Who pays, the sandbox, the budget and the names are not among them.
@@ -143,9 +156,42 @@ def state_of(path: Path) -> str:
     return "finished" if (path / "lock.json").is_file() else "unfinished"
 
 
+def record_names(n: int) -> tuple:
+    """The file names of a baseline run's n-th freezing record and of its entry: the first is baseline.json and
+    baseline_entry.json, one frozen again is baseline.2.json and baseline_entry.2.json, and so on."""
+    return (FILE, ENTRY) if n == 1 else (f"baseline.{n}.json", f"baseline_entry.{n}.json")
+
+
+def records(path: Path) -> int:
+    """How many freezing records a baseline run has."""
+    path, n = Path(path), 0
+    while (path / record_names(n + 1)[0]).is_file():
+        n += 1
+    return n
+
+
+def latest(path: Path) -> dict | None:
+    """A baseline run's newest freezing record, the one that counts, or None when nothing is frozen."""
+    n = records(path)
+    return read_json(Path(path) / record_names(n)[0]) if n else None
+
+
+def frozen_entry(path: Path) -> dict:
+    """The entry of a baseline run's newest freezing record."""
+    return read_json(Path(path) / record_names(records(path))[1])
+
+
 def established(path: Path) -> bool:
-    f = Path(path) / FILE
-    return f.is_file() and bool(read_json(f).get("established"))
+    return bool((latest(path) or {}).get("established"))
+
+
+def twin_networks(model) -> list:
+    """(model, network id) for every network of a baseline model's twins: the networks its runs are read on."""
+    out = []
+    for name in twins(model):
+        twin = load_model(f"models/{name}")
+        out += [(twin, n["id"]) for n in twin.config["networks"]]
+    return out
 
 
 def find(cfg: dict, prices: str | None = None, where: Path | None = None) -> dict | None:
@@ -292,13 +338,18 @@ def _receipt(r: dict) -> dict:
 
 
 # step 2: freezing ---------------------------------------------------------------------------------
-def freeze(path: Path, log=print) -> dict:
-    """Freeze a finished baseline run's entry (once: an existing baseline.json is the result and is returned)."""
+def freeze(path: Path, log=print, again: bool = False) -> dict:
+    """Freeze a finished baseline run's entry. Once: a record on file is the result and is returned. Only when asked
+    to freeze `again` is a new record made, under the present rule, and written next to the earlier ones."""
     from .loop import entry_of, scored, seed_scores, completed
 
     path = Path(path)
-    if (path / FILE).is_file():
-        return read_json(path / FILE)
+    have = records(path)
+    if have and not again:
+        return latest(path)
+    if again and not have:
+        raise RuntimeError(f"{path.name} has not been frozen yet: there is nothing to freeze again")
+    file, entry_file = (path / x for x in record_names(have + 1))
     run = read_json(path / "run.json")
     cfg = run["config"]
     model = load_model(cfg["model"])
@@ -319,18 +370,19 @@ def freeze(path: Path, log=print) -> dict:
                 candidates.append((-e["reward"], s["round"], s["submission"], s, e))
             else:
                 inexact += 1
-    tries = int((cfg.get("baseline") or {}).get("candidates", 3))
     record = {"baseline_run": path.name, "model": model.name, "twins": twins(model), "conditions": conditions(cfg, run.get("prices")),
-              "asked_for_exactness": cfg.get(EXACT) is True, "rule": "the network's output on every input of its region, on every "
-              "one of the model's other networks", "frozen_at": now()}
+              "asked_for_exactness": cfg.get(EXACT) is True, "rule": RULE, "frozen_at": now()}
+    if have:  # frozen again: the earlier records stay as they are, and this one counts
+        record.update(record=have + 1, earlier=[record_names(k)[0] for k in range(1, have + 1)])
     if not candidates:
         why = ("no submission gave the second network's output on every input of its region" + (f" ({inexact} were scored there)" if inexact else "")
                if inexact else "no submission was scored on the second network")
         record.update(entry_sha256=None, label="none", established=False, why=why)
-        write_json(path / FILE, record)
+        write_json(file, record)
         log(f"the baseline: nothing to freeze ({why}), so it is not established")
         return record
     others = [n["id"] for n in model.config["networks"] if n["id"] not in (cfg["network"], second)]
+    of_twins = twin_networks(model)
     seed = int.from_bytes(os.urandom(8), "big")  # one fresh sample for every candidate and every network
     tried, seen = [], set()
     for _, _, _, sub, e in sorted(candidates, key=lambda c: c[:3]):
@@ -345,25 +397,33 @@ def freeze(path: Path, log=print) -> dict:
             r = Verifier(model, nid, cfg).score(entry, seed=seed)
             confirm[nid] = {**_receipt(r), "reward_range": list(reward_range(r, cfg["reward"]))}
             log(f"  the baseline candidate {sub['carried_as']} on {nid}: {describe(r)}")
-        label, why = verdict(confirm)
-        tried.append({"sub": sub, "on_second": e, "entry": entry, "confirmation": confirm, "label": label, "why": why})
+        on_twins = {}
+        if confirm and all(exact(r) for r in confirm.values()):  # one that fails on its own model is not run on the twins
+            for twin, nid in of_twins:
+                r = Verifier(twin, nid, cfg).score(entry, seed=seed)
+                on_twins[nid] = {**_receipt(r), "reward_range": list(reward_range(r, cfg["reward"]))}
+                log(f"  the baseline candidate {sub['carried_as']} on {nid}, a network of {twin.name}: {describe(r)}")
+        label, why = verdict({**confirm, **on_twins})
+        tried.append({"sub": sub, "on_second": e, "entry": entry, "confirmation": confirm, "on_twins": on_twins, "label": label,
+                      "why": why})
         log(f"  {sub['carried_as']} ({sub['entry_sha256'][:12]}), {e['reward']:.4f} on the second network: {label} ({why})")
-        if label == "passes" or len(tried) >= tries:
+        if label == "passes":
             break
     pick = next((x for x in tried if x["label"] == "passes"), tried[0])
     sub, e = pick["sub"], pick["on_second"]
     record.update(entry_sha256=sub["entry_sha256"], chosen=sub["carried_as"], name=sub["name"],
-                  chosen_by=(f"the highest reward on the second network, of the entries exact there, that passes the check, trying up to "
-                             f"{tries} different entries in that order (every submission is scored on the second network on one fixed sample)"),
+                  chosen_by=("the highest reward on the second network, of the entries exact there, that passes the check, trying "
+                             "every different entry in that order (every submission is scored on the second network on one fixed sample)"),
                   on_first={k: sub.get(k) for k in ("reward", "parts", "inputs")},
                   on_second={k: e.get(k) for k in ("network", "reward", "parts", "inputs")},
-                  confirmation={"inputs_seed": seed, "networks": pick["confirmation"]}, label=pick["label"], why=pick["why"],
+                  confirmation={"inputs_seed": seed, "networks": pick["confirmation"], "twin_networks": pick["on_twins"]},
+                  label=pick["label"], why=pick["why"],
                   established=pick["label"] == "passes",
                   tried=[{"chosen": x["sub"]["carried_as"], "entry_sha256": x["sub"]["entry_sha256"], "name": x["sub"]["name"],
                           "on_second_reward": x["on_second"]["reward"], "label": x["label"], "why": x["why"]} for x in tried])
-    write_json(path / ENTRY, pick["entry"])
-    write_json(path / FILE, record)
-    log(f"the baseline: {sub['carried_as']} ({sub['entry_sha256'][:12]}) frozen, {pick['label']}"
+    write_json(entry_file, pick["entry"])
+    write_json(file, record)
+    log(f"the baseline: {sub['carried_as']} ({sub['entry_sha256'][:12]}) frozen{' again' if have else ''}, {pick['label']}"
         + ("" if pick["label"] == "passes" else f": none of the {len(tried)} tried passed, so it is not established"))
     return record
 
@@ -412,7 +472,7 @@ def compare(path: Path, log=print) -> dict:
         return {"state": "empty", "baseline_run": hit["path"].name, "why": frozen.get("why")}
     if not frozen.get("established"):
         return {"state": "not established", "baseline_run": hit["path"].name, "why": frozen.get("why")}
-    entry = read_json(hit["path"] / ENTRY)
+    entry = frozen_entry(hit["path"])
     if lang.entry_hash(entry) != frozen["entry_sha256"]:
         raise RuntimeError(f"{hit['path'].name}'s frozen entry on disk is not the one it records")
     have = {(e.get("baseline_entry_sha256"), e.get("network"), (e.get("inputs") or {}).get("seed"), (e.get("inputs") or {}).get("mode"))
@@ -449,7 +509,7 @@ def reading(path: Path) -> dict:
     cfg = run["config"]
     model = load_model(cfg["model"])
     if is_baseline(model):
-        frozen = read_json(path / FILE) if (path / FILE).is_file() else None
+        frozen = latest(path)
         return {"kind": "baseline run", "twins": twins(model), "frozen": frozen, "asked_for_exactness": cfg.get(EXACT) is True}
     if not baseline_models(model):
         return {"kind": "run", "state": "no baseline model"}
@@ -460,9 +520,9 @@ def reading(path: Path) -> dict:
            "same_first_prompt": same_first_prompt(path, hit["path"])}
     if hit["state"] != "frozen":
         return out
-    frozen = read_json(hit["path"] / FILE)
+    frozen = latest(hit["path"])
     out.update(label=frozen.get("label"), why=frozen.get("why"), chosen=frozen.get("chosen"), entry_sha256=frozen.get("entry_sha256"),
-               tried=frozen.get("tried") or [])
+               tried=frozen.get("tried") or [], on_twins="twin_networks" in (frozen.get("confirmation") or {}))
     if not frozen.get("entry_sha256"):
         out["state"] = "empty"
         return out

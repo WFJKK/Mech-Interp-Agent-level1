@@ -1,0 +1,18 @@
+# The baseline pilot for lin-b-4's shape and data set (models/lin-f-4: 4 slots, 64 tokens, width 8, inputs of
+# four tokens), 671 operations per forward pass. Everything the agent is given is what the lin-b-4 pilot gives
+# it: the same prompt but for one paragraph that asks for an entry exact for any weights, data set, rounds,
+# budgets and reward. Only the networks differ; what they are is in withheld/lin-f-4/. What the agent achieves
+# here is the baseline that runs of this shape and data set are read against.
+# 64^4 inputs, so the verifier scores a fresh sample for every submission.
+#   rounds on      lin-f-4-s0
+#   seed check on  lin-f-4-s1   the same sizes, another seed (lin-f-4-s2 to s5 are for freezing the entry)
+# Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-lin-f-4-exact
+exact_on_any_weights: true   # its prompt asks for an entry exact for any weights of the design
+model: models/lin-f-4
+network: lin-f-4-s0
+seed_check: {network: lin-f-4-s1}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

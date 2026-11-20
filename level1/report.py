@@ -297,21 +297,37 @@ def baseline_lines(rep: dict) -> list:
             return out + ["Nothing is frozen yet: that happens when the run finishes.", ""]
         if not f.get("entry_sha256"):
             return out + [f"Nothing was frozen: {f.get('why')}. This baseline is not established, and no run is read against it.", ""]
+        head = ["| Network | Reward | With its sampling interval | Coverage | Fidelity | Wrong | Cost | Build part | Per input |",
+                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
+
+        def rows(receipts: dict) -> list:
+            made = []
+            for nid, r in receipts.items():
+                if r.get("status") != "scored":
+                    made.append(f"| {nid} | refused: {str(r.get('reason'))[:80]} | | | | | | | |")
+                    continue
+                q = r["parts"]
+                wrong = int(q.get("n_in_region", 0)) - int(q.get("n_agree", 0)) if q.get("n_in_region") is not None else ""
+                made.append(f"| {nid} | {r['reward']:.4f} | {_range(r['reward_range'])} | {q['coverage']:.4f} | {q['fidelity']:.5f} | "
+                            f"{wrong} | {rewards.cost_of(q):.4f} | {q['b']:.4f} | {q['r']:.4f} |")
+            return made
+
+        if f.get("earlier"):
+            out += [f"This run was frozen again, when asked: this is its record {f['record']}, and what was frozen before is kept as it "
+                    f"was ({', '.join(f['earlier'])}).", ""]
         out += [f"Frozen: {f['chosen']} (`{f['name']}`), sha256 `{f['entry_sha256'][:16]}`, chosen as {f['chosen_by']} "
                 f"({f['on_second']['reward']:.4f} on {f['on_second']['network']}). Scored again on the model's other networks, all on one "
-                f"fresh sample (seed {f['confirmation']['inputs_seed']}):", "",
-                "| Network | Reward | With its sampling interval | Coverage | Fidelity | Wrong | Cost | Build part | Per input |",
-                "| --- | --- | --- | --- | --- | --- | --- | --- | --- |"]
-        for nid, r in f["confirmation"]["networks"].items():
-            if r.get("status") != "scored":
-                out.append(f"| {nid} | refused: {str(r.get('reason'))[:80]} | | | | | | | |")
-                continue
-            q = r["parts"]
-            wrong = int(q.get("n_in_region", 0)) - int(q.get("n_agree", 0)) if q.get("n_in_region") is not None else ""
-            out.append(f"| {nid} | {r['reward']:.4f} | {_range(r['reward_range'])} | {q['coverage']:.4f} | {q['fidelity']:.5f} | "
-                       f"{wrong} | {rewards.cost_of(q):.4f} | {q['b']:.4f} | {q['r']:.4f} |")
-        rule = "the network's output on every input of its region on every other network" if f.get("rule") else (
-            f"rewards within {f.get('tolerance')} of each other (the rule before exactness was asked for)")
+                f"fresh sample (seed {f['confirmation']['inputs_seed']}):", ""] + head + rows(f["confirmation"]["networks"])
+        on_twins = f["confirmation"].get("twin_networks")  # None in a record made before the twins' networks were part of the check
+        if on_twins:
+            out += ["", f"And on every network of its twins ({', '.join(b['twins'])}), on the same sample:", ""] + head + rows(on_twins)
+        if not f.get("rule"):
+            rule = f"rewards within {f.get('tolerance')} of each other (the rule before exactness was asked for)"
+        elif on_twins is None:
+            rule = "the network's output on every input of its region on every other network"
+        else:
+            rule = ("the network's output on every input of its region, on every other network of its model and on every network of "
+                    "its twins")
         out += ["", f"Verdict ({rule}): **{f['label']}**: {f['why']}."]
         if len(f.get("tried") or []) > 1 or not f.get("established", f.get("label") == "passes"):
             out += ["", "Tried, in the order of their reward on the second network:", ""]
@@ -331,9 +347,10 @@ def baseline_lines(rep: dict) -> list:
     if state == "empty":
         return out + [f"The baseline run {b['baseline_run']} froze nothing ({b.get('why')}), so there is no usable baseline for this "
                       "run.", ""]
+    where = "its model's other networks and its twins' networks" if b.get("on_twins") else "its model's other networks"
     if state == "not established":
-        out += [f"The baseline run {b['baseline_run']} is not established: no entry it tried gave the outputs of its model's other "
-                f"networks exactly ({b.get('why')}). So there is no usable baseline for this run, and nothing is read against it.", ""]
+        out += [f"The baseline run {b['baseline_run']} is not established: no entry it tried gave the outputs of {where} exactly "
+                f"({b.get('why')}). So there is no usable baseline for this run, and nothing is read against it.", ""]
         tried = b.get("tried") or []
         if tried:
             out += ["Tried, in the order of their reward on the second network:", ""]
@@ -341,8 +358,8 @@ def baseline_lines(rep: dict) -> list:
             out += [""]
         return out
     same = {True: "yes", False: "no", None: "not known"}[b.get("same_first_prompt")]
-    out += [f"The baseline run {b['baseline_run']} froze {b.get('chosen')}, which **{b.get('label')}** the check on its model's other "
-            f"networks ({b.get('why')}). Its agent was given the same first prompt as this run's, byte for byte, but for the paragraph "
+    out += [f"The baseline run {b['baseline_run']} froze {b.get('chosen')}, which **{b.get('label')}** the check on {where} "
+            f"({b.get('why')}). Its agent was given the same first prompt as this run's, byte for byte, but for the paragraph "
             f"that asks for an entry exact for any weights: {same}.", ""]
     if state == "not exact here":
         bad = "; ".join(f"on {v['network']} ({role}), the network's output on {v.get('n_agree') or 0:,} of the {v.get('n_in_region') or 0:,} "

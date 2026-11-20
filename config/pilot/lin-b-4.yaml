@@ -1,0 +1,15 @@
+# The pilot on lin-b's two networks asked only about inputs of four tokens in four slots, no slot empty
+# (models/lin-b-4: 4 slots, 64 tokens, width 8), 671 operations per forward pass. The agent is told what an
+# input is and how the data set is drawn, not what the network does.
+# 64^4 = 16,777,216 inputs: the verifier scores a fresh sample for every submission, as on lin-b.
+#   rounds on      lin-b-4-s0   (lin-b-s0)
+#   seed check on  lin-b-4-s1   (lin-b-s1) the same sizes and training, another seed
+# Its baseline is config/pilot/lin-f-4.yaml. Everything else is config/pilot/base.yaml and config/defaults.yaml.
+extends: base.yaml
+run_id: pilot-lin-b-4
+model: models/lin-b-4
+network: lin-b-4-s0
+seed_check: {network: lin-b-4-s1}
+verifier:
+  check: sample
+  sample_size: 16384      # per scoring; an entry's build is spread over these

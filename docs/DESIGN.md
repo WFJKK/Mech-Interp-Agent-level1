@@ -321,14 +321,28 @@ run's entry only in cost: that is what generic tricks are worth there.
 **Freezing.** When a baseline run finishes, its scored submissions that gave the second network's output
 on every input of their region (every submission is scored there on one fixed sample) are taken in the
 order of their reward there, one per different entry, and each is scored again on every one of the
-model's other networks, all on one fresh sample. It *passes* when it gives each of them the network's
-output on every input of its region, and *fails* otherwise. The first that passes is frozen and the
-baseline is established. If none of the first `baseline.candidates` (3) passes, or no submission was
-exact on the second network, what was tried is recorded, the baseline is not established, and no run is
-read against it: the reports say there is no usable baseline.
+model's other networks and then on every network of its twins, all on one fresh sample. It *passes* when
+it gives each of them the network's output on every input of its region, and *fails* otherwise. The
+first that passes is frozen and the baseline is established. If none passes, or no submission was exact
+on the second network, what was tried is recorded, the baseline is not established, and no run is read
+against it: the reports say there is no usable baseline.
+
+Why the twins' networks too. A baseline model's networks are all alike in ways a trained network is not;
+their weights are small, for one. An entry can lean on that and still be exact on every one of them.
+pilot-rnn-f-exact (17 and 18 November) ended on entries that kept the weights as whole numbers, times
+2^60, which a weight of 8 or more does not fit: its networks' weights stay below 0.25, a trained
+network's reach 11 to 38, and the entry frozen under the rule of the time was refused on every trained
+network, so no run could be read against it. Only whether a candidate is exact on the twins' networks
+is used, never what it scores there, and the three tries the rule once stopped at are gone: the best
+entry that is exact everywhere is the baseline, however far down it is
+(`tests/test_gaming.py`).
 
 The choice, every score with its parts and seed, and the verdict are written once (`baseline.json`, and
-the entry in `baseline_entry.json`). One baseline run gives a known achievable generic score, not the
+the entry in `baseline_entry.json`). A baseline run frozen under an earlier rule, or before a twin was
+added, is frozen again only when asked (`python -m level1.loop baseline --again <its folder>`): the new
+record and its entry are written next to the earlier ones (`baseline.2.json`, `baseline_entry.2.json`,
+and so on), which stay as they are; the newest record counts, and the finished runs the baseline serves
+are read against it. One baseline run gives a known achievable generic score, not the
 best possible one. Of several baseline runs that match a run, an established one is used; one that is
 not established comes last; and a baseline run whose prompt did not ask for exactness serves no run.
 

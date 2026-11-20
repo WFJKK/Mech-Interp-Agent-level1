@@ -1,0 +1,10 @@
+# A first contact with the rnn-g pilot, kept small on purpose: one round with a short session, to see that
+# everything works together on this machine before the pilot proper (config/pilot/rnn-g.yaml).
+extends: rnn-g.yaml
+run_id: pilot-rnn-g-smoke
+rounds_max: 1
+session:
+  python_calls: 8
+  submissions: 2
+  max_turns: 40
+  seconds: 1200

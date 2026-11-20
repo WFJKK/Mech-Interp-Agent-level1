@@ -1,0 +1,11 @@
+{
+ "calls": [
+  {"tool": "run_python", "args": {"code": {"$file": "explore.py"}}},
+  {"tool": "submit_entry", "args": {"name": "packed_unembed", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+  {"tool": "submit_entry", "args": {"name": "packed_hidden", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+  {"tool": "submit_entry", "args": {"name": "packed_embed", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+  {"tool": "submit_entry", "args": {"name": "packed_two", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+  {"tool": "submit_entry", "args": {"name": "itself", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}}
+ ],
+ "response": "## What the network does\nIts three matrices multiplied once give every output.\n\n## How you found it\nFrom the weights.\n\n## The best entry\npacked_hidden\n\n## Claims\nAs submitted.\n\n## Next\nNothing."
+}
