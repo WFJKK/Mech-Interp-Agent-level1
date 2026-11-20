@@ -1,0 +1,15 @@
+# A small first run of config/experiments/rnn-b-team.yaml on the real backend: one cycle, two researchers
+# with 6 Python calls each, at most $15, to check that the team runs end to end before the full run.
+extends: rnn-b-team.yaml
+run_id: team-rnn-b-smoke
+rounds_max: 1
+session:
+  python_calls: 25
+  submissions: 6
+  max_turns: 120
+  seconds: 3600
+budget:
+  run_usd: 15
+  round_usd: 10
+orchestration:
+  workers: 2

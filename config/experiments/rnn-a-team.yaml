@@ -1,0 +1,35 @@
+# The recurrent network on two real numbers (models/rnn-a, 2 hidden units) studied by a team: a lead that
+# decides, each cycle, what each of up to two researchers works on, and that combines their checked results
+# into one program for the whole network. The agents are told what an input is and how the data set is
+# drawn, not what the network was trained to do.
+#   rounds on      rnn-a-s2
+#   seed check on  rnn-a-s1   the same sizes and training, another seed
+#
+# Allowances are per cycle and shared by the team (level1/multi_agent.py, _allocation). With these numbers
+# each of two researchers gets 30 Python calls, 2 submissions and $4.20 a cycle, and the lead 30 calls,
+# 2 submissions and $4.20; the planning lead $4.20, the baseline agent $12 and the closing summary $6. That
+# is at most $60 for the run.
+# An entry that differs from the network on 1 input in 10,000 or fewer can rarely be told from an exact one
+# on a sample of 16,384 inputs; check a locked entry on more inputs afterwards.
+extends: research.yaml
+run_id: team-rnn-a
+model: models/rnn-a
+network: rnn-a-s2
+seed_check: {network: rnn-a-s1}
+rounds_max: 3
+verifier:
+  sample_size: 16384
+  workload_size: 16384      # the inputs are real numbers: an entry's build is spread over this many
+session:
+  python_calls: 125
+  submissions: 6
+  max_turns: 300
+  seconds: 7200
+budget:
+  run_usd: 60
+  round_usd: 20
+orchestration:
+  workers: 2
+  initial_regions: []
+  initial_tasks:            # only if the lead gives out no tasks
+    - task: Find the program for the whole network with the highest reward you can.
