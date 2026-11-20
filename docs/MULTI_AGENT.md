@@ -1,8 +1,8 @@
-# Regional research and global integration
+# Team research and global integration
 
 The optional research framework uses the existing reward and entry language. It can run trained-model
-research, one global generic baseline agent, or both. A lead researcher assigns input domains to regional
-researchers and uses their checked results to construct a complete program. Code owns baseline
+research, one global generic baseline agent, or both. A lead decides, each cycle, what each researcher
+works on, and uses their checked results to construct a complete program. Code owns baseline
 validation, evaluation, the shared budget, the archive and the final lock. When research is enabled,
 an optional final tool-free lead session explains the frozen global and regional findings.
 
@@ -124,6 +124,29 @@ in the entry language. Existing adapters cover several architectures and both di
 inputs. An arbitrary external model or natural-language corpus may need a new adapter, distribution
 implementation and cost model. Unknown-cardinality domains need an explicit workload.
 
+## Teams for the recurrent networks
+
+Three configurations run a team on the recurrent networks on real numbers. The lead decides every
+task; the configurations only set the team's size, the number of cycles and the allowances.
+
+| Config | Network | Researchers | Cycles | At most |
+| --- | --- | ---: | ---: | ---: |
+| `config/experiments/rnn-b-team-smoke.yaml` | `rnn-b-s0` (4 units) | 2 | 1 | $15 |
+| `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 3 | $120 |
+| `config/experiments/rnn-a-team.yaml` | `rnn-a-s2` (2 units) | 2 | 3 | $60 |
+
+Each file's comments give what every role gets. Run the smoke configuration first:
+
+```bash
+python -m level1.loop run --config config/experiments/rnn-b-team-smoke.yaml --auth api_key
+python -m level1.loop run --config config/experiments/rnn-b-team.yaml --auth api_key
+```
+
+A cycle's researchers run side by side, and each of their Python programs may use up to
+`python.memory_limit_mb` of memory, so four researchers can need four times that at once. Set
+`orchestration.parallel: false` to run them one after another. The baseline is one agent's
+session, as in the rest of this framework, not a team.
+
 ## Roles and schedule
 
 In `both` mode, one global baseline session runs first. Its validated program is frozen before the target's
@@ -138,16 +161,26 @@ its deterministic report. It creates no regional workers, target-research lead o
 The `baseline` and `both` modes use the same baseline validation policy; running it alone
 does not relax its acceptance checks.
 
-The lead can call `assign_region(scope, task, entry_name=None)`. Each assignment contains an
-immutable scope and a bounded question. Workers can explore and submit programs directly to the
-same verifier used by the lead. They cannot broaden their assigned scope or change the reward,
-prices or workload policy. They can submit an entry within that assignment or make a separately
-evaluated claim on a narrower domain. The controller retains each actual evaluation domain.
+The lead gives out tasks with `assign_task(task, scope=None, entry_name=None)`: at most
+`orchestration.workers` in a cycle, one per researcher. The lead decides what a task is, for example
+some of the network's units or another part of its computation, a group of inputs, making a saved
+program cheaper, or testing a claim. A researcher's programs are ordinary entries scored by the same
+reward. A program that computes part of the network its own way and the rest as the network does is
+such an entry, so work on a part of the network is measured by its effect on the network's output.
+`scope` only fixes where the researcher's submissions are scored; without it they are scored on all
+inputs. Each assignment's scope is frozen before the researcher begins. Researchers can explore and
+submit programs directly to the same verifier used by the lead. They cannot broaden their assigned
+scope or change the reward, prices or workload policy. They can submit an entry within that
+assignment or make a separately evaluated claim on a narrower domain. The controller retains each
+actual evaluation domain.
 
-With two workers, the lead is encouraged to use one for a directed investigation and the other for
-an alternative hypothesis or underexplored domain. Worker contexts and archive snapshots are fixed
-before a parallel phase begins. Their results become available to the integration session after
-evaluation.
+A lead that gives out fewer tasks than `orchestration.workers` runs fewer researchers, and each gets
+more of the cycle's allowance. With more than one task, the lead is encouraged to leave room for an
+alternative explanation instead of making every researcher follow the same hypothesis. Researcher
+contexts and archive snapshots are fixed before a parallel phase begins. Their results become
+available to the integration session after evaluation. If the planning lead gives out no tasks,
+`orchestration.initial_tasks` (tasks whose scope defaults to all inputs) or the older
+`orchestration.initial_regions` are used instead.
 
 Progress is recorded separately for the global incumbent and regional frontiers. Patience expires
 only when neither improves. All submissions are retained, including programs that are useful for
