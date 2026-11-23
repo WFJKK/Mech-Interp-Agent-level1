@@ -132,7 +132,7 @@ task; the configurations only set the team's size, the number of cycles and the 
 | Config | Network | Researchers | Cycles | At most |
 | --- | --- | ---: | ---: | ---: |
 | `config/experiments/rnn-b-team-smoke.yaml` | `rnn-b-s0` (4 units) | 2 | 1 | $15 |
-| `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 5 | $120 |
+| `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 5 | $200 |
 | `config/experiments/rnn-a-team.yaml` | `rnn-a-s2` (2 units) | 2 | 3 | $60 |
 
 Each file's comments give what every role gets. The two `rnn-b` files run no baseline agent
@@ -145,6 +145,17 @@ keep one fixed development sample. Run the smoke configuration first:
 ```bash
 python -m level1.loop run --config config/experiments/rnn-b-team-smoke.yaml --auth api_key
 python -m level1.loop run --config config/experiments/rnn-b-team.yaml --auth api_key
+```
+
+A team run can stop between cycles. `--pause-after N` on `run` or `resume` stops it after cycle N,
+before the next cycle starts, with nothing locked and the lead's new tasks saved. `resume` goes on
+with those tasks, with the allowances of the whole run; `finish` ends the research there with the
+usual locking, audits, closing summary and report. For three of the five cycles first:
+
+```bash
+python -m level1.loop run --config config/experiments/rnn-b-team.yaml --auth api_key --pause-after 3
+python -m level1.loop resume --run <run folder>    # cycles 4 and 5, then the end of the run
+python -m level1.loop finish --run <run folder>    # or the end of the run after cycle 3
 ```
 
 A cycle's researchers run side by side, and each of their Python programs may use up to

@@ -319,6 +319,58 @@ def test_a_lead_that_finishes_sends_the_run_to_its_ordinary_end(tmp_path):
     assert len(read_json(path / "multi_agent/state.json")["sessions"]) == 4
 
 
+# ---------------------------------------------------------------- the operator can pause between cycles
+
+def paused_run(tmp_path):
+    cfg = team_cfg(tmp_path)
+    path = run_config.run_path(cfg)
+    path.mkdir(parents=True)
+    write_json(path / "run.json", {"run_id": cfg["run_id"], "config": cfg, "model_ops": 671, "sandbox": {"mode": "process"}})
+    scripts, lines = team_scripts(tmp_path), []
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lines.append, pause_after=1) == "stopped"
+    return path, scripts, lines
+
+
+def test_a_paused_run_stops_after_its_cycle_with_nothing_locked_and_goes_on_with_the_leads_tasks(tmp_path):
+    path, scripts, lines = paused_run(tmp_path)
+    state = read_json(path / "multi_agent/state.json")
+    assert state["stop_reason"] == "paused by the operator after cycle 1"
+    assert [c["status"] for c in state["cycles"]] == ["completed"] and len(state["sessions"]) == 5
+    assert not (path / "multi_agent/lock.json").exists() and not (path / "lock.json").exists()
+    assert any(f"resume --run {path}" in line for line in lines)
+    assert '"paused_after_cycle": 1' in (path / "log.jsonl").read_text()
+    # going on: the next cycle runs the tasks the lead of cycle 1 gave out, and the run ends as an unpaused one
+    assert multi_agent.drive(path, fake_scripts=scripts, out=lines.append) == "finished"
+    state = read_json(path / "multi_agent/state.json")
+    roles = [(p["role"], p["cycle"]) for p in sorted(state["sessions"].values(), key=lambda p: p["index"])]
+    assert roles == [("lead", 0), ("regional", 1), ("regional", 1), ("regional", 1), ("lead", 1),
+                     ("regional", 2), ("regional", 2), ("lead", 2)]
+    assert [p["task"] for p in state["sessions"].values() if p["role"] == "regional" and p["cycle"] == 2] == [
+        "Make the program 'whole' cheaper without changing any output.", "Try to break the claim made for units 0 to 3."]
+    assert state["stop_reason"] == "the configured research cycles are complete"
+    assert (path / "multi_agent/lock.json").exists()
+
+
+def test_a_paused_run_can_end_after_its_cycle_with_the_usual_lock(tmp_path):
+    path, _, lines = paused_run(tmp_path)
+    assert loop.finish(path, out=lines.append)["locked"]
+    state = read_json(path / "multi_agent/state.json")
+    assert len(state["cycles"]) == 1 and len(state["sessions"]) == 5
+    report = (path / "report.md").read_text()
+    assert "Completed cycles: 1." in report and "Stop reason: paused by the operator after cycle 1" in report
+
+
+def test_only_a_team_run_can_pause_and_only_after_a_cycle_number(tmp_path):
+    single = ["run", "--config", "config/pilot/lin-a-1to4.yaml", "--runs-dir", str(tmp_path / "runs"),
+              "--fake", str(tmp_path / "scripts")]
+    assert loop.main(single + ["--pause-after", "1"]) == 1
+    team = ["run", "--config", "config/experiments/rnn-b-team.yaml", "--runs-dir", str(tmp_path / "runs"),
+            "--fake", str(tmp_path / "scripts"), "--sandbox", "process"]
+    assert loop.main(team + ["--pause-after", "-1"]) == 1
+    assert loop.main(team + ["--pause-after", "1", "--with-baseline"]) == 1
+    assert not (tmp_path / "runs").exists()  # refused before any run folder is made
+
+
 # ---------------------------------------------------------------- scoring during the cycles, as for a single agent
 
 def test_a_fresh_sample_per_submission_is_only_for_runs_without_a_baseline(tmp_path):

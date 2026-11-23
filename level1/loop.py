@@ -1,10 +1,12 @@
 """The loop: the rounds on one network, then the lock, the seed check and the report.
 
     python -m level1.loop run --config config/pilot/lin-a.yaml [--run-id X] [--sandbox hardened] [--fake DIR]
-                              [--auth api_key] [--budget-usd 60]
+                              [--auth api_key] [--budget-usd 60] [--pause-after N]
     python -m level1.loop run --config <config> --mode trained|baseline|both
                               explicitly select the research controller's stages
-    python -m level1.loop resume --run <run folder> [--budget-usd 80]
+    python -m level1.loop resume --run <run folder> [--budget-usd 80] [--pause-after N]
+    a team run (orchestration) given --pause-after N stops after its cycle N with nothing locked: resume goes
+                                  on with the lead's tasks, finish ends the research there
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop baseline --config <config> | --run <run folder>    the baseline for that shape and those
                                   conditions: found, or run, then frozen (level1/baseline.py)
@@ -231,7 +233,7 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
     return out
 
 
-def start(cfg: dict, fake_scripts=None, out=print) -> Path:
+def start(cfg: dict, fake_scripts=None, out=print, pause_after: int | None = None) -> Path:
     """Make the run folder, check everything that can be checked before a model is asked, then run the rounds."""
     from .sandbox import check_probe, choose, probe, protected_paths
 
@@ -327,16 +329,20 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
                 f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
     elif cfg["backend"] == "claude_code":
         log("under your Claude Code login: no API key is used")
-    drive(path, fake_scripts=fake_scripts, out=out)
+    drive(path, fake_scripts=fake_scripts, out=out, pause_after=pause_after)
     return path
 
 
-def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False, budget_usd: float | None = None) -> str:
+def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False, budget_usd: float | None = None,
+          pause_after: int | None = None) -> str:
     """Run the rounds that are left, then finish. Returns how it ended: finished, or stopped (resume later).
-    budget_usd: a new budget for a run billed to an API key, kept in its spend log."""
+    budget_usd: a new budget for a run billed to an API key, kept in its spend log.
+    pause_after: a team run stops after that cycle, with nothing locked."""
     path = Path(path)
     run = read_json(path / "run.json")
     cfg = run["config"]
+    if pause_after is not None and not (cfg.get("orchestration") or {}).get("enabled"):
+        raise RuntimeError("--pause-after is for team runs (orchestration)")
     log = Log(path, out)
     if budget_usd is not None and not (cfg.get("orchestration") or {}).get("enabled"):
         if cfg.get("auth") != "api_key":
@@ -372,7 +378,7 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
     if (cfg.get("orchestration") or {}).get("enabled"):
         from . import multi_agent
 
-        return multi_agent.drive(path, fake_scripts=fake_scripts, out=out, budget_usd=budget_usd)
+        return multi_agent.drive(path, fake_scripts=fake_scripts, out=out, budget_usd=budget_usd, pause_after=pause_after)
     backend = make(cfg, log=log, fake_scripts=fake_scripts)
     forbidden = forbidden_strings(cfg, model)
     while True:
@@ -686,12 +692,15 @@ def main(argv=None) -> int:
                    help="enable the research controller: trained research only, one global baseline only, or both")
     r.add_argument("--with-baseline", action="store_true", help="run the baseline of this shape and these conditions alongside, "
                    "unless it is on record (level1/baseline.py)")
+    r.add_argument("--pause-after", type=int, metavar="N", help="a team run: stop after cycle N with nothing locked; "
+                   "resume goes on, finish ends the research there")
     s = sub.add_parser("resume")
     s.add_argument("--run", required=True)
     s.add_argument("--fake")
     s.add_argument("--accept-changes", action="store_true")
     s.add_argument("--budget-usd", type=float, help="api_key: a new budget for the whole run, in dollars")
     s.add_argument("--with-baseline", action="store_true", help="run, or go on with, the run's baseline alongside")
+    s.add_argument("--pause-after", type=int, metavar="N", help="a team run: stop again after cycle N")
     f = sub.add_parser("finish")
     f.add_argument("--run", required=True)
     b = sub.add_parser("baseline", help="the baseline for a config's or a run's shape and conditions: found, run or resumed, frozen")
@@ -729,19 +738,22 @@ def main(argv=None) -> int:
             if args.mode is not None:
                 over["orchestration"] = {"enabled": True, "mode": args.mode}
             cfg = run_config.load(args.config, over)
+            _check_pause(args, cfg)
             if args.with_baseline:
                 return 0 if run_with_baseline(cfg, fake_scripts=args.fake) == "finished" else 2
-            path = start(cfg, fake_scripts=args.fake)
+            path = start(cfg, fake_scripts=args.fake, pause_after=args.pause_after)
             if cfg.get("orchestration", {}).get("enabled"):
                 return 0 if (path / "multi_agent/lock.json").is_file() else 2
             return 0
         if args.cmd == "resume":
+            if args.pause_after is not None:
+                _check_pause(args, read_json(Path(args.run) / "run.json")["config"])
             if args.with_baseline:
                 cfg = read_json(Path(args.run) / "run.json")["config"]
                 return 0 if run_with_baseline(cfg, fake_scripts=args.fake, resume=Path(args.run), accept_changes=args.accept_changes,
                                               budget_usd=args.budget_usd) == "finished" else 2
             return 0 if drive(Path(args.run), fake_scripts=args.fake, accept_changes=args.accept_changes,
-                              budget_usd=args.budget_usd) == "finished" else 2
+                              budget_usd=args.budget_usd, pause_after=args.pause_after) == "finished" else 2
         if args.cmd == "finish":
             finish(Path(args.run))
             return 0
@@ -772,6 +784,18 @@ def main(argv=None) -> int:
     except (run_config.ConfigError, hygiene.HygieneError, BackendError, ModelError, SandboxError, RuntimeError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)  # what the user needs to read, without a traceback around it
         return 1
+
+
+def _check_pause(args, cfg: dict) -> None:
+    """--pause-after: a cycle number, for a team run, without a baseline run alongside."""
+    if args.pause_after is None:
+        return
+    if args.pause_after < 0:
+        raise RuntimeError("--pause-after takes a cycle number, 0 or more")
+    if not (cfg.get("orchestration") or {}).get("enabled"):
+        raise RuntimeError("--pause-after is for team runs (orchestration)")
+    if args.with_baseline:
+        raise RuntimeError("--pause-after cannot be combined with --with-baseline")
 
 
 if __name__ == "__main__":

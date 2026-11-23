@@ -561,7 +561,7 @@ def _stop_cycles(state: dict, cfg: dict) -> str | None:
     return None
 
 
-def drive(path, fake_scripts=None, out=print, budget_usd=None) -> str:
+def drive(path, fake_scripts=None, out=print, budget_usd=None, pause_after=None) -> str:
     with _controller_lock(Path(path)):
         if budget_usd is not None:
             cfg = read_json(Path(path) / "run.json")["config"]
@@ -577,10 +577,10 @@ def drive(path, fake_scripts=None, out=print, budget_usd=None) -> str:
             append_jsonl(Path(path) / "log.jsonl", event)
             out(f"the experiment's API budget is now ${float(budget_usd):.2f} (was ${previous['run_usd']:.2f}); "
                 "planned role and cycle caps are unchanged")
-        return _drive(Path(path), fake_scripts=fake_scripts, out=out)
+        return _drive(Path(path), fake_scripts=fake_scripts, out=out, pause_after=pause_after)
 
 
-def _drive(path, fake_scripts=None, out=print) -> str:
+def _drive(path, fake_scripts=None, out=print, pause_after=None) -> str:
     path = Path(path)
     run = read_json(path / "run.json")
     cfg = run["config"]
@@ -685,6 +685,16 @@ def _drive(path, fake_scripts=None, out=print) -> str:
                     write_json(_state_path(path), state)
                     out(state["stop_reason"])
                     break
+                if pause_after is not None and len(state["cycles"]) >= pause_after:
+                    # The operator's pause: nothing is locked, and resume goes on with the tasks just given out.
+                    done = len(state["cycles"])
+                    state["stop_reason"] = f"paused by the operator after {f'cycle {done}' if done else 'the planning session'}"
+                    write_json(_state_path(path), state)
+                    append_jsonl(path / "log.jsonl", {"at": now(), "message": state["stop_reason"], "paused_after_cycle": done})
+                    out(f"{state['stop_reason']}; nothing is locked. Go on with: python -m level1.loop resume --run {path}"
+                        f"  or end the research here with: python -m level1.loop finish --run {path}")
+                    write_report(path)
+                    return "stopped"
                 assignments = _assignments(cfg, last_lead)
                 if not assignments:
                     state["stop_reason"] = "the lead gave out no tasks and no initial tasks are configured"

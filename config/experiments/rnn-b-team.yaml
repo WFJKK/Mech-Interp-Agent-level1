@@ -11,9 +11,11 @@
 # reward, agent and effort. No baseline agent runs (orchestration.mode: trained).
 #
 # Allowances are per cycle and shared by the team (level1/multi_agent.py, _allocation). With these numbers
-# each of four researchers gets 37 Python calls, 2 submissions, 81 turns, 32 minutes and $3.24 a cycle, and
-# the lead 75 calls, 4 submissions, 65 minutes and $6.48; the planning lead $10.80 and the closing summary
-# $12. That is at most $120 for the run. Fewer tasks in a cycle give each researcher more.
+# each of four researchers gets 37 Python calls, 2 submissions, 81 turns, 32 minutes and $5.00 a cycle, and
+# the lead 75 calls, 4 submissions, 65 minutes and $10.00; the planning lead $18 and the closing summary
+# $20. That is at most $188 for the run, as round_usd caps a cycle at $30. Fewer tasks in a cycle give
+# each researcher more. Researchers of earlier team runs spent $2.40 to $4.30 a session when nothing
+# stopped them, so $5.00 leaves them their own end.
 # A cycle's researchers run side by side, each Python program with up to python.memory_limit_mb of memory.
 extends: research.yaml
 run_id: team-rnn-b
@@ -30,7 +32,7 @@ session:
   max_turns: 600
   seconds: 14400
 budget:
-  run_usd: 120
+  run_usd: 200
   round_usd: 30
 orchestration:
   mode: trained            # no baseline agent in this run
