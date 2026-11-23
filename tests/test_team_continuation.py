@@ -314,3 +314,36 @@ def test_the_rnn_g_team_configs_go_on_from_the_single_agents_last_run():
     assert team["verifier"]["sample_size"] == team["verifier"]["workload_size"] == 72000
     assert team["verifier"]["time_limit_s"] == single["verifier"]["time_limit_s"] and team["orchestration"]["development_seed"] is None
     assert smoke["budget"]["run_usd"] < team["budget"]["run_usd"] and smoke["orchestration"]["workers"] == 2
+
+
+def test_a_team_that_went_on_from_a_single_agent_can_itself_be_continued(tmp_path):
+    """Single agent, then a team, then another team: the last carries the single agent's programs and the first
+    team's, and the notes of both, and numbers its sessions after the first team's."""
+    shifted = {"calls": [
+        {"tool": "run_python", "args": {"code": "g = graph()\nsave_entry('shifted2', g.entry(interpretation="
+                                                "(g.tokens() + g.const([0.03, 0.0])).argmin()))"}},
+        {"tool": "submit_entry", "args": {"name": "shifted2", "claimed_fidelity": 0.99}}],
+        "response": "## What the network does\nA smaller shift; still not always."}
+    single = run_config.load("config/pilot/rnn-a-smoke.yaml", run_config.merge(
+        {"backend": "fake", "sandbox": "process", "runs_dir": str(tmp_path), "run_id": "alone", "rounds_max": 1,
+         "network": "rnn-a-s2", "seed_check": {"network": "rnn-a-s1"},
+         "verifier": {"sample_size": 1500, "reference_samples": 2}, "session": {"python_calls": 3, "submissions": 2}}, {}))
+    loop.start(single, fake_scripts=scripts(tmp_path / "single-scripts", SINGLE), out=lambda *_: None)
+    first = loop.start(config(tmp_path, "first-team", continue_from="alone"),
+                       fake_scripts=scripts(tmp_path / "team-scripts", PLANNING_AGAIN, shifted, LEAD_AGAIN),
+                       out=lambda *_: None)
+    assert read_json(first / "lock.json")["measured_again"]["parts"]["fidelity"] < 1.0
+    cfg = continuation.prepare(config(tmp_path, "second-team", continue_from="first-team"))
+    d = cfg["continuation"]["derived"]
+    assert d["runs"] == ["alone", "first-team"] and d["earlier_team"] and d["next_index"] == 3
+    assert [("rounds" in p, "phases" in p) for p in d["prices"]] == [(True, False), (False, True)]
+    assert "(round 1 of one researcher working alone) and alpha" in prompt.continuation_note(cfg).replace("\n", " ")
+    later = run_config.run_path(cfg)
+    later.mkdir(parents=True)
+    archive = multi_agent._empty_archive()
+    assert multi_agent._carry_earlier(later, cfg, archive)
+    assert sorted((c["id"], c["from_run"]) for c in archive["candidates"]) == [("a0002s1", "first-team"), ("r1s1", "alone")]
+    assert [multi_agent._entry(later, c)["format"] for c in archive["candidates"]] == ["level1-entry-v1"] * 2
+    rows = multi_agent._earlier_history(later, {"continuation": {"runs": d["runs"]}})
+    assert [(r["from_run"], r["role"]) for r in rows] == [("alone", "single"), ("first-team", "lead"),
+                                                          ("first-team", "regional"), ("first-team", "lead")]
