@@ -135,8 +135,11 @@ def check_orchestration(cfg: dict) -> None:
             if math.floor(cfg["session"][key] * cfg["rounds_max"] * baseline_fraction) < 1:
                 raise ConfigError(f"the baseline allocation must allow at least one session.{key}")
     seed = options.get("development_seed")
-    if isinstance(seed, bool) or not isinstance(seed, int) or seed < 0:
-        raise ConfigError("orchestration.development_seed must be a valid nonnegative integer")
+    if seed is not None and (isinstance(seed, bool) or not isinstance(seed, int) or seed < 0):
+        raise ConfigError("orchestration.development_seed must be a valid nonnegative integer, or null")
+    if seed is None and mode != "trained":
+        raise ConfigError("orchestration.development_seed: null (a fresh sample for every submission) needs "
+                          "orchestration.mode: trained; a baseline comparison is scored on one fixed sample")
     from .regions import normalize_scope
 
     # Every active stage uses the original global input distribution.

@@ -317,3 +317,34 @@ def test_a_lead_that_finishes_sends_the_run_to_its_ordinary_end(tmp_path):
     # a second drive, as after an interruption, ends the same way without starting another cycle
     assert multi_agent.drive(path, fake_scripts=finishing_scripts(tmp_path / "again"), out=lines.append) == "finished"
     assert len(read_json(path / "multi_agent/state.json")["sessions"]) == 4
+
+
+# ---------------------------------------------------------------- scoring during the cycles, as for a single agent
+
+def test_a_fresh_sample_per_submission_is_only_for_runs_without_a_baseline(tmp_path):
+    base = {"runs_dir": str(tmp_path), "backend": "fake", "sandbox": "process"}
+    cfg = run_config.load("config/experiments/rnn-b-team.yaml", base)
+    assert cfg["orchestration"]["development_seed"] is None and cfg["verifier"]["sample_seed"] is None
+    assert multi_agent._scope_cfg(cfg, ALL)["verifier"]["sample_seed"] is None
+    with pytest.raises(run_config.ConfigError, match="development_seed: null"):
+        run_config.load("config/experiments/rnn-b-team.yaml", {**base, "orchestration": {"mode": "both", "baseline_agent": True}})
+    fixed = run_config.load("config/experiments/rnn-b-team.yaml", {**base, "orchestration": {"development_seed": 5}})
+    assert fixed["verifier"]["sample_seed"] == 5 and multi_agent._scope_cfg(fixed, ALL)["verifier"]["sample_seed"] == 5
+
+
+def test_with_fresh_samples_each_submission_is_chosen_by_its_own_score(tmp_path):
+    cfg = team_cfg(tmp_path, rounds_max=3, orchestration={"workers": 2, "development_seed": None},
+                   session={"python_calls": 40, "submissions": 6})
+    assert cfg["verifier"]["sample_seed"] is None
+    path = run_config.run_path(cfg)
+    path.mkdir(parents=True)
+    write_json(path / "run.json", {"run_id": cfg["run_id"], "config": cfg, "model_ops": 671, "sandbox": {"mode": "process"}})
+    assert multi_agent.drive(path, fake_scripts=finishing_scripts(tmp_path), out=lambda *_: None) == "finished"
+    archive = multi_agent.read_archive(path)
+    seeds = [c["submitted"]["inputs"]["seed"] for c in archive["candidates"]]
+    assert len(seeds) == 3 and len(set(seeds)) == 3  # every submission drew its own inputs
+    for candidate in archive["candidates"]:
+        assert candidate["selection"] == candidate["submitted"]  # no second scoring on a common sample
+    best = next(c for c in archive["candidates"] if c["id"] == archive["global"]["best"])
+    assert best["selection"]["reward"] == max(c["selection"]["reward"] for c in archive["candidates"] if c["scope_id"] == "all")
+    assert (path / "multi_agent/lock.json").exists()

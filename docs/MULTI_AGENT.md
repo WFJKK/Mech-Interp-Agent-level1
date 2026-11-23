@@ -138,7 +138,9 @@ task; the configurations only set the team's size, the number of cycles and the 
 Each file's comments give what every role gets. The two `rnn-b` files run no baseline agent
 (`orchestration.mode: trained`); `rnn-b-team.yaml` is set up to be read against the single-agent
 run `pilot-rnn-b`, with the same networks, five rounds as five cycles, patience, sample size,
-reward and agent. Run the smoke configuration first:
+reward and agent. Like the single agent, they score every submission on a fresh sample and choose
+the best by those scores (`orchestration.development_seed: null`); runs with a baseline comparison
+keep one fixed development sample. Run the smoke configuration first:
 
 ```bash
 python -m level1.loop run --config config/experiments/rnn-b-team-smoke.yaml --auth api_key

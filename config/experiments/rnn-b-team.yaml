@@ -7,8 +7,8 @@
 #   seed check on  rnn-b-s4   the same sizes and training, another seed
 #
 # Made to be read against the single-agent run pilot-rnn-b (config/pilot/rnn-b.yaml): the same networks, five
-# rounds (here five cycles), patience 2, 16,384 inputs per scoring, the same reward, agent and effort. No
-# baseline agent runs (orchestration.mode: trained).
+# rounds (here five cycles), patience 2, a fresh sample of 16,384 inputs for every submission, the same
+# reward, agent and effort. No baseline agent runs (orchestration.mode: trained).
 #
 # Allowances are per cycle and shared by the team (level1/multi_agent.py, _allocation). With these numbers
 # each of four researchers gets 37 Python calls, 2 submissions, 81 turns, 32 minutes and $3.24 a cycle, and
@@ -34,6 +34,7 @@ budget:
   round_usd: 30
 orchestration:
   mode: trained            # no baseline agent in this run
+  development_seed: null   # a fresh sample of 16,384 inputs for every submission, as in pilot-rnn-b
   workers: 4
   initial_regions: []
   initial_tasks:            # only if the lead gives out no tasks

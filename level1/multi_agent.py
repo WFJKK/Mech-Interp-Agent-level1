@@ -147,10 +147,17 @@ def progress(before: dict, after: dict) -> dict:
             "improved": global_improved or regional_improved}
 
 
+def _development_seed(cfg: dict) -> int | None:
+    """The one sample every submission is scored on during the cycles, or None: then each submission gets a
+    fresh sample, as in the single-agent runs, and the best is chosen by those scores."""
+    seed = _options(cfg).get("development_seed")
+    return None if seed is None else int(seed)
+
+
 def _scope_cfg(cfg: dict, scope: dict) -> dict:
     out = copy.deepcopy(cfg)
     out["verifier"]["scope"] = regions.normalize_scope(scope)
-    out["verifier"]["sample_seed"] = int(_options(cfg)["development_seed"])
+    out["verifier"]["sample_seed"] = _development_seed(cfg)
     return out
 
 
@@ -194,7 +201,7 @@ def _comparison(path: Path, cfg: dict, model, archive: dict, scope: dict) -> Non
     if entry is None:
         return
     verifier = Verifier(model, cfg["network"], _scope_cfg(cfg, scope))
-    archive["baseline_scores"][key] = verifier.score(entry, seed=int(_options(cfg)["development_seed"]))
+    archive["baseline_scores"][key] = verifier.score(entry, seed=_development_seed(cfg))
 
 
 def _entry(path: Path, candidate: dict) -> dict:
@@ -510,13 +517,13 @@ def _ingest(path: Path, cfg: dict, model, archive: dict, plan: dict, record: dic
         digest = lang.entry_hash(entry)
         if receipt.get("entry_sha256") and receipt["entry_sha256"] != digest:
             raise RuntimeError(f"submission {cid} changed before it entered the archive")
-        selection = receipt
-        if receipt["status"] == "scored":
+        selection = receipt  # with fresh samples, the submission's own score selects it, as for a single agent
+        if receipt["status"] == "scored" and _development_seed(cfg) is not None:
             verifier_key = lang.canonical(scope)
             if verifier_key not in verifiers:
                 verifiers[verifier_key] = Verifier(model, cfg["network"], _scope_cfg(cfg, scope))
             selection = verifiers[verifier_key].score(entry, claimed=receipt.get("claimed_fidelity"),
-                                                     seed=int(_options(cfg)["development_seed"]))
+                                                     seed=_development_seed(cfg))
         archive["candidates"].append({"id": cid, "role": plan["role"], "session_id": plan["id"],
                                       "cycle": plan["cycle"], "scope": scope, "scope_id": regions.scope_id(scope),
                                       "entry_path": entry_path, "entry_sha256": digest, "selection": selection,
