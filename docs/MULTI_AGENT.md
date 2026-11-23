@@ -132,10 +132,13 @@ task; the configurations only set the team's size, the number of cycles and the 
 | Config | Network | Researchers | Cycles | At most |
 | --- | --- | ---: | ---: | ---: |
 | `config/experiments/rnn-b-team-smoke.yaml` | `rnn-b-s0` (4 units) | 2 | 1 | $15 |
-| `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 3 | $120 |
+| `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 5 | $120 |
 | `config/experiments/rnn-a-team.yaml` | `rnn-a-s2` (2 units) | 2 | 3 | $60 |
 
-Each file's comments give what every role gets. Run the smoke configuration first:
+Each file's comments give what every role gets. The two `rnn-b` files run no baseline agent
+(`orchestration.mode: trained`); `rnn-b-team.yaml` is set up to be read against the single-agent
+run `pilot-rnn-b`, with the same networks, five rounds as five cycles, patience, sample size,
+reward and agent. Run the smoke configuration first:
 
 ```bash
 python -m level1.loop run --config config/experiments/rnn-b-team-smoke.yaml --auth api_key
