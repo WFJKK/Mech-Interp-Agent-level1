@@ -126,13 +126,15 @@ implementation and cost model. Unknown-cardinality domains need an explicit work
 
 ## Teams for the recurrent networks
 
-Three configurations run a team on the recurrent networks on real numbers. The lead decides every
+These configurations run a team on the recurrent networks on real numbers. The lead decides every
 task; the configurations only set the team's size, the number of cycles and the allowances.
 
 | Config | Network | Researchers | Cycles | At most |
 | --- | --- | ---: | ---: | ---: |
 | `config/experiments/rnn-b-team-smoke.yaml` | `rnn-b-s0` (4 units) | 2 | 1 | $15 |
 | `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 5 | $200 |
+| `config/experiments/rnn-b-team-detail-smoke.yaml` | `rnn-b-s0` (4 units) | 2 | 1 | $15 |
+| `config/experiments/rnn-b-team-detail.yaml` | `rnn-b-s0` (4 units) | 4 | 2 | $98 |
 | `config/experiments/rnn-a-team.yaml` | `rnn-a-s2` (2 units) | 2 | 3 | $60 |
 
 Each file's comments give what every role gets. The two `rnn-b` files run no baseline agent
