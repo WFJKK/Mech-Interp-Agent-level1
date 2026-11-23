@@ -182,6 +182,14 @@ available to the integration session after evaluation. If the planning lead give
 `orchestration.initial_tasks` (tasks whose scope defaults to all inputs) or the older
 `orchestration.initial_regions` are used instead.
 
+A lead after a cycle can instead end the research with `finish_research(reason)`. The run then
+goes through the same final locking, audits, closing summary and report as after the last cycle,
+and the report gives the lead's reason as the stop reason. The tool needs a program for the whole
+input distribution that has already been scored, by that lead or earlier in the run, and it cannot be
+combined with tasks given out in the same session. The planning lead cannot finish, and the lead of
+the last cycle needs no tool for it. An empty task list without `finish_research` still means "no
+decision": the configured initial tasks are used, or, without them, the run stops unfinished.
+
 Progress is recorded separately for the global incumbent and regional frontiers. Patience expires
 only when neither improves. All submissions are retained, including programs that are useful for
 shared computation but are not currently on a frontier.

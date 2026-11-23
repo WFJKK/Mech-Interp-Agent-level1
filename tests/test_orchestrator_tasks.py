@@ -3,7 +3,7 @@ any size runs through several cycles. Only the scripted fake backend is used."""
 
 import pytest
 
-from level1 import hygiene, loop, multi_agent, prompt, regions, run_config
+from level1 import hygiene, lang, loop, multi_agent, prompt, regions, run_config
 from level1.networks import load_model
 from level1.session import RESEARCH_TOOLS, Session, ToolError
 from level1.util import read_json, write_json
@@ -23,9 +23,10 @@ def session_cfg(tmp_path, **changes):
 
 
 def test_the_lead_has_one_assignment_tool_and_only_the_task_is_required():
-    assert set(RESEARCH_TOOLS) == {"assign_task"}
+    assert set(RESEARCH_TOOLS) == {"assign_task", "finish_research"}
     schema = RESEARCH_TOOLS["assign_task"]["schema"]
     assert schema["required"] == ["task"] and set(schema["properties"]) == {"task", "scope", "entry_name"}
+    assert RESEARCH_TOOLS["finish_research"]["schema"]["required"] == ["reason"]
 
 
 def test_a_task_without_a_scope_is_scored_on_every_input(tmp_path):
@@ -211,3 +212,108 @@ def test_the_last_lead_combines_and_gives_out_nothing(team_run):
     assert "No further tasks can be given out in this session." in (path / last["directory"] / "prompt.md").read_text()
     archive = multi_agent.read_archive(path)
     assert archive["global"]["best"] is not None
+
+
+# ---------------------------------------------------------------- the lead can finish the research
+
+def constant_entry():
+    g = lang.Graph({}, 4)
+    return g.entry(predict=g.const(0))
+
+
+def test_only_a_lead_after_a_cycle_can_finish_and_only_with_a_scored_whole_program(tmp_path):
+    def lead(name, cycle, assignments=2):
+        cfg = session_cfg(tmp_path, research_task={"role": "lead", "max_assignments": assignments, "cycle": cycle})
+        return Session.create(tmp_path / name, cfg, cfg["network"], tmp_path / f"run-{name}", {"constant": constant_entry()})
+
+    planning = lead("planning", 0)
+    assert "assign_task" in planning.TOOLS and "finish_research" not in planning.TOOLS
+    with pytest.raises(ToolError, match="cannot finish"):
+        planning.finish_research("Nothing to do.")
+    assert "finish_research" not in lead("last", 2, assignments=0).TOOLS
+
+    integrating = lead("integrating", 1)
+    assert "finish_research" in integrating.TOOLS
+    with pytest.raises(ToolError, match="no program for the whole input distribution"):
+        integrating.call("finish_research", {"reason": "Enough evidence."})
+    with pytest.raises(ToolError, match="nonempty"):
+        integrating.call("finish_research", {"reason": "  "})
+    assert integrating.call("submit_entry", {"name": "constant", "claimed_fidelity": 0.1})["status"] == "scored"
+    out = integrating.call("finish_research", {"reason": "Enough evidence."})
+    assert out == {"status": "finished", "reason": "Enough evidence."}
+    assert Session(integrating.path).state["finish"]["reason"] == "Enough evidence."
+    with pytest.raises(ToolError, match="finished the research"):
+        integrating.call("assign_task", {"task": "One more idea."})
+    with pytest.raises(ToolError, match="already finished"):
+        integrating.call("finish_research", {"reason": "Again."})
+
+    assigning = lead("assigning", 1)
+    assigning.call("submit_entry", {"name": "constant", "claimed_fidelity": 0.1})
+    assigning.call("assign_task", {"task": "Check the remaining inputs."})
+    with pytest.raises(ToolError, match="already given out tasks"):
+        assigning.call("finish_research", {"reason": "Changed my mind."})
+
+
+def test_an_earlier_whole_program_in_the_archive_is_enough_to_finish(tmp_path):
+    cfg = session_cfg(tmp_path, research_task={"role": "lead", "max_assignments": 2, "cycle": 1})
+    run = tmp_path / "run"
+    lead = Session.create(tmp_path / "lead", cfg, cfg["network"], run)
+    with pytest.raises(ToolError, match="no program"):
+        lead.finish_research("Enough.")
+    archive = multi_agent._empty_archive()
+    archive["global"]["best"] = "a0003s1"
+    (run / "multi_agent").mkdir(parents=True)
+    write_json(run / "multi_agent" / "archive.json", archive)
+    assert lead.finish_research("Enough.")["status"] == "finished"
+
+
+def test_the_finish_note_is_shown_only_to_leads_after_a_cycle(tmp_path):
+    cfg = run_config.load("config/experiments/rnn-b-team.yaml", {"runs_dir": str(tmp_path), "backend": "fake", "sandbox": "process"})
+    model = load_model(cfg["model"])
+    texts = {}
+    for name, cycle, count in (("planning", 0, 4), ("after a cycle", 1, 4), ("last", 3, 0)):
+        role_cfg = {**cfg, "research_task": {"role": "lead", "max_assignments": count, "cycle": cycle}}
+        texts[name] = prompt.build_multi(role_cfg, model, cycle, "lead", "Plan.", "", [])
+    assert "finish_research(reason)" in texts["after a cycle"]
+    assert "finish_research" not in texts["planning"] and "finish_research" not in texts["last"]
+    hygiene.check({**texts, **loop.agent_surface(cfg, model)}, loop.forbidden_strings(cfg, model))
+
+
+def finishing_scripts(tmp_path):
+    where = tmp_path / "fake-finish"
+    where.mkdir(parents=True)
+    worker = {"calls": [
+        {"tool": "run_python", "args": {"code": "g=graph()\nsave_entry('mine', g.entry(predict=model.reference(g,lv1)))"}},
+        {"tool": "submit_entry", "args": {"name": "mine", "claimed_fidelity": 1.0}},
+    ], "response": "## What the network does\nA researcher's notes."}
+    planning = {"calls": [
+        {"tool": "assign_task", "args": {"task": "Describe units 0 to 3 of the hidden layer at every input."}},
+        {"tool": "assign_task", "args": {"task": "Describe units 4 to 7 of the hidden layer at every input."}},
+    ], "response": "## What the network does\nTwo tasks are given out."}
+    lead = {"calls": [
+        {"tool": "run_python", "args": {"code": "g=graph()\nsave_entry('whole', g.entry(predict=model.reference(g,lv1)))"}},
+        {"tool": "submit_entry", "args": {"name": "whole", "claimed_fidelity": 1.0}},
+        {"tool": "finish_research", "args": {"reason": "The reward has stopped rising; more cycles would not pay."}},
+    ], "response": "## What the network does\nThe research is finished."}
+    for index, item in enumerate((planning, worker, worker, lead), 1):
+        write_json(where / f"{index:02d}.json", item)
+    return where
+
+
+def test_a_lead_that_finishes_sends_the_run_to_its_ordinary_end(tmp_path):
+    cfg = team_cfg(tmp_path, rounds_max=3, orchestration={"workers": 2, "initial_tasks": [{"task": "Fallback that must not run."}]},
+                   session={"python_calls": 40, "submissions": 6})
+    path = run_config.run_path(cfg)
+    path.mkdir(parents=True)
+    write_json(path / "run.json", {"run_id": cfg["run_id"], "config": cfg, "model_ops": 671, "sandbox": {"mode": "process"}})
+    lines = []
+    assert multi_agent.drive(path, fake_scripts=finishing_scripts(tmp_path), out=lines.append) == "finished"
+    state = read_json(path / "multi_agent/state.json")
+    assert state["stop_reason"] == "the lead finished the research: The reward has stopped rising; more cycles would not pay."
+    assert [p["role"] for p in sorted(state["sessions"].values(), key=lambda p: p["index"])] == ["lead", "regional", "regional", "lead"]
+    assert len(state["cycles"]) == 1 and state["cycles"][0]["status"] == "completed"
+    assert (path / "multi_agent/lock.json").exists()
+    assert "Stop reason: the lead finished the research" in (path / "report.md").read_text()
+    # a second drive, as after an interruption, ends the same way without starting another cycle
+    assert multi_agent.drive(path, fake_scripts=finishing_scripts(tmp_path / "again"), out=lines.append) == "finished"
+    assert len(read_json(path / "multi_agent/state.json")["sessions"]) == 4

@@ -217,6 +217,15 @@ or workload policy. When giving out more than one task, leave room for an altern
 instead of making every researcher follow the same hypothesis.
 """
 
+# A lead after a cycle may also end the research (session.finish_research); the planning lead may not.
+FINISH_NOTE = """
+If you judge that further research is unlikely to raise the reward, call `finish_research(reason)`
+instead of giving out tasks. The run then goes straight to its final checks and report: the best
+program scored on the whole input distribution is locked, as after the last cycle. A program for the
+whole network must have been scored first, by you or earlier in the run, and finishing cannot be
+combined with tasks given out in this session.
+"""
+
 
 def research_allocation(cfg: dict) -> str:
     """Describe the configured session quota without treating a login as dollar-capped."""
@@ -386,7 +395,8 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
         "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
         "API_ALLOCATION": research_allocation(cfg), "DELIVERABLE_NOTE": research_deliverable(cfg),
-        "ASSIGNMENT_NOTE": ASSIGNMENT_NOTE.format(count=count) if role == "lead" and count else "No further tasks can be given out in this session.",
+        "ASSIGNMENT_NOTE": (ASSIGNMENT_NOTE.format(count=count) + (FINISH_NOTE if int(research.get("cycle", 0)) >= 1 else "")
+                            if role == "lead" and count else "No further tasks can be given out in this session."),
         "ARCHIVE": archive_summary or "No checked submissions yet.", "HISTORY": notes or "No earlier research notes.",
         **research_domain_notes(role, int(cfg["session"]["submissions"])),
     }

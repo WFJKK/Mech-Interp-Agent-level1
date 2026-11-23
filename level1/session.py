@@ -207,6 +207,17 @@ RESEARCH_TOOLS = {
             "entry_name": {"type": "string", "description": "For a predicate scope, the saved entry defining its region."}},
             "required": ["task"]},
     },
+    "finish_research": {
+        "description": (
+            "End the research now instead of giving out more tasks, and say why. The run then goes to its "
+            "final checks and report with the programs already scored: the best program for the whole input "
+            "distribution is locked and measured on fresh inputs and on the second network, as after the last "
+            "cycle. A program for the whole network must have been scored first, by this session or earlier "
+            "in the run. Finishing cannot be undone and cannot be combined with tasks given out in this session."),
+        "schema": {"type": "object", "properties": {
+            "reason": {"type": "string", "description": "Why further research is not worth its cost now."}},
+            "required": ["reason"]},
+    },
 }
 
 
@@ -305,7 +316,9 @@ class Session:
         if research.get("role") in ("lead", "regional"):
             self.TOOLS["submit_entry"] = RESEARCH_SUBMIT_TOOL
         if research.get("role") == "lead" and int(research.get("max_assignments", 0)) > 0:
-            self.TOOLS.update(RESEARCH_TOOLS)
+            self.TOOLS["assign_task"] = RESEARCH_TOOLS["assign_task"]
+            if int(research.get("cycle", 0)) >= 1:
+                self.TOOLS["finish_research"] = RESEARCH_TOOLS["finish_research"]
 
     def _require_research(self) -> None:
         if (self.state.get("research_task") or {}).get("role") == "summary":
@@ -625,6 +638,8 @@ class Session:
             limit = int(research.get("max_assignments", 0))
             if research.get("role") != "lead" or limit <= 0:
                 raise ToolError("this session cannot assign tasks")
+            if self.state.get("finish"):
+                raise ToolError("this session has finished the research; it gives out no more tasks")
             assignments = self.state.get("assignments", [])
             if len(assignments) >= limit:
                 raise ToolError(f"this session has already assigned its {limit} tasks")
@@ -666,6 +681,52 @@ class Session:
             return out
         except ToolError as exc:
             self._log("assign_task", args, {"error": str(exc)}, time.monotonic() - t0)
+            raise
+
+    def _whole_program_scored(self) -> bool:
+        """A scored program for the session's whole domain: one of this session's receipts, or a global
+        candidate already in the run's archive."""
+        from .regions import scope_id
+
+        assigned = self.state["verifier"].get("scope") or {"kind": "all"}
+        sid = scope_id(assigned)
+        if any(r.get("status") == "scored" and r.get("reward") is not None
+               and scope_id(r.get("claim_scope", assigned)) == sid for r in self.receipts()):
+            return True
+        from .multi_agent import read_archive
+
+        try:
+            return bool((read_archive(Path(self.state["run_path"])).get("global") or {}).get("best"))
+        except (OSError, ValueError):
+            return False
+
+    def finish_research(self, reason: str) -> dict:
+        """The lead ends the research. The controller then locks, audits and reports what has been scored, as
+        after the last cycle."""
+        t0 = time.monotonic()
+        args = {"reason": reason}
+        try:
+            self._require_research()
+            self._require_attempt_open()
+            research = self.state.get("research_task") or {}
+            if (research.get("role") != "lead" or int(research.get("max_assignments", 0)) <= 0
+                    or int(research.get("cycle", 0)) < 1):
+                raise ToolError("this session cannot finish the research")
+            if self.state.get("finish"):
+                raise ToolError("this session has already finished the research")
+            if self.state.get("assignments"):
+                raise ToolError("this session has already given out tasks, which the next phase will run")
+            if not isinstance(reason, str) or not reason.strip() or len(reason) > MAX_TEXT:
+                raise ToolError("reason must be nonempty text within the tool's output limit")
+            if not self._whole_program_scored():
+                raise ToolError("no program for the whole input distribution has been scored yet; submit one first")
+            self.state["finish"] = {"reason": reason.strip(), "at": now()}
+            write_json(self.state_path, self.state)
+            out = {"status": "finished", "reason": self.state["finish"]["reason"]}
+            self._log("finish_research", args, out, time.monotonic() - t0)
+            return out
+        except ToolError as exc:
+            self._log("finish_research", args, {"error": str(exc)}, time.monotonic() - t0)
             raise
 
     def call(self, tool: str, arguments: dict) -> dict:

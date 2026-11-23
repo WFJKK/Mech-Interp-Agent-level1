@@ -482,6 +482,7 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
     record = {"id": plan["id"], "index": plan["index"], "role": plan["role"], "cycle": plan["cycle"],
               "scope": plan["scope"], "notes": notes_of(response_text), "meta": meta,
               "submissions": session.receipts(), "assignments": session.state.get("assignments", []),
+              "finish": session.state.get("finish"),
               "tools_used": session.state["used"], "prompt_file": prompt_path.name, "at": now()}
     write_json(completed, record)
     return record
@@ -665,6 +666,18 @@ def _drive(path, fake_scripts=None, out=print) -> str:
                 if state["cycles"]:
                     last = state["sessions"][state["cycles"][-1]["lead"]]
                     last_lead = read_json(path / last["directory"] / "record.json")
+                finish = last_lead.get("finish") if isinstance(last_lead, dict) else None
+                if finish:
+                    if not archive["global"]["best"]:  # the tool refuses this; a guard for edited records
+                        state["stop_reason"] = "the lead finished the research before a program for the whole network was scored"
+                        write_json(_state_path(path), state)
+                        out(state["stop_reason"])
+                        write_report(path)
+                        return "stopped"
+                    state["stop_reason"] = f"the lead finished the research: {finish['reason']}"
+                    write_json(_state_path(path), state)
+                    out(state["stop_reason"])
+                    break
                 assignments = _assignments(cfg, last_lead)
                 if not assignments:
                     state["stop_reason"] = "the lead gave out no tasks and no initial tasks are configured"

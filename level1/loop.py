@@ -214,6 +214,7 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
         out["research tool submit_entry"] = json.dumps(RESEARCH_SUBMIT_TOOL)
         out["research roles"] = json.dumps(prompt.RESEARCH_ROLES)
         out["research assignment instructions"] = prompt.ASSIGNMENT_NOTE
+        out["research finish instructions"] = prompt.FINISH_NOTE
         out["research prompt template"] = (prompt.TEMPLATES / "research_v1.md").read_text()
         out["summary prompt template"] = (prompt.TEMPLATES / "summary_v1.md").read_text()
         # These are operator-supplied tasks. Agent-generated discoveries are handled as history.
