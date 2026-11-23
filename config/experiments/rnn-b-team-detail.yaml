@@ -1,0 +1,17 @@
+# Two more research phases for the rnn-b team (config/experiments/rnn-b-team.yaml), going on from its finished run
+# team-rnn-b at a higher price for a wrong answer (level1/continuation.py, docs/CONTINUATION.md). The price is set
+# from the program team-rnn-b locked, as measured again on fresh inputs: alpha = 2 x (1 - C) / e, rounded up, where
+# C is its cost over all inputs and e the share of all inputs it answers wrongly, so that removing all of its
+# errors pays even if it costs a forward pass on every input. The sample grows with the price, to 200 inputs per
+# unit of alpha (at most 1,000,000). For team-rnn-b's lock (a0004s1: cost 0.1121, wrong on 0.49% of fresh inputs)
+# that is alpha = 364 and 72,800 inputs per scoring.
+#
+# Every session's prompt carries team-rnn-b's archive (each reward recomputed at the new price; carried in
+# `entries`, never selected unless submitted again), the notes of its sessions, and a note on what changed. This
+# run's sessions are numbered after team-rnn-b's (from a0008), and its two phases are planned, run and stopped as
+# any team run's are: allowances per phase as in team-rnn-b, at most $98 for the run (planning $18, two phases at
+# $30, the closing summary $20).
+extends: rnn-b-team.yaml
+run_id: team-rnn-b-detail
+continue_from: team-rnn-b
+rounds_max: 2

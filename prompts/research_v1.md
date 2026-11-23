@@ -65,7 +65,7 @@ The evaluator measures coverage, fidelity and cost within the assigned domain, a
 {{SAMPLE_NOTE}}
 
 {{FINAL_CHECK_NOTE}}
-{{EXACT_NOTE}}
+{{EXACT_NOTE}}{{CONTINUATION_NOTE}}
 
 ## Tools and this session's allocation
 

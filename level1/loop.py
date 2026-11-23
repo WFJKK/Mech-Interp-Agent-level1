@@ -318,11 +318,16 @@ def start(cfg: dict, fake_scripts=None, out=print, pause_after: int | None = Non
     d = continuation.derived(cfg)
     if d:
         lk = d["locked"]
+        if d.get("team"):
+            memory = (f"its archive and notes are in every session's prompt and this run's sessions start at "
+                      f"a{d['next_index'] + 1:04d}" if d["runs"] else "a control: nothing of the earlier research is in the prompts")
+        else:
+            memory = (f"its rounds are in the prompt and this run starts at round {d['first_round']}" if d["runs"]
+                      else "a control: none of its rounds are in the prompt")
         log(f"going on from {d['from']}: its locked entry {lk['carried_as']} saves {lk['saved']:.4f} and is wrong on "
             f"{lk['errors']:.5f} of all inputs; alpha {d['alpha_before']:g} -> {d['alpha']:g}, "
-            + (f"{d['sample_before']:,} -> {d['sample']:,} inputs per scoring; " if d["sampled"] else "")
-            + (f"its rounds are in the prompt and this run starts at round {d['first_round']}" if d["runs"]
-               else "a control: none of its rounds are in the prompt"), continuation=d)
+            + (f"{d['sample_before']:,} -> {d['sample']:,} inputs per scoring; " if d["sampled"] else "") + memory,
+            continuation=d)
     if (cfg.get("orchestration") or {}).get("enabled"):
         mode = research_modes.mode(cfg)
         log(f"workflow mode: {mode}; " + {"trained": "trained research only; no baseline search",

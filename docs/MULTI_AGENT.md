@@ -158,6 +158,16 @@ python -m level1.loop resume --run <run folder>    # cycles 4 and 5, then the en
 python -m level1.loop finish --run <run folder>    # or the end of the run after cycle 3
 ```
 
+A finished team run can be followed by more research phases at a higher price for a wrong answer,
+set from the program it locked (`continue_from`, `docs/CONTINUATION.md`). The new run starts with the
+earlier archive (rewards recomputed at the new price, never selected), the earlier notes and the
+earlier programs in `entries`, and numbers its sessions after the earlier ones:
+
+```bash
+python -m level1.loop run --config config/experiments/rnn-b-team-detail-smoke.yaml --auth api_key
+python -m level1.loop run --config config/experiments/rnn-b-team-detail.yaml --auth api_key
+```
+
 A cycle's researchers run side by side, and each of their Python programs may use up to
 `python.memory_limit_mb` of memory, so four researchers can need four times that at once. Set
 `orchestration.parallel: false` to run them one after another. The baseline is one agent's

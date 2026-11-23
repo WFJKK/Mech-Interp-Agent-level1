@@ -9,6 +9,12 @@ from .session import ENTRY_NAME
 from .util import read_json, write_json
 
 
+def home(path: Path, item: dict) -> Path:
+    """The run folder an archived entry's path is relative to: this run's or, for one carried from an earlier run
+    that this one goes on from (continue_from), that run's, beside it."""
+    return Path(path).parent / item["from_run"] if item.get("from_run") else Path(path)
+
+
 def collect(path: Path, cfg: dict, archive: dict, plan: dict) -> None:
     """Snapshot content once, recording new names but not unchanged inheritance."""
     drafts = archive.setdefault("drafts", [])
@@ -93,7 +99,7 @@ def carried(path: Path, archive: dict, reserved=()) -> dict:
     for alias, item in aliases(archive, reserved).items():
         key = item["id"]
         if key not in loaded:
-            entry = read_json(Path(path) / item["entry_path"])
+            entry = read_json(home(path, item) / item["entry_path"])
             if lang.entry_hash(entry) != item["entry_sha256"]:
                 raise RuntimeError(f"saved draft {key} changed after it was snapshotted")
             loaded[key] = entry

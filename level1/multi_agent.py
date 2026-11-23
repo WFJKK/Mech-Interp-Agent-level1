@@ -9,6 +9,13 @@ the archive and the final lock; neither worker notes nor held-out results select
 Session plans, indices and input snapshots are written before a backend is called.
 Each session has its own directory but spends against the parent run. Worker calls
 may overlap; archive updates and state transitions have one writer.
+
+A team run can go on from a finished team run at a higher price for a wrong answer
+(continue_from; continuation.py, docs/CONTINUATION.md). It starts with the earlier
+archive, every reward recomputed at its price, and the earlier sessions' notes: shown
+to every session and carried in `entries`, read from the earlier run's folder, never
+selected. Its own sessions are numbered after the earlier ones and plan, research and
+stop exactly as a new run's do.
 """
 
 from __future__ import annotations
@@ -22,7 +29,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import artifacts, budget, global_baseline, hygiene, lang, prompt, regions, report, research_modes, rewards, synthesis
+from . import (artifacts, budget, continuation, global_baseline, hygiene, lang, prompt, regions, report, research_modes,
+               rewards, synthesis)
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session
@@ -104,14 +112,16 @@ def _frontier(candidates: list[dict]) -> list[str]:
 
 
 def update_frontiers(archive: dict) -> dict:
-    """Rebuild selections from development receipts, never from final audits."""
+    """Rebuild selections from development receipts, never from final audits. A candidate carried from an earlier
+    run (from_run) is shown and carried, never selected: only this run's submissions can be."""
     archive["candidates"].sort(key=lambda c: (c["session_id"], c["submitted"]["submission"]))
-    global_candidates = [c for c in archive["candidates"] if c["scope_id"] == "all"]
+    own = [c for c in archive["candidates"] if not c.get("from_run")]
+    global_candidates = [c for c in own if c["scope_id"] == "all"]
     scored_global = [c for c in global_candidates if _usable(c)]
     best = max(scored_global, key=lambda c: c["selection"]["reward"], default=None)
     archive["global"] = {"best": best["id"] if best else None, "frontier": _frontier(global_candidates)}
     groups = {}
-    for candidate in archive["candidates"]:
+    for candidate in own:
         if candidate["role"] == "regional" or candidate["scope_id"] != "all":
             groups.setdefault(candidate["scope_id"], []).append(candidate)
     archive["regions"] = {
@@ -205,7 +215,7 @@ def _comparison(path: Path, cfg: dict, model, archive: dict, scope: dict) -> Non
 
 
 def _entry(path: Path, candidate: dict) -> dict:
-    entry = read_json(Path(path) / candidate["entry_path"])
+    entry = read_json(artifacts.home(path, candidate) / candidate["entry_path"])
     if lang.entry_hash(entry) != candidate["entry_sha256"]:
         raise RuntimeError(f"the archived entry {candidate['id']} changed after it was scored")
     return entry
@@ -221,7 +231,9 @@ def archive_summary(archive: dict, limit: int) -> str:
         receipt = candidate["selection"]
         p = receipt["parts"]
         scope_meta = receipt.get("scope") or {}
-        return (f"{cid}: scope {candidate['scope_id']}; reward {receipt['reward']:.6f}; "
+        then = (f" ({receipt['reward_recorded']:.6f} at the price it was measured at)"
+                if receipt.get("reward_recorded") is not None else "")
+        return (f"{cid}: scope {candidate['scope_id']}; reward {receipt['reward']:.6f}{then}; "
                 f"coverage {p['coverage']:.6f}; fidelity {p['fidelity']}; cost {rewards.cost_of(p)}; "
                 f"fidelity lower bound {p.get('fidelity_low')}; "
                 f"outer scope mass {scope_meta.get('mass')} (exact: {scope_meta.get('mass_exact')}); "
@@ -234,6 +246,17 @@ def archive_summary(archive: dict, limit: int) -> str:
         ids = sorted(group["frontier"], key=lambda cid: candidates[cid]["selection"]["reward"], reverse=True)
         sections.append(f"Regional scope {key}: {json.dumps(group['scope'], sort_keys=True)}\n" +
                         "\n".join(row(cid) for cid in ids[:limit]))
+    earlier = {}
+    for candidate in archive["candidates"]:
+        if candidate.get("from_run") and _usable(candidate):
+            earlier.setdefault(candidate["scope_id"], []).append(candidate)
+    if earlier:  # a run that goes on from an earlier one: that run's frontiers, at this run's price
+        shown = [prompt.TEAM_EARLIER_ARCHIVE]
+        for key, group in earlier.items():
+            ids = sorted(_frontier(group), key=lambda cid: candidates[cid]["selection"]["reward"], reverse=True)
+            shown.append(f"Scope {key}: {json.dumps(group[0]['scope'], sort_keys=True)}\n" +
+                         "\n".join(row(cid) for cid in ids[:limit]))
+        sections.append("\n".join(shown))
     for key, receipt in archive["baseline_scores"].items():
         if receipt["status"] == "scored":
             parts = receipt["parts"]
@@ -263,6 +286,32 @@ def _carried(path: Path, cfg: dict, archive: dict) -> dict:
         out["comparison_entry"] = entry
     out.update(artifacts.carried(path, archive, out))
     return out
+
+
+def _carry_earlier(path: Path, cfg: dict, archive: dict) -> bool:
+    """A team run that goes on from an earlier one (continue_from) starts with that run's archive: its candidates
+    and saved drafts, each marked with the run it came from (its entry is read there) and each development reward
+    recomputed at this run's price, the recorded one kept as reward_recorded. Done once, marked by 'earlier'; a
+    control carries nothing. Returns whether the archive changed."""
+    d = continuation.derived(cfg)
+    if not d or "earlier" in archive:
+        return False
+    if d["runs"]:
+        source = read_archive(Path(path).parent / d["from"])
+        for candidate in source["candidates"]:
+            candidate = copy.deepcopy(candidate)
+            candidate["from_run"] = candidate.get("from_run") or d["from"]
+            receipt = candidate["selection"]
+            if receipt.get("status") == "scored" and receipt.get("reward") is not None:
+                claimed = receipt.get("claimed_fidelity", candidate["submitted"].get("claimed_fidelity"))
+                receipt.setdefault("reward_recorded", receipt["reward"])
+                receipt["reward"] = rewards.compute(receipt["parts"], cfg["reward"], claimed)["reward"]
+            archive["candidates"].append(candidate)
+        for item in source.get("drafts", []):
+            archive.setdefault("drafts", []).append({**copy.deepcopy(item), "from_run": item.get("from_run") or d["from"]})
+    archive["earlier"] = {"from": d["from"], "runs": list(d["runs"]), "alpha": float(cfg["reward"]["alpha"])}
+    update_frontiers(archive)
+    return True
 
 
 def _allocation(cfg: dict, role: str, cycle: int, workers: int) -> tuple[int, int, float, float]:
@@ -394,8 +443,23 @@ def _safe_history(path: Path, state: dict, history: list[dict]) -> list[dict]:
     return rows
 
 
-def _history(path: Path, state: dict, before_index: int) -> list[dict]:
+def _earlier_history(path: Path, state: dict) -> list[dict]:
+    """The notes of the runs a team run goes on from (continue_from), in order, each row marked with its run."""
     rows = []
+    for rid in (state.get("continuation") or {}).get("runs", []):
+        where = Path(path).parent / rid
+        earlier = read_json(_state_path(where))
+        for plan in sorted(earlier["sessions"].values(), key=lambda item: item["index"]):
+            record_path = where / plan["directory"] / "record.json"
+            if plan["role"] not in ("baseline", "summary") and record_path.exists():
+                record = read_json(record_path)
+                rows.append({"session_id": plan["id"], "role": plan["role"], "scope": plan["scope"],
+                             "notes": _research_notes(record), "submissions": record["submissions"], "from_run": rid})
+    return rows
+
+
+def _history(path: Path, state: dict, before_index: int) -> list[dict]:
+    rows = _earlier_history(path, state)
     for plan in sorted(state["sessions"].values(), key=lambda item: item["index"]):
         record_path = Path(path) / plan["directory"] / "record.json"
         if plan["role"] not in ("baseline", "summary") and plan["index"] < before_index and record_path.exists():
@@ -593,12 +657,17 @@ def _drive(path, fake_scripts=None, out=print, pause_after=None) -> str:
     directory.mkdir(parents=True, exist_ok=True)
     _baselines(path, cfg)
     archive = read_archive(path)
+    if _carry_earlier(path, cfg, archive):
+        write_json(_archive_path(path), archive)
     if _state_path(path).exists():
         state = read_json(_state_path(path))
     else:
-        state = {"version": 1, "mode": research_modes.mode(cfg), "next_index": 0,
+        d = continuation.derived(cfg)
+        state = {"version": 1, "mode": research_modes.mode(cfg), "next_index": int((d or {}).get("next_index", 0)),
                  "baseline_validation_version": research_modes.validation_version(cfg),
                  "sessions": {}, "cycles": [], "stop_reason": None}
+        if d:
+            state["continuation"] = {"from": d["from"], "runs": list(d["runs"])}
         if global_baseline.enabled(cfg):
             baseline_plan = _new_plan(state, "baseline", 0, ALL,
                                       "Develop a full-domain predictor exact for any parameter values, with low measured cost.",
@@ -655,9 +724,11 @@ def _drive(path, fake_scripts=None, out=print, pause_after=None) -> str:
         _comparison(path, cfg, model, archive, ALL)
         write_json(_archive_path(path), archive)
         if "planning" not in state:
+            going_on = bool((state.get("continuation") or {}).get("runs"))
             planning = _new_plan(state, "lead", 0, ALL,
-                                 "Decide what each researcher works on in the first research phase, and give out the tasks.",
-                                 int(_options(cfg)["workers"]), _snapshot(archive), [])
+                                 f"Decide what each researcher works on in the {'next' if going_on else 'first'} research "
+                                 "phase, and give out the tasks.",
+                                 int(_options(cfg)["workers"]), _snapshot(archive), _history(path, state, state["next_index"]))
             state["planning"] = planning["id"]
             write_json(_state_path(path), state)
         planning = state["sessions"][state["planning"]]
@@ -976,9 +1047,12 @@ def write_report(path) -> None:
              policy, "",
              "One frozen global program is scored on the target network within each claim's scope, using the same inputs and workload as the candidate. Regional comparisons do not launch additional baseline agents.", "",
              "A single-agent comparison search has different resources from the research team. A reward gap over this known program can include generic optimizations; it does not by itself measure an effect of training.", "",
-             "## Global selection", "", f"Selected candidate: `{archive['global']['best'] or 'none'}`.", "",
-             "## Development archive", "", "| Candidate | Role | Scope | Coverage | Fidelity | Cost | Reward | Comparison gap |",
-             "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
+             "## Global selection", "", f"Selected candidate: `{archive['global']['best'] or 'none'}`.", ""]
+    lock = read_json(path / "lock.json") if (path / "lock.json").is_file() else None
+    lines += report.continuation_lines({"continuation": report._continuation(run["config"], lock),
+                                        "entry_limits": {k: run["config"]["entry"].get(k) for k in ("max_nodes", "max_const_scalars")}})
+    lines += ["## Development archive", "", "| Candidate | Role | Scope | Coverage | Fidelity | Cost | Reward | Comparison gap |",
+              "| --- | --- | --- | ---: | ---: | ---: | ---: | ---: |"]
     for candidate in archive["candidates"]:
         receipt = candidate["selection"]
         if receipt["status"] != "scored":
@@ -990,7 +1064,11 @@ def write_report(path) -> None:
         fidelity = "none" if p["fidelity"] is None else f"{p['fidelity']:.6f}"
         cost = rewards.cost_of(p)
         cost = "none" if cost is None else f"{cost:.6f}"
-        lines.append(f"| {candidate['id']} | {candidate['role']} | {key} | {p['coverage']:.6f} | {fidelity} | {cost} | {receipt['reward']:.6f} | {gap} |")
+        name = candidate["id"] + (f" (from {candidate['from_run']})" if candidate.get("from_run") else "")
+        lines.append(f"| {name} | {candidate['role']} | {key} | {p['coverage']:.6f} | {fidelity} | {cost} | {receipt['reward']:.6f} | {gap} |")
+    if any(candidate.get("from_run") for candidate in archive["candidates"]):
+        lines += ["", "A candidate marked with a run comes from that earlier run: its reward is recomputed at this run's price "
+                  "from what was measured then, and it was never a candidate for this run's selection."]
     lines += ["", "## Regional frontiers", ""]
     for key, group in archive["regions"].items():
         lines.append(f"- `{key}`: {', '.join(group['frontier']) or 'no covered candidate'}; scope `{json.dumps(group['scope'], sort_keys=True)}`.")
@@ -1074,7 +1152,7 @@ def rescore(path, reward_cfg: dict, out=print) -> list[dict]:
     rows = []
     for candidate in archive["candidates"]:
         receipt = candidate["selection"]
-        if receipt["status"] != "scored":
+        if receipt["status"] != "scored" or candidate.get("from_run"):  # an earlier run's are rescored in that run
             continue
         claimed = receipt.get("claimed_fidelity", candidate["submitted"].get("claimed_fidelity"))
         value = rewards.compute(receipt["parts"], reward_cfg, claimed)["reward"]

@@ -1,0 +1,16 @@
+# A small first run of config/experiments/rnn-b-team-detail.yaml on the real backend: the same price and sample,
+# set from team-rnn-b's lock, one research phase with two researchers, at most $15, to check that a team run going
+# on from team-rnn-b runs end to end before the two phases proper. It reads team-rnn-b and writes nothing there.
+extends: rnn-b-team-detail.yaml
+run_id: team-rnn-b-detail-smoke
+rounds_max: 1
+session:
+  python_calls: 25
+  submissions: 6
+  max_turns: 120
+  seconds: 3600
+budget:
+  run_usd: 15
+  round_usd: 10
+orchestration:
+  workers: 2

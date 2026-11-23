@@ -46,6 +46,30 @@ With `continuation.memory: false` the run gets the same price and sample and not
 rounds: the control that shows what the memory is worth. A continuation can itself be continued;
 the note then lists every earlier price with its rounds.
 
+## A team going on from a team
+
+A team run (`orchestration.enabled`, `docs/MULTI_AGENT.md`) goes on from a finished team run in the
+same way: the price and the sample come from the program the earlier team locked, measured again on
+fresh inputs. A team run goes on only from a team run, a single agent's only from a single agent's,
+and a team that goes on does research only (`orchestration.mode: trained`). The new run's sessions
+are numbered after the earlier ones (team-rnn-b's seven sessions end at a0007, so the next run starts
+at a0008), and its research phases are planned, run and stopped as a new run's are: a planning lead
+gives out the tasks of the next phase, and the run has its own `rounds_max` phases, patience and
+allowances. Every session's prompt carries:
+
+- the earlier archive in the checked archive, under "Earlier research phases": the frontier of each
+  domain, every reward recomputed at the new price beside the one recorded then;
+- the earlier candidates in `entries` under their names, and the earlier saved drafts under their
+  aliases, read from the earlier run's folder;
+- the notes of the earlier sessions, marked as written at the earlier prices, before this run's;
+- a note (`prompt.TEAM_CONTINUATION_NOTE`) that says what the single agent's note says, in phases,
+  and adds that a domain given by a region test must hold clearly more than the sample size over
+  200,000 (`regions.DEFAULT_DRAWS`) of all inputs to be scored at the new sample size.
+
+The earlier candidates are shown and carried but never selected: only a program submitted in the new
+run can be locked, as in a single agent's continuation, so an earlier program counts only if it is
+submitted again. The control (`continuation.memory: false`) starts at a0001 with none of this.
+
 ## How much is understood
 
 The report of a continued run gives the understood share of the entry it locked, if that entry is
@@ -66,5 +90,13 @@ python -m level1.loop run --config config/pilot/rnn-b-detail.yaml --auth api_key
 python -m level1.loop run --config config/pilot/rnn-b-detail-control.yaml --auth api_key
 ```
 
+For the rnn-b team, two phases going on from `team-rnn-b` (alpha 364 and 72,800 inputs per scoring
+for its lock), after a one-phase smoke run:
+
+```bash
+python -m level1.loop run --config config/experiments/rnn-b-team-detail-smoke.yaml --auth api_key
+python -m level1.loop run --config config/experiments/rnn-b-team-detail.yaml --auth api_key
+```
+
 The earlier run must be finished (it has a `lock.json`) and in the same `runs_dir`, on the same model
-and network, under the same prices and reward. Team runs cannot be continued yet.
+and network, under the same prices and reward.

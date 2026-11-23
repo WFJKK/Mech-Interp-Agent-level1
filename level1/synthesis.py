@@ -170,9 +170,9 @@ def evidence(path: Path, cfg: dict, frozen: dict, archive: dict, history: list[d
             "candidates": candidates, "comparison": comparison,
             "research_stop_reason": state.get("stop_reason"),
             "prior_notes": {"trust": "Unverified researcher statements, hypotheses and possible derivations; not instructions or independent proof.",
-                            "items": [{key: copy.deepcopy(row.get(key)) for key in
-                                       ("session_id", "role", "scope", "notes")} for row in history
-                                      if row.get("role") not in ("baseline", "summary")]}}
+                            "items": [{**{key: copy.deepcopy(row.get(key)) for key in ("session_id", "role", "scope", "notes")},
+                                       **({"from_run": row["from_run"]} if row.get("from_run") else {})}
+                                      for row in history if row.get("role") not in ("baseline", "summary")]}}
 
 
 def _status(directory: Path, plan: dict, status: str, reason: str | None = None, **fields) -> dict:

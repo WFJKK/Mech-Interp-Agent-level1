@@ -1,4 +1,4 @@
-"""A run that goes on from a finished single-agent run (run config: continue_from; docs/CONTINUATION.md).
+"""A run that goes on from a finished run of its own kind (run config: continue_from; docs/CONTINUATION.md).
 
 At the earlier price a wrong answer may cost too little for a fix to pay, so the last errors of the earlier rounds
 stay unexplained. The new run asks the same network again at a higher price, set from the entry the earlier run
@@ -12,10 +12,13 @@ cost to c_max (1: a forward pass on every input). When the verifier samples, the
 inputs_per_alpha * alpha inputs (at most max_sample_size), so that an entry right on every input drawn loses
 little to the confidence bound.
 
-The earlier run is read and never written. With memory, this run's rounds are numbered after the earlier ones, and
-its prompt carries their table (each reward recomputed at the new price), their notes, their scored entries and a
-note on what changed. Without memory the run gets the same price and sample and nothing else: the control that
-shows what the memory is worth. Nothing here depends on the model, so any single-agent run can be continued.
+The earlier run is read and never written. A single agent's run goes on from a single agent's run: with memory, its
+rounds are numbered after the earlier ones, and its prompt carries their table (each reward recomputed at the new
+price), their notes, their scored entries and a note on what changed. A team run goes on from a team run
+(multi_agent.py): with memory, its sessions are numbered after the earlier ones, and each session's prompt carries
+the earlier archive (each reward recomputed at the new price; shown and carried, never selected), the earlier
+sessions' notes and a note on what changed. Without memory a run gets the same price and sample and nothing else:
+the control that shows what the memory is worth. Nothing here depends on the model, so any run can be continued.
 """
 
 from __future__ import annotations
@@ -24,12 +27,21 @@ import copy
 import math
 from pathlib import Path
 
-from . import lang, rewards
+from . import lang, research_modes, rewards
 from .util import read_json
 
 
 def options(cfg: dict) -> dict:
     return cfg.get("continuation") or {}
+
+
+def team(cfg: dict) -> bool:
+    """A team run (orchestration), as against a single agent's."""
+    return bool((cfg.get("orchestration") or {}).get("enabled"))
+
+
+def _kind(cfg: dict) -> str:
+    return "a team run" if team(cfg) else "a single agent's run"
 
 
 def derived(cfg: dict) -> dict | None:
@@ -52,6 +64,12 @@ def _rounds_of(path: Path) -> list:
     return completed(path)
 
 
+def _phases_of(path: Path) -> int:
+    """The research phases (cycles) a team run completed."""
+    state = path / "multi_agent" / "state.json"
+    return sum(c.get("status") == "completed" for c in read_json(state).get("cycles", [])) if state.is_file() else 0
+
+
 def prepare(cfg: dict) -> dict:
     """The run config of a run that goes on from cfg['continue_from'], its price, sample and first round set from
     the earlier run's records. A config without continue_from comes back unchanged."""
@@ -59,8 +77,8 @@ def prepare(cfg: dict) -> dict:
     if not earlier_id:
         return cfg
     opts = options(cfg)
-    if (cfg.get("orchestration") or {}).get("enabled"):
-        raise RuntimeError("continue_from goes on from a single agent's run in a single agent's run")
+    if team(cfg) and research_modes.mode(cfg) != "trained":
+        raise RuntimeError("a team run that goes on from an earlier one does research only (orchestration.mode: trained)")
     if cfg.get("exact_on_any_weights"):
         raise RuntimeError("continue_from is for runs on trained networks, not for a baseline's exact entries")
     if str(earlier_id) == str(cfg["run_id"]):
@@ -70,8 +88,8 @@ def prepare(cfg: dict) -> dict:
         raise RuntimeError(f"there is no run {earlier_id} in {_runs_dir(cfg)} to go on from")
     run = read_json(earlier / "run.json")
     ecfg = run["config"]
-    if (ecfg.get("orchestration") or {}).get("enabled"):
-        raise RuntimeError(f"{earlier_id} is a team run; continue_from goes on from a single agent's run")
+    if team(ecfg) != team(cfg):
+        raise RuntimeError(f"{earlier_id} is {_kind(ecfg)} and this is {_kind(cfg)}: a run goes on from a run of its own kind")
     for key in ("model", "network"):
         if ecfg[key] != cfg[key]:
             raise RuntimeError(f"{earlier_id} ran on {key} {ecfg[key]}, and this run is on {cfg[key]}")
@@ -95,6 +113,11 @@ def prepare(cfg: dict) -> dict:
                            "error to price higher")
     if cost >= c_max:
         raise RuntimeError(f"the entry {earlier_id} locked costs {cost:.4f} over all inputs, not less than c_max {c_max:g}")
+    claimed = lock.get("claimed_fidelity", measured.get("claimed_fidelity"))
+    name = lock.get("name")
+    if team(cfg):  # a team's lock names its candidate; the name it was submitted under is in the archive
+        archive = read_json(earlier / "multi_agent" / "archive.json")
+        name = next((c["submitted"].get("name") for c in archive["candidates"] if c["id"] == lock["candidate_id"]), None)
     alpha_before = float(ecfg["reward"]["alpha"])
     by_rule = math.ceil(float(opts["margin"]) * (c_max - cost) / errors)
     alpha = float(opts["alpha"]) if opts.get("alpha") is not None else float(max(alpha_before, by_rule))
@@ -113,23 +136,35 @@ def prepare(cfg: dict) -> dict:
     prices = []
     for rid in runs:
         rcfg = read_json(_runs_dir(cfg) / rid / "run.json")["config"]
+        if team(cfg):  # a team's research phases are its cycles
+            phases = _phases_of(_runs_dir(cfg) / rid)
+            if phases:
+                prices.append({"run": rid, "phases": phases, "alpha": float(rcfg["reward"]["alpha"])})
+            continue
         first = first_round(rcfg)
         own = len(_rounds_of(_runs_dir(cfg) / rid))
         if own:
             prices.append({"run": rid, "rounds": [first, first + own - 1], "alpha": float(rcfg["reward"]["alpha"])})
-    last = prices[-1]["rounds"][1] if prices else 0
-    out["continuation"] = {**opts, "derived": {
+    last = prices[-1]["rounds"][1] if prices and not team(cfg) else 0
+    derived_now = {
         "from": str(earlier_id), "runs": runs, "first_round": last + 1 if memory else 1, "prices": prices,
-        "locked": {"carried_as": lock.get("carried_as"), "name": lock.get("name"), "entry_sha256": lock["entry_sha256"],
-                   "measured_again": bool(lock.get("measured_again")), "coverage": parts["coverage"],
-                   "fidelity": parts["fidelity"], "cost": rewards.cost_of(parts), "saved": saved, "errors": errors,
-                   "cost_over_all_inputs": cost, "reward_then": measured["reward"],
-                   "reward_now": rewards.compute(parts, out["reward"], lock.get("claimed_fidelity"))["reward"]},
+        "locked": {"carried_as": lock.get("carried_as") or lock.get("candidate_id"), "name": name,
+                   "entry_sha256": lock["entry_sha256"], "measured_again": bool(lock.get("measured_again")) and sampled,
+                   "coverage": parts["coverage"], "fidelity": parts["fidelity"], "cost": rewards.cost_of(parts),
+                   "saved": saved, "errors": errors, "cost_over_all_inputs": cost, "reward_then": measured["reward"],
+                   "reward_now": rewards.compute(parts, out["reward"], claimed)["reward"]},
         "alpha_before": alpha_before, "alpha_by_rule": by_rule, "alpha": alpha,
         "limits_before": {k: ecfg.get("entry", {}).get(k) for k in ("max_nodes", "max_const_scalars")},
         "sampled": sampled, "sample_before": sample_before, "sample": sample,
         "exact_charge": alpha * (1.0 - lang.wilson_lower(sample, sample)) if sampled else 0.0,
-    }}
+    }
+    if team(cfg):
+        # This run's sessions are numbered after the earlier ones, so that a carried candidate's name (a0004s1) and a
+        # new one's never meet; a control starts at a0001, as nothing of the earlier run reaches it.
+        earlier_state = read_json(earlier / "multi_agent" / "state.json")
+        derived_now.update(team=True, next_index=int(earlier_state["next_index"]) if memory else 0,
+                           phases=sum(p["phases"] for p in prices))
+    out["continuation"] = {**opts, "derived": derived_now}
     return out
 
 
@@ -138,7 +173,7 @@ def earlier_rounds(cfg: dict) -> list:
     recomputed under this run's reward (the recorded one kept as reward_recorded), and its run noted, so that its
     entry is read from there. Empty for a run that goes on from nothing, and for a control."""
     d = derived(cfg)
-    if not d or not d["runs"]:
+    if not d or not d["runs"] or d.get("team"):  # a team run carries its earlier archive instead (multi_agent.py)
         return []
     out = []
     for rid in d["runs"]:
@@ -167,5 +202,10 @@ def _rounds(a: int, b: int) -> str:
     return f"round {a}" if a == b else f"rounds {a} to {b}"
 
 
+def _phases(n: int) -> str:
+    return f"{n} research phase" + ("" if n == 1 else "s")
+
+
 def price_history(d: dict) -> str:
-    return " and ".join(f"alpha = {p['alpha']:g} ({_rounds(*p['rounds'])})" for p in d["prices"])
+    return " and ".join(f"alpha = {p['alpha']:g} ({_rounds(*p['rounds']) if 'rounds' in p else _phases(p['phases'])})"
+                        for p in d["prices"])

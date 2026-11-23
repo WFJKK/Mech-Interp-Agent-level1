@@ -288,9 +288,15 @@ def continuation_lines(rep: dict) -> list:
         return []
     lk, o = c["locked"], c["options"]
     out = ["## Going on from an earlier run", ""]
-    out.append(f"This run went on from `{c['from']}`" + (f" after its round {c['first_round'] - 1}, with the earlier rounds' table "
-               "(rewards recomputed at the new price), notes and entries in its prompt." if c["runs"] else
-               ", as a control: the same price and sample, without any of the earlier rounds in its prompt."))
+    if c.get("team"):  # a team run going on from a team run (multi_agent.py)
+        out.append(f"This run went on from `{c['from']}`" + (
+            f" after {c['phases']} research phase{'' if c['phases'] == 1 else 's'}, with the earlier archive (rewards "
+            "recomputed at the new price, never selected here), notes and programs in its sessions' prompts." if c["runs"] else
+            ", as a control: the same price and sample, without any of the earlier research in its prompts."))
+    else:
+        out.append(f"This run went on from `{c['from']}`" + (f" after its round {c['first_round'] - 1}, with the earlier rounds' table "
+                   "(rewards recomputed at the new price), notes and entries in its prompt." if c["runs"] else
+                   ", as a control: the same price and sample, without any of the earlier rounds in its prompt."))
     out += ["",
             f"- The entry `{c['from']}` locked ({lk['carried_as']}), " + ("measured again on fresh inputs" if lk["measured_again"] else "on every input")
             + f": saves {lk['saved']:.4f} of the forward passes and is wrong on {lk['errors']:.6f} of all inputs "
