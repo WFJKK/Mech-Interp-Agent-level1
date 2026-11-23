@@ -1,0 +1,17 @@
+# Two more rounds on rnn-g-s0, ARC's 432-weight challenge network, after the pilot run pilot-rnn-g
+# (config/pilot/rnn-g.yaml), at a higher price for a wrong answer, as rnn-b-detail.yaml does for rnn-b
+# (level1/continuation.py, docs/CONTINUATION.md). The price and the sample are worked out when the run starts,
+# from the entry pilot-rnn-g locked, as measured again on fresh inputs: alpha = 2 * (1 - C) / e, rounded up,
+# and 200 * alpha inputs per scoring. The agent sees the five earlier rounds (their rewards recomputed at the
+# new price), their notes and their entries, and a note on what changed and what these rounds are for.
+# Scoring an entry of this network takes about as long as running the network on the sample, some 40 s on
+# 72,000 inputs on a laptop, so an entry may take up to 600 s rather than 120 s, and the report scores its
+# reference entries on 2 samples rather than 8 (more inputs than 8 of the pilot's samples all the same).
+#   rnn-g-detail-smoke.yaml   one short round first, to see that it all works on this machine
+extends: rnn-g.yaml
+run_id: pilot-rnn-g-detail
+continue_from: pilot-rnn-g
+rounds_max: 2
+verifier:
+  time_limit_s: 600
+  reference_samples: 2

@@ -207,3 +207,15 @@ def test_the_rnn_b_configs_go_on_from_the_pilot_and_differ_from_it_in_nothing_el
     for key in ("model", "network", "seed_check", "verifier", "reward", "session", "agent_model", "effort", "budget", "patience"):
         assert detail[key] == pilot[key] == control[key]
     assert smoke["session"]["python_calls"] < detail["session"]["python_calls"]
+
+
+def test_the_rnn_g_configs_go_on_from_the_pilot_with_more_time_per_scoring():
+    pilot = run_config.load("config/pilot/rnn-g.yaml")
+    detail, smoke = (run_config.load(f"config/pilot/rnn-g-detail{s}.yaml") for s in ("", "-smoke"))
+    assert detail["continue_from"] == smoke["continue_from"] == pilot["run_id"]
+    assert detail["rounds_max"] == 2 and smoke["rounds_max"] == 1
+    assert len({pilot["run_id"], detail["run_id"], smoke["run_id"]}) == 3
+    assert detail["verifier"] == {**pilot["verifier"], "time_limit_s": 600, "reference_samples": 2}
+    for key in ("model", "network", "seed_check", "reward", "session", "agent_model", "effort", "budget", "patience"):
+        assert detail[key] == pilot[key]
+    assert smoke["session"]["python_calls"] < detail["session"]["python_calls"]
