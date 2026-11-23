@@ -1,0 +1,51 @@
+# A team on ARC's 432-weight challenge network (models/rnn-g, rnn-g-s0), going on from the single agent's runs on
+# it: pilot-rnn-g (rounds 1 to 5, alpha = 10), pilot-rnn-g-detail (rounds 6 and 7) and pilot-rnn-g-detail-2
+# (rounds 8 and 9, entries up to 800 nodes and 512 numbers), the last four at alpha = 360. The single agent stopped
+# near the same reward three runs in a row; this asks whether a team, a lead who gives out tasks to four
+# researchers and combines what they find, gets further from the same start (level1/continuation.py,
+# docs/CONTINUATION.md, docs/MULTI_AGENT.md).
+#
+# Every session's prompt carries the single agent's scored submissions as the team's earlier archive (each reward
+# at this run's price; carried in `entries` under their names, r1s1 to r9s4, never selected unless submitted
+# again), the notes of its nine rounds, and a note on what changed. The price stays at the single agent's 360: the
+# rule would ask about 20,000 for errors this rare, and a million inputs per scoring. So does the sample, 72,000
+# inputs drawn afresh for every submission, over which an entry's build is spread, as in its last runs. Entries
+# keep its room of 800 nodes and 512 numbers.
+#
+# Three research phases. Per phase each of four researchers gets 37 Python calls, 2 submissions, 81 turns,
+# 49 minutes and $7.50, and the lead 75 calls, 4 submissions, 162 turns, 97 minutes and $15; the planning lead
+# $18 and the closing summary $20. That is at most $173 for the run, as round_usd caps a phase at $45.
+extends: research.yaml
+run_id: team-rnn-g-detail
+model: models/rnn-g
+network: rnn-g-s0
+seed_check: {network: rnn-g-s1}
+continue_from: pilot-rnn-g-detail-2
+continuation:
+  alpha: 360
+rounds_max: 3
+patience: 2
+verifier:
+  check: sample
+  sample_size: 72000
+  workload_size: 72000
+  time_limit_s: 600
+  reference_samples: 2
+entry:
+  max_nodes: 800
+  max_const_scalars: 512
+session:
+  python_calls: 250
+  submissions: 12
+  max_turns: 600
+  seconds: 21600
+budget:
+  run_usd: 200
+  round_usd: 45
+orchestration:
+  mode: trained            # no baseline agent in this run
+  development_seed: null   # a fresh sample for every submission, as for the single agent
+  workers: 4
+  initial_regions: []
+  initial_tasks:            # only if the lead gives out no tasks
+    - task: Find the program for the whole network with the highest reward you can.

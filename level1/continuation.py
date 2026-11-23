@@ -1,4 +1,4 @@
-"""A run that goes on from a finished run of its own kind (run config: continue_from; docs/CONTINUATION.md).
+"""A run that goes on from a finished run (run config: continue_from; docs/CONTINUATION.md).
 
 At the earlier price a wrong answer may cost too little for a fix to pay, so the last errors of the earlier rounds
 stay unexplained. The new run asks the same network again at a higher price, set from the entry the earlier run
@@ -14,11 +14,12 @@ little to the confidence bound.
 
 The earlier run is read and never written. A single agent's run goes on from a single agent's run: with memory, its
 rounds are numbered after the earlier ones, and its prompt carries their table (each reward recomputed at the new
-price), their notes, their scored entries and a note on what changed. A team run goes on from a team run
-(multi_agent.py): with memory, its sessions are numbered after the earlier ones, and each session's prompt carries
-the earlier archive (each reward recomputed at the new price; shown and carried, never selected), the earlier
-sessions' notes and a note on what changed. Without memory a run gets the same price and sample and nothing else:
-the control that shows what the memory is worth. Nothing here depends on the model, so any run can be continued.
+price), their notes, their scored entries and a note on what changed. A team run (multi_agent.py) goes on from a
+team run or from a single agent's: with memory, each session's prompt carries the earlier work as an archive (each
+reward recomputed at the new price; shown and carried, never selected), the earlier notes and a note on what
+changed, and after a team its sessions are numbered after the earlier ones. Without memory a run gets the same
+price and sample and nothing else: the control that shows what the memory is worth. Nothing here depends on the
+model, so any run can be continued.
 """
 
 from __future__ import annotations
@@ -88,8 +89,9 @@ def prepare(cfg: dict) -> dict:
         raise RuntimeError(f"there is no run {earlier_id} in {_runs_dir(cfg)} to go on from")
     run = read_json(earlier / "run.json")
     ecfg = run["config"]
-    if team(ecfg) != team(cfg):
-        raise RuntimeError(f"{earlier_id} is {_kind(ecfg)} and this is {_kind(cfg)}: a run goes on from a run of its own kind")
+    if team(ecfg) and not team(cfg):
+        raise RuntimeError(f"{earlier_id} is {_kind(ecfg)} and this is {_kind(cfg)}: a single agent goes on only from a "
+                           "single agent's run")
     for key in ("model", "network"):
         if ecfg[key] != cfg[key]:
             raise RuntimeError(f"{earlier_id} ran on {key} {ecfg[key]}, and this run is on {cfg[key]}")
@@ -113,9 +115,15 @@ def prepare(cfg: dict) -> dict:
                            "error to price higher")
     if cost >= c_max:
         raise RuntimeError(f"the entry {earlier_id} locked costs {cost:.4f} over all inputs, not less than c_max {c_max:g}")
+    if team(cfg):  # a team saves the programs it carries under its own limits (artifacts.collect checks them)
+        for key in ("max_nodes", "max_const_scalars"):
+            here, then = cfg["entry"].get(key), (ecfg.get("entry") or {}).get(key)
+            if here is not None and then is not None and int(here) < int(then):
+                raise RuntimeError(f"entry.{key} is {here} here and was {then} in {earlier_id}: a team carries the earlier "
+                                   "programs, so its limits cannot be lower")
     claimed = lock.get("claimed_fidelity", measured.get("claimed_fidelity"))
     name = lock.get("name")
-    if team(cfg):  # a team's lock names its candidate; the name it was submitted under is in the archive
+    if team(ecfg):  # a team's lock names its candidate; the name it was submitted under is in the archive
         archive = read_json(earlier / "multi_agent" / "archive.json")
         name = next((c["submitted"].get("name") for c in archive["candidates"] if c["id"] == lock["candidate_id"]), None)
     alpha_before = float(ecfg["reward"]["alpha"])
@@ -136,7 +144,7 @@ def prepare(cfg: dict) -> dict:
     prices = []
     for rid in runs:
         rcfg = read_json(_runs_dir(cfg) / rid / "run.json")["config"]
-        if team(cfg):  # a team's research phases are its cycles
+        if team(rcfg):  # a team's research phases are its cycles
             phases = _phases_of(_runs_dir(cfg) / rid)
             if phases:
                 prices.append({"run": rid, "phases": phases, "alpha": float(rcfg["reward"]["alpha"])})
@@ -159,11 +167,13 @@ def prepare(cfg: dict) -> dict:
         "exact_charge": alpha * (1.0 - lang.wilson_lower(sample, sample)) if sampled else 0.0,
     }
     if team(cfg):
-        # This run's sessions are numbered after the earlier ones, so that a carried candidate's name (a0004s1) and a
-        # new one's never meet; a control starts at a0001, as nothing of the earlier run reaches it.
-        earlier_state = read_json(earlier / "multi_agent" / "state.json")
-        derived_now.update(team=True, next_index=int(earlier_state["next_index"]) if memory else 0,
-                           phases=sum(p["phases"] for p in prices))
+        # After a team, this run's sessions are numbered after the earlier ones, so that a carried candidate's name
+        # (a0004s1) and a new one's never meet; after a single agent (whose names are r9s1 and the like) and in a
+        # control, to which nothing of the earlier run comes, they start at a0001.
+        next_index = int(read_json(earlier / "multi_agent" / "state.json")["next_index"]) if team(ecfg) and memory else 0
+        derived_now.update(team=True, earlier_team=team(ecfg), next_index=next_index,
+                           phases=sum(p.get("phases", 0) for p in prices),
+                           rounds_before=max((p["rounds"][1] for p in prices if "rounds" in p), default=0))
     out["continuation"] = {**opts, "derived": derived_now}
     return out
 
@@ -209,3 +219,27 @@ def _phases(n: int) -> str:
 def price_history(d: dict) -> str:
     return " and ".join(f"alpha = {p['alpha']:g} ({_rounds(*p['rounds']) if 'rounds' in p else _phases(p['phases'])})"
                         for p in d["prices"])
+
+
+def team_price_history(d: dict) -> tuple[str, str]:
+    """The earlier prices as a team's note gives them, and who did the earlier work: 'team' (research phases),
+    'alone' (rounds of one researcher working alone) or 'both'. Neighbouring runs at one price are taken together."""
+    groups = []
+    for p in d["prices"]:
+        kind = "rounds" if "rounds" in p else "phases"
+        last = groups[-1] if groups else None
+        if last and last["kind"] == kind and last["alpha"] == p["alpha"]:
+            if kind == "phases":
+                last["phases"] += p["phases"]
+                continue
+            if last["rounds"][1] + 1 == p["rounds"][0]:
+                last["rounds"][1] = p["rounds"][1]
+                continue
+        groups.append({"kind": kind, "alpha": p["alpha"], "rounds": list(p.get("rounds") or []), "phases": p.get("phases", 0)})
+    kinds = {g["kind"] for g in groups}
+    who = "both" if len(kinds) > 1 else "alone" if kinds == {"rounds"} else "team"
+    parts = [f"alpha = {g['alpha']:g} (" + (_rounds(*g["rounds"]) + (" of one researcher working alone" if who == "both" else "")
+                                           if g["kind"] == "rounds" else _phases(g["phases"]) + (" of a team" if who == "both" else ""))
+             + ")" for g in groups]
+    text = " and ".join(parts) if len(parts) <= 2 else ", ".join(parts[:-1]) + " and " + parts[-1]
+    return text, who

@@ -135,6 +135,8 @@ task; the configurations only set the team's size, the number of cycles and the 
 | `config/experiments/rnn-b-team.yaml` | `rnn-b-s0` (4 units) | 4 | 5 | $200 |
 | `config/experiments/rnn-b-team-detail-smoke.yaml` | `rnn-b-s0` (4 units) | 2 | 1 | $15 |
 | `config/experiments/rnn-b-team-detail.yaml` | `rnn-b-s0` (4 units) | 4 | 2 | $98 |
+| `config/experiments/rnn-g-team-detail-smoke.yaml` | `rnn-g-s0` (16 units) | 2 | 1 | $15 |
+| `config/experiments/rnn-g-team-detail.yaml` | `rnn-g-s0` (16 units) | 4 | 3 | $173 |
 | `config/experiments/rnn-a-team.yaml` | `rnn-a-s2` (2 units) | 2 | 3 | $60 |
 
 Each file's comments give what every role gets. The two `rnn-b` files run no baseline agent
@@ -160,15 +162,19 @@ python -m level1.loop resume --run <run folder>    # cycles 4 and 5, then the en
 python -m level1.loop finish --run <run folder>    # or the end of the run after cycle 3
 ```
 
-A finished team run can be followed by more research phases at a higher price for a wrong answer,
-set from the program it locked (`continue_from`, `docs/CONTINUATION.md`). The new run starts with the
-earlier archive (rewards recomputed at the new price, never selected), the earlier notes and the
-earlier programs in `entries`, and numbers its sessions after the earlier ones:
+A finished team run, or a finished single agent's run, can be followed by research phases of a team
+at a higher price for a wrong answer, set from the program it locked (`continue_from`,
+`docs/CONTINUATION.md`). The new run starts with the earlier work as its archive (rewards recomputed
+at the new price, never selected), the earlier notes and the earlier programs in `entries`:
 
 ```bash
 python -m level1.loop run --config config/experiments/rnn-b-team-detail-smoke.yaml --auth api_key
 python -m level1.loop run --config config/experiments/rnn-b-team-detail.yaml --auth api_key
+python -m level1.loop run --config config/experiments/rnn-g-team-detail-smoke.yaml --auth api_key
+python -m level1.loop run --config config/experiments/rnn-g-team-detail.yaml --auth api_key
 ```
+
+The `rnn-g` team goes on from the single agent's nine rounds on ARC's challenge network.
 
 A cycle's researchers run side by side, and each of their Python programs may use up to
 `python.memory_limit_mb` of memory, so four researchers can need four times that at once. Set

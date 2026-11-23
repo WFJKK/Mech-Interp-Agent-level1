@@ -161,8 +161,8 @@ def test_what_cannot_be_continued_is_refused(earlier, tmp_path):
         continuation.prepare(config(where, "later", continue_from="early", network="rnn-a-s1", seed_check={"network": "rnn-a-s2"}))
     with pytest.raises(RuntimeError, match="from itself"):
         continuation.prepare(config(where, "early", continue_from="early"))
-    with pytest.raises(RuntimeError, match="single agent"):
-        continuation.prepare({**config(where, "later", continue_from="early"), "orchestration": {"enabled": True}})
+    team = continuation.prepare({**config(where, "later", continue_from="early"), "orchestration": {"enabled": True}})
+    assert team["continuation"]["derived"]["team"] and not team["continuation"]["derived"]["earlier_team"]  # a team may
     # an earlier run whose locked entry is right on every input measured leaves no error to price
     exact = loop.start(config(tmp_path, "exact"), fake_scripts=Path("tests/fake_run_numbers"), out=lambda *_: None)
     assert read_json(exact / "lock.json")["measured_again"]["parts"]["fidelity"] == 1.0

@@ -160,50 +160,57 @@ CONTINUATION_EVERY = "An entry right on every input loses nothing to errors, so 
 CONTINUATION_LIMITS = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants ({nodes_before} "
                        "and {consts_before} in the earlier rounds), so an idea that did not fit then may fit now.")
 
-# The same for a team run that goes on from a team run (level1/multi_agent.py): its research phases are its cycles,
-# and the earlier phases reach its sessions through the checked archive and the research notes.
-TEAM_CONTINUATION_HEADING = "## This research goes on from earlier research phases"
+# The same for a team run that goes on from earlier work (level1/multi_agent.py): a team's research phases (its
+# cycles) or a single agent's rounds, which reach its sessions through the checked archive and the research notes.
+TEAM_CONTINUATION_HEADING = "## This research goes on from earlier research"
 TEAM_CONTINUATION_NOTE = (
-    "The earlier research phases on this network were scored with {prices}. The program for the whole network locked "
-    "after them ({carried_as}), {measured}, has coverage {coverage:.4f}, fidelity {fidelity:.5f} and cost {cost:.4f}: "
-    "it saves {saved:.4f} of the forward passes and is wrong on {errors:.6f} of all inputs. From this phase on, the aim "
-    "is to go into more detail on what the earlier phases did not understand: the inputs on which their programs "
-    "disagree with the network, why the network answers as it does there, and how to predict that cheaply.",
+    "{earlier_work} The program for the whole network locked after it ({carried_as}), {measured}, has coverage "
+    "{coverage:.4f}, fidelity {fidelity:.5f} and cost {cost:.4f}: it saves {saved:.4f} of the forward passes and is "
+    "wrong on {errors:.6f} of all inputs. From this phase on, the aim is to go into more detail on what the earlier "
+    "research did not understand: the inputs on which its programs disagree with the network, why the network answers "
+    "as it does there, and how to predict that cheaply.",
     "To make that count, a wrong answer is now charged at alpha = {alpha:g} forward passes. {rule} At this price the "
-    "program locked after the earlier phases scores {reward_now:.4f}. {exact}",
-    "The checked archive below lists the earlier phases' programs under \"Earlier research phases\", with rewards "
-    "recomputed at this price from what was measured then; they are in `entries` under those names, and the earlier "
-    "saved drafts under their aliases. Only programs submitted from this phase on can be selected, so an earlier "
-    "program counts only if it is submitted again. The research notes of the earlier phases were written at the "
-    "earlier prices, so a fix they judged not worth its cost may be worth it now.",
+    "program locked after the earlier research scores {reward_now:.4f}. {exact}",
+    "The checked archive below lists the earlier programs under \"Earlier research\", with rewards recomputed at this "
+    "price from what was measured then; they are in `entries` under those names{drafts}. Only programs submitted from "
+    "this phase on can be selected, so an earlier program counts only if it is submitted again. The notes of the "
+    "earlier research were written at the earlier prices, so a fix it judged not worth its cost may be worth it now.",
 )
+TEAM_EARLIER_WORK = {
+    "team": "The earlier research phases on this network were scored with {prices}.",
+    "alone": "Before this team, one researcher worked on this network alone, in rounds scored with {prices}.",
+    "both": "The earlier research on this network was scored with {prices}.",
+}
+TEAM_EARLIER_DRAFTS = ", and the earlier saved drafts under their aliases"
 TEAM_CONTINUATION_FIXED = "That price is set for this research."
 TEAM_CONTINUATION_SAMPLED = ("A program right on every input of its sample is charged only {charge:.3f} at full coverage "
                              "for the inputs not drawn, so among such programs the saving decides. To keep that charge "
                              "small, each submission is now scored on {sample:,} inputs ({sample_before:,} before).")
 TEAM_CONTINUATION_SAMPLED_SAME = ("A program right on every input of its sample is charged only {charge:.3f} at full "
                                   "coverage for the inputs not drawn, so among such programs the saving decides. Each "
-                                  "submission is scored on {sample:,} inputs, as in the earlier phases.")
+                                  "submission is scored on {sample:,} inputs, as in the earlier research.")
 TEAM_CONTINUATION_DRAWS = ("A domain given by a saved entry's region test is sampled by drawing up to {draws:,} inputs "
                            "from the whole distribution and keeping those inside it, so at {sample:,} inputs per scoring "
                            "such a domain needs clearly more than {share:.1%} of all inputs to be scored.")
 TEAM_CONTINUATION_LIMITS = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants "
-                            "({nodes_before} and {consts_before} in the earlier phases), so an idea that did not fit then "
-                            "may fit now.")
+                            "({nodes_before} and {consts_before} in the earlier research), so an idea that did not fit "
+                            "then may fit now.")
 # In the checked archive and the research notes of such a run (multi_agent.archive_summary, build_multi).
-TEAM_EARLIER_ARCHIVE = ("Earlier research phases, with rewards recomputed at the current price. These programs are in "
+TEAM_EARLIER_ARCHIVE = ("Earlier research, with rewards recomputed at the current price. These programs are in "
                         "`entries` under these names; they can be selected only if submitted again.")
-TEAM_EARLIER_NOTES = "Notes of the earlier research phases, written at the earlier prices:"
+TEAM_EARLIER_NOTES = "Notes of the earlier research, written at the earlier prices:"
 TEAM_LATER_NOTES = "Notes of the research since then:"
+TEAM_SINGLE_ROUND = "Round {round}, by one researcher working alone:"
 
 
 def continuation_texts() -> str:
     """The continuation note's parts as written, for the hygiene check of the agent's surface."""
     return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, CONTINUATION_RULE, CONTINUATION_FIXED,
                          CONTINUATION_SAMPLED, CONTINUATION_SAMPLED_SAME, CONTINUATION_EVERY, CONTINUATION_LIMITS,
-                         TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE, TEAM_CONTINUATION_FIXED,
-                         TEAM_CONTINUATION_SAMPLED, TEAM_CONTINUATION_SAMPLED_SAME, TEAM_CONTINUATION_DRAWS,
-                         TEAM_CONTINUATION_LIMITS, TEAM_EARLIER_ARCHIVE, TEAM_EARLIER_NOTES, TEAM_LATER_NOTES))
+                         TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE, *TEAM_EARLIER_WORK.values(),
+                         TEAM_EARLIER_DRAFTS, TEAM_CONTINUATION_FIXED, TEAM_CONTINUATION_SAMPLED,
+                         TEAM_CONTINUATION_SAMPLED_SAME, TEAM_CONTINUATION_DRAWS, TEAM_CONTINUATION_LIMITS,
+                         TEAM_EARLIER_ARCHIVE, TEAM_EARLIER_NOTES, TEAM_LATER_NOTES, TEAM_SINGLE_ROUND))
 
 
 def continuation_note(cfg: dict) -> str:
@@ -236,6 +243,10 @@ def continuation_note(cfg: dict) -> str:
               "carried_as": lk["carried_as"], "measured": "measured again on fresh inputs" if lk["measured_again"] else "on every input",
               "coverage": lk["coverage"], "fidelity": lk["fidelity"], "cost": lk["cost"], "saved": lk["saved"],
               "errors": lk["errors"], "alpha": d["alpha"], "rule": rule, "reward_now": lk["reward_now"], "exact": exact}
+    if team:  # the earlier work: a team's research phases, one researcher's rounds, or both
+        prices, who = continuation.team_price_history(d)
+        fields.update(earlier_work=TEAM_EARLIER_WORK[who].format(prices=prices),
+                      drafts="" if who == "alone" else TEAM_EARLIER_DRAFTS)
     notes = list(TEAM_CONTINUATION_NOTE if team else CONTINUATION_NOTE)
     before = d.get("limits_before") or {}
     now = {k: cfg["entry"][k] for k in ("max_nodes", "max_const_scalars")}

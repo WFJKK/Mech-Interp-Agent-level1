@@ -10,12 +10,12 @@ Session plans, indices and input snapshots are written before a backend is calle
 Each session has its own directory but spends against the parent run. Worker calls
 may overlap; archive updates and state transitions have one writer.
 
-A team run can go on from a finished team run at a higher price for a wrong answer
-(continue_from; continuation.py, docs/CONTINUATION.md). It starts with the earlier
-archive, every reward recomputed at its price, and the earlier sessions' notes: shown
-to every session and carried in `entries`, read from the earlier run's folder, never
-selected. Its own sessions are numbered after the earlier ones and plan, research and
-stop exactly as a new run's do.
+A team run can go on from a finished team run, or from a single agent's run, at a higher
+price for a wrong answer (continue_from; continuation.py, docs/CONTINUATION.md). It starts
+with the earlier work as archive candidates, every reward recomputed at its price, and the
+earlier notes: shown to every session and carried in `entries`, read from the earlier
+run's folder, never selected. After a team its sessions are numbered after the earlier
+ones; either way they plan, research and stop exactly as a new run's do.
 """
 
 from __future__ import annotations
@@ -232,12 +232,15 @@ def archive_summary(archive: dict, limit: int) -> str:
         p = receipt["parts"]
         scope_meta = receipt.get("scope") or {}
         then = (f" ({receipt['reward_recorded']:.6f} at the price it was measured at)"
-                if receipt.get("reward_recorded") is not None else "")
+                if receipt.get("reward_recorded") is not None and abs(receipt["reward_recorded"] - receipt["reward"]) > 1e-12
+                else "")
+        # a single agent's submission was scored on the whole input distribution, with no domain of its own
+        where = ("" if candidate["role"] == "single" else
+                 f"outer scope mass {scope_meta.get('mass')} (exact: {scope_meta.get('mass_exact')}); "
+                 f"scope cardinality {scope_meta.get('cardinality')}; workload {scope_meta.get('workload_size')}; ")
         return (f"{cid}: scope {candidate['scope_id']}; reward {receipt['reward']:.6f}{then}; "
                 f"coverage {p['coverage']:.6f}; fidelity {p['fidelity']}; cost {rewards.cost_of(p)}; "
-                f"fidelity lower bound {p.get('fidelity_low')}; "
-                f"outer scope mass {scope_meta.get('mass')} (exact: {scope_meta.get('mass_exact')}); "
-                f"scope cardinality {scope_meta.get('cardinality')}; workload {scope_meta.get('workload_size')}; "
+                f"fidelity lower bound {p.get('fidelity_low')}; {where}"
                 f"build operations {p.get('build_ops')}; prediction operations {p.get('predict_ops')}")
 
     if archive["global"]["best"]:
@@ -288,16 +291,40 @@ def _carried(path: Path, cfg: dict, archive: dict) -> dict:
     return out
 
 
+def _single_candidates(runs_dir: Path, runs: list) -> list[dict]:
+    """A single agent's scored submissions, as archive candidates of a team that goes on from its runs: each scored on
+    the whole input distribution, named as its run named it (r9s1), and read from its run's folder."""
+    from .loop import completed
+
+    out = []
+    for rid in runs:
+        for rd in completed(Path(runs_dir) / rid):
+            for receipt in rd["submissions"]:
+                if receipt["status"] == "scored":
+                    out.append({"id": receipt["carried_as"], "role": "single", "session_id": f"round_{rd['round']:03d}",
+                                "cycle": None, "scope": ALL, "scope_id": regions.scope_id(ALL),
+                                "entry_path": f"round_{rd['round']:03d}/session/submissions/{receipt['submission']:03d}/entry.json",
+                                "entry_sha256": receipt["entry_sha256"], "selection": copy.deepcopy(receipt),
+                                "submitted": copy.deepcopy(receipt), "expected_fidelity_other": receipt.get("expected_fidelity_other"),
+                                "from_run": rid})
+    return out
+
+
 def _carry_earlier(path: Path, cfg: dict, archive: dict) -> bool:
-    """A team run that goes on from an earlier one (continue_from) starts with that run's archive: its candidates
-    and saved drafts, each marked with the run it came from (its entry is read there) and each development reward
+    """A team run that goes on from an earlier one (continue_from) starts with the earlier work: an earlier team's
+    archive (its candidates and saved drafts, with whatever that team carried itself), or a single agent's scored
+    submissions. Each is marked with the run it came from (its entry is read there) and has its development reward
     recomputed at this run's price, the recorded one kept as reward_recorded. Done once, marked by 'earlier'; a
     control carries nothing. Returns whether the archive changed."""
     d = continuation.derived(cfg)
     if not d or "earlier" in archive:
         return False
     if d["runs"]:
-        source = read_archive(Path(path).parent / d["from"])
+        runs_dir = Path(path).parent
+        if continuation.team(read_json(runs_dir / d["from"] / "run.json")["config"]):
+            source = read_archive(runs_dir / d["from"])
+        else:
+            source = {"candidates": _single_candidates(runs_dir, d["runs"]), "drafts": []}
         for candidate in source["candidates"]:
             candidate = copy.deepcopy(candidate)
             candidate["from_run"] = candidate.get("from_run") or d["from"]
@@ -444,10 +471,20 @@ def _safe_history(path: Path, state: dict, history: list[dict]) -> list[dict]:
 
 
 def _earlier_history(path: Path, state: dict) -> list[dict]:
-    """The notes of the runs a team run goes on from (continue_from), in order, each row marked with its run."""
+    """The notes of the runs a team run goes on from (continue_from), in order, each row marked with its run: a
+    team's sessions, or a single agent's rounds, each headed with its round."""
     rows = []
     for rid in (state.get("continuation") or {}).get("runs", []):
         where = Path(path).parent / rid
+        if not continuation.team(read_json(where / "run.json")["config"]):
+            from .loop import completed
+
+            for rd in completed(where):
+                notes = (rd.get("notes") or "").strip() or "(none)"
+                rows.append({"session_id": f"round_{rd['round']:03d}", "role": "single", "scope": ALL,
+                             "notes": prompt.TEAM_SINGLE_ROUND.format(round=rd["round"]) + "\n\n" + notes,
+                             "submissions": rd["submissions"], "from_run": rid})
+            continue
         earlier = read_json(_state_path(where))
         for plan in sorted(earlier["sessions"].values(), key=lambda item: item["index"]):
             record_path = where / plan["directory"] / "record.json"

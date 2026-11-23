@@ -116,7 +116,9 @@ def test_the_sessions_are_numbered_after_the_earlier_ones_and_see_its_archive_an
     assert state["sessions"]["a0004"]["task"].startswith("Decide what each researcher works on in the next research phase")
     flat = " ".join(planning.split())
     assert prompt.TEAM_CONTINUATION_HEADING in planning and f"alpha = {d['alpha']:g} forward passes" in flat
-    assert "alpha = 10 (1 research phase)" in flat and "go into more detail on what the earlier phases did not understand" in flat
+    assert "The earlier research phases on this network were scored with alpha = 10 (1 research phase)." in flat
+    assert "go into more detail on what the earlier research did not understand" in flat
+    assert "and the earlier saved drafts under their aliases" in flat
     assert f"scored on {d['sample']:,} inputs (1,500 before)" in flat and "clearly more than" in flat
     assert planning.index(prompt.TEAM_CONTINUATION_HEADING) < planning.index("## Tools and this session's allocation")
     # the earlier archive, each reward recomputed at the new price, and the earlier notes, marked as earlier
@@ -197,7 +199,7 @@ def test_a_team_control_gets_the_price_and_sample_and_nothing_else(earlier):
     assert "as a control" in (control / "report.md").read_text()
 
 
-def test_only_runs_of_one_kind_go_on_from_each_other(earlier, tmp_path):
+def test_a_single_agent_does_not_go_on_from_a_team(earlier, tmp_path):
     where, _, path = earlier
     single = run_config.load("config/pilot/rnn-a-smoke.yaml", {"runs_dir": str(where), "run_id": "single-later",
                                                                 "backend": "fake", "continue_from": "team-early"})
@@ -237,3 +239,78 @@ def test_the_rnn_b_team_detail_configs_go_on_from_the_team_run():
                 "patience", "orchestration"):
         assert detail[key] == team[key]
     assert smoke["budget"]["run_usd"] < detail["budget"]["run_usd"] and smoke["orchestration"]["workers"] == 2
+
+
+# ---------------------------------------------------------------- a team going on from a single agent's run
+
+SINGLE = {"calls": RESEARCHER["calls"], "response": RESEARCHER["response"]}
+
+
+@pytest.fixture(scope="module")
+def after_single(tmp_path_factory):
+    """A single agent's run on the team's network (one round: the program that shifts the first number), then a team
+    that goes on from it. The single agent's round is script 1; the team's sessions, numbered from a0001, are 1 to 3
+    of their own scripts."""
+    where = tmp_path_factory.mktemp("team-after-single")
+    single_cfg = run_config.load("config/pilot/rnn-a-smoke.yaml", run_config.merge(
+        {"backend": "fake", "sandbox": "process", "runs_dir": str(where), "run_id": "alone", "rounds_max": 1,
+         "network": "rnn-a-s2", "seed_check": {"network": "rnn-a-s1"},
+         "verifier": {"sample_size": 1500, "reference_samples": 2}, "session": {"python_calls": 3, "submissions": 2}}, {}))
+    alone = loop.start(single_cfg, fake_scripts=scripts(where / "single-scripts", SINGLE), out=lambda *_: None)
+    assert read_json(alone / "lock.json")["carried_as"] == "r1s1"
+    before = folder_hash(alone)
+    lines = []
+    team = loop.start(config(where, "team-after", continue_from="alone"),
+                      fake_scripts=scripts(where / "team-scripts", PLANNING_AGAIN, RESEARCHER_AGAIN, LEAD_AGAIN),
+                      out=lines.append)
+    assert folder_hash(alone) == before  # the single agent's run is read, never written
+    return where, alone, team, lines
+
+
+def test_a_team_goes_on_from_a_single_agents_rounds(after_single):
+    _, alone, team, lines = after_single
+    cfg = read_json(team / "run.json")["config"]
+    d = cfg["continuation"]["derived"]
+    assert d["team"] and not d["earlier_team"] and d["next_index"] == 0 and d["rounds_before"] == 1
+    assert d["prices"] == [{"run": "alone", "rounds": [1, 1], "alpha": 10.0}] and d["locked"]["carried_as"] == "r1s1"
+    state = read_json(team / "multi_agent/state.json")
+    assert sorted(state["sessions"]) == ["a0001", "a0002", "a0003"]
+    assert state["sessions"]["a0001"]["task"].startswith("Decide what each researcher works on in the next research phase")
+    planning = (team / state["sessions"]["a0001"]["directory"] / "prompt.md").read_text()
+    flat = " ".join(planning.split())
+    assert "Before this team, one researcher worked on this network alone, in rounds scored with alpha = 10 (round 1)." in flat
+    assert "earlier saved drafts" not in flat
+    # the single agent's submission is an earlier candidate, rescored, carried and never selected
+    archive = multi_agent.read_archive(team)
+    carried = next(c for c in archive["candidates"] if c["id"] == "r1s1")
+    assert carried["from_run"] == "alone" and carried["role"] == "single" and carried["scope_id"] == "all"
+    assert carried["selection"]["reward_recorded"] == read_json(alone / "round_001/round.json")["submissions"][0]["reward"]
+    assert carried["selection"]["reward"] < carried["selection"]["reward_recorded"]
+    assert f"r1s1: scope all; reward {carried['selection']['reward']:.6f}" in planning and "outer scope mass None" not in planning
+    assert archive["global"]["best"] == "a0002s1" and read_json(team / "lock.json")["candidate_id"] == "a0002s1"
+    # its notes, headed with its round, and its program in the researcher's entries
+    assert prompt.TEAM_SINGLE_ROUND.format(round=1) in planning and "the first shifted up a little" in planning
+    shown = (team / state["sessions"]["a0002"]["directory"] / "session/python/001.txt").read_text()
+    assert "carried ['r1s1']" in shown
+    assert "a single agent's run, after its round 1" in (team / "report.md").read_text()
+    assert any("going on from alone" in line and "start at a0001" in line for line in lines)
+
+
+def test_a_team_keeps_at_least_the_entry_room_of_the_run_it_goes_on_from(after_single):
+    where, _, _, _ = after_single
+    with pytest.raises(RuntimeError, match="its limits cannot be lower"):
+        continuation.prepare(config(where, "team-cramped", continue_from="alone", entry={"max_nodes": 100}))
+
+
+def test_the_rnn_g_team_configs_go_on_from_the_single_agents_last_run():
+    single = run_config.load("config/pilot/rnn-g-detail-2.yaml")
+    team, smoke = (run_config.load(f"config/experiments/rnn-g-team-detail{s}.yaml") for s in ("", "-smoke"))
+    assert team["continue_from"] == smoke["continue_from"] == single["run_id"]
+    assert len({single["run_id"], team["run_id"], smoke["run_id"]}) == 3
+    assert team["orchestration"]["enabled"] and team["orchestration"]["mode"] == "trained" and team["orchestration"]["workers"] == 4
+    assert team["rounds_max"] == 3 and smoke["rounds_max"] == 1 and team["continuation"]["alpha"] == single["continuation"]["alpha"] == 360
+    for key in ("model", "network", "seed_check", "entry", "agent_model", "effort"):
+        assert team[key] == single[key]
+    assert team["verifier"]["sample_size"] == team["verifier"]["workload_size"] == 72000
+    assert team["verifier"]["time_limit_s"] == single["verifier"]["time_limit_s"] and team["orchestration"]["development_seed"] is None
+    assert smoke["budget"]["run_usd"] < team["budget"]["run_usd"] and smoke["orchestration"]["workers"] == 2
