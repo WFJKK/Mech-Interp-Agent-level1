@@ -261,6 +261,7 @@ def build(path: Path) -> dict:
         "spend": budget.state(path, cfg["budget"]) if cfg.get("auth") == "api_key" else None,
         "baseline": _baseline(path),
         "continuation": _continuation(cfg, lock),
+        "entry_limits": {k: (cfg.get("entry") or {}).get(k) for k in ("max_nodes", "max_const_scalars")},
     }
 
 
@@ -300,6 +301,10 @@ def continuation_lines(rep: dict) -> list:
                else ", as configured") + "."]
     if c["sampled"]:
         out.append(f"- Sample: {c['sample_before']:,} inputs per scoring before, {c['sample']:,} here.")
+    before, now = c.get("limits_before") or {}, rep.get("entry_limits") or {}
+    if before and now and before != now:
+        out.append(f"- Entry limits: {before['max_nodes']} nodes and {before['max_const_scalars']} numbers in constants "
+                   f"before, {now['max_nodes']} and {now['max_const_scalars']} here.")
     here = c.get("locked_here")
     if here is None:
         out.append("- Understood share: none, as nothing was locked here.")

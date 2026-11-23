@@ -126,6 +126,7 @@ def prepare(cfg: dict) -> dict:
                    "cost_over_all_inputs": cost, "reward_then": measured["reward"],
                    "reward_now": rewards.compute(parts, out["reward"], lock.get("claimed_fidelity"))["reward"]},
         "alpha_before": alpha_before, "alpha_by_rule": by_rule, "alpha": alpha,
+        "limits_before": {k: ecfg.get("entry", {}).get(k) for k in ("max_nodes", "max_const_scalars")},
         "sampled": sampled, "sample_before": sample_before, "sample": sample,
         "exact_charge": alpha * (1.0 - lang.wilson_lower(sample, sample)) if sampled else 0.0,
     }}

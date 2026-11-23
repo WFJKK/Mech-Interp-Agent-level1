@@ -18,6 +18,7 @@
 #   config/pilot/rnn-c.yaml         one of the same design, 16 units, on ten real numbers
 #   config/pilot/rnn-b-detail.yaml  two more rounds after rnn-b's, at a higher price (docs/CONTINUATION.md)
 #   config/pilot/rnn-g-detail.yaml  the same after rnn-g's, ARC's 432-weight challenge network
+#   config/pilot/rnn-g-detail-2.yaml  two more after that, same price, room for entries twice the size
 #   config/pilot/rnn-d.yaml         the baseline of rnn-a's shape
 #   config/pilot/rnn-e.yaml         the baseline of rnn-b's shape
 #   config/pilot/rnn-f.yaml         the baseline of rnn-c's shape

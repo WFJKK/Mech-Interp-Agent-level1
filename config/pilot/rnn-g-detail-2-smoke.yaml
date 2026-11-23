@@ -1,0 +1,10 @@
+# rnn-g-detail-2.yaml kept small on purpose: one round with a short session, to see that going on from
+# pilot-rnn-g-detail works on this machine before the two rounds proper.
+extends: rnn-g-detail-2.yaml
+run_id: pilot-rnn-g-detail-2-smoke
+rounds_max: 1
+session:
+  python_calls: 8
+  submissions: 2
+  max_turns: 40
+  seconds: 1800

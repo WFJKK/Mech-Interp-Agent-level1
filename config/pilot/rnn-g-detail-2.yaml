@@ -1,0 +1,16 @@
+# Two more rounds on ARC's 432-weight challenge network after pilot-rnn-g-detail (config/pilot/rnn-g-detail.yaml),
+# at the same price, alpha = 360, but with room for entries twice the size: 800 nodes and 512 numbers in constants
+# instead of 400 and 256. The agent of pilot-rnn-g-detail ended at 392 nodes and 238 numbers and named the limits
+# as what kept it from modelling why its risky inputs are risky, so that fewer of them need the network's own
+# arithmetic. The agent sees all seven earlier rounds (rewards at alpha = 360), their notes and entries, and the
+# note on what these rounds are for, which also says that the limits were raised (level1/continuation.py).
+#   rnn-g-detail-2-smoke.yaml   one short round first
+extends: rnn-g-detail.yaml
+run_id: pilot-rnn-g-detail-2
+continue_from: pilot-rnn-g-detail
+rounds_max: 2
+continuation:
+  alpha: 360          # the rule would ask about 23,000 now, and about 4.7 million inputs per scoring
+entry:
+  max_nodes: 800
+  max_const_scalars: 512

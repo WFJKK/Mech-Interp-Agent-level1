@@ -219,3 +219,24 @@ def test_the_rnn_g_configs_go_on_from_the_pilot_with_more_time_per_scoring():
     for key in ("model", "network", "seed_check", "reward", "session", "agent_model", "effort", "budget", "patience"):
         assert detail[key] == pilot[key]
     assert smoke["session"]["python_calls"] < detail["session"]["python_calls"]
+
+
+def test_the_note_says_when_entries_have_other_room_than_in_the_earlier_rounds(earlier):
+    where, _, path = earlier
+    before = read_json(path / "run.json")["config"]["entry"]
+    room = {"max_nodes": before["max_nodes"] + 100, "max_const_scalars": before["max_const_scalars"] + 64}
+    cfg = continuation.prepare(config(where, "roomier", continue_from="early", entry=room))
+    note = " ".join(prompt.continuation_note(cfg).split())
+    assert (f"Entries may now have up to {room['max_nodes']} nodes and {room['max_const_scalars']} numbers in their "
+            f"constants ({before['max_nodes']} and {before['max_const_scalars']} in the earlier rounds)") in note
+    same = continuation.prepare(config(where, "same", continue_from="early"))
+    assert "Entries may now have" not in prompt.continuation_note(same)
+
+
+def test_the_second_rnn_g_continuation_keeps_the_price_and_doubles_the_room():
+    first = run_config.load("config/pilot/rnn-g-detail.yaml")
+    second, smoke = (run_config.load(f"config/pilot/rnn-g-detail-2{s}.yaml") for s in ("", "-smoke"))
+    assert second["continue_from"] == smoke["continue_from"] == first["run_id"]
+    assert second["continuation"]["alpha"] == 360 and second["rounds_max"] == 2 and smoke["rounds_max"] == 1
+    assert second["entry"] == {"max_nodes": 800, "max_const_scalars": 512}
+    assert second["verifier"] == first["verifier"] and second["session"] == first["session"]

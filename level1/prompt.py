@@ -139,9 +139,9 @@ CONTINUATION_NOTE = (
     "{saved:.4f} of the forward passes and is wrong on {errors:.6f} of all inputs. From round {first} on, the aim is "
     "to go into more detail on what the earlier rounds did not understand: the inputs on which their entries "
     "disagree with the network, why the network answers as it does there, and how to predict that cheaply.",
-    "To make that count, a wrong answer is now charged at alpha = {alpha:g} forward passes. {rule} At the new price "
+    "To make that count, a wrong answer is now charged at alpha = {alpha:g} forward passes. {rule} At this price "
     "the entry locked after round {last} scores {reward_now:.4f}. {exact}",
-    "The rewards of the earlier rounds under \"Earlier rounds\" are recomputed at the new price from what was "
+    "The rewards of the earlier rounds under \"Earlier rounds\" are recomputed at this price from what was "
     "measured then. Their notes were written at the earlier prices, so a fix they judged not worth its cost may be "
     "worth it now. Their scored entries are in `entries` as before.",
 )
@@ -153,13 +153,18 @@ CONTINUATION_SAMPLED = ("An entry right on every input of its sample is charged 
                         "for the inputs not drawn, so among such entries the saving decides. To keep that charge "
                         "small, each submission is now scored on {sample:,} inputs drawn afresh ({sample_before:,} "
                         "before).")
+CONTINUATION_SAMPLED_SAME = ("An entry right on every input of its sample is charged only {charge:.3f} at full coverage "
+                             "for the inputs not drawn, so among such entries the saving decides. Each submission is "
+                             "scored on {sample:,} inputs drawn afresh, as in round {last}.")
 CONTINUATION_EVERY = "An entry right on every input loses nothing to errors, so among such entries the saving decides."
+CONTINUATION_LIMITS = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants ({nodes_before} "
+                       "and {consts_before} in the earlier rounds), so an idea that did not fit then may fit now.")
 
 
 def continuation_texts() -> str:
     """The continuation note's parts as written, for the hygiene check of the agent's surface."""
     return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, CONTINUATION_RULE, CONTINUATION_FIXED,
-                         CONTINUATION_SAMPLED, CONTINUATION_EVERY))
+                         CONTINUATION_SAMPLED, CONTINUATION_SAMPLED_SAME, CONTINUATION_EVERY, CONTINUATION_LIMITS))
 
 
 def continuation_note(cfg: dict) -> str:
@@ -175,14 +180,25 @@ def continuation_note(cfg: dict) -> str:
     rule = (CONTINUATION_RULE.format(margin=float(o["margin"]), allowed=allowed, whole=" (all of it)" if c_max == 1 else "",
                                      errors=lk["errors"])
             if o.get("alpha") is None else CONTINUATION_FIXED)
-    exact = (CONTINUATION_SAMPLED.format(charge=d["exact_charge"], sample=d["sample"], sample_before=d["sample_before"])
-             if d["sampled"] else CONTINUATION_EVERY)
+    if not d["sampled"]:
+        exact = CONTINUATION_EVERY
+    elif d["sample"] == d["sample_before"]:
+        exact = CONTINUATION_SAMPLED_SAME.format(charge=d["exact_charge"], sample=d["sample"], last=d["first_round"] - 1)
+    else:
+        exact = CONTINUATION_SAMPLED.format(charge=d["exact_charge"], sample=d["sample"], sample_before=d["sample_before"])
     fields = {"prices": continuation.price_history(d), "last": d["first_round"] - 1, "first": d["first_round"],
               "carried_as": lk["carried_as"], "measured": "measured again on fresh inputs" if lk["measured_again"] else "on every input",
               "coverage": lk["coverage"], "fidelity": lk["fidelity"], "cost": lk["cost"], "saved": lk["saved"],
               "errors": lk["errors"], "alpha": d["alpha"], "rule": rule, "reward_now": lk["reward_now"], "exact": exact}
+    notes = list(CONTINUATION_NOTE)
+    before = d.get("limits_before") or {}
+    now = {k: cfg["entry"][k] for k in ("max_nodes", "max_const_scalars")}
+    if all(before.get(k) is not None for k in now) and before != now:  # the earlier rounds' entries had other room
+        notes.insert(2, CONTINUATION_LIMITS)
+        fields.update(nodes=now["max_nodes"], consts=now["max_const_scalars"], nodes_before=before["max_nodes"],
+                      consts_before=before["max_const_scalars"])
     paragraphs = [textwrap.fill(p.format(**fields), width=100, break_long_words=False, break_on_hyphens=False)
-                  for p in CONTINUATION_NOTE]
+                  for p in notes]
     return "\n\n" + "\n\n".join([CONTINUATION_HEADING, *paragraphs])
 
 
