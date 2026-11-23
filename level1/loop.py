@@ -52,7 +52,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import budget, global_baseline, hygiene, lang, prompt, research_modes, rewards, run_config
+from . import budget, continuation, global_baseline, hygiene, lang, prompt, research_modes, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
 from .session import RESEARCH_SUBMIT_TOOL, RESEARCH_TOOLS, Session, surface
@@ -92,10 +92,13 @@ class Log:
 
 # what the records say ---------------------------------------------------------------------------
 def completed(path: Path) -> list:
-    """The rounds that are done, in order: round.json of round 1, 2, ... until one is missing."""
+    """The rounds that are done, in order: round.json of the run's first round, the next, ... until one is missing.
+    The first is round 1, or, in a run that goes on from earlier rounds (continue_from), the one after them."""
+    path = Path(path)
+    first = continuation.first_round(read_json(path / "run.json")["config"]) if (path / "run.json").is_file() else 1
     out = []
     while True:
-        f = Path(path) / f"round_{len(out) + 1:03d}" / "round.json"
+        f = path / f"round_{first + len(out):03d}" / "round.json"
         if not f.is_file():
             return out
         out.append(read_json(f))
@@ -135,7 +138,9 @@ def stop_reason(rounds: list, cfg: dict) -> str | None:
 
 
 def entry_of(path: Path, sub: dict) -> dict:
-    return read_json(Path(path) / f"round_{sub['round']:03d}" / "session" / "submissions" / f"{sub['submission']:03d}" / "entry.json")
+    """A submission's entry, from its own run's folder: this run's, or the earlier run's it came from."""
+    where = Path(sub["from_run"]) if sub.get("from_run") else Path(path)
+    return read_json(where / f"round_{sub['round']:03d}" / "session" / "submissions" / f"{sub['submission']:03d}" / "entry.json")
 
 
 def carried_entries(path: Path, rounds: list) -> dict:
@@ -205,7 +210,7 @@ def agent_surface(cfg: dict, model, sandbox_mode: str | None = None) -> dict:
     from .backends.claude_code import SUMMARY_SYSTEM_PROMPT, SYSTEM_PROMPT
 
     out = {**surface(model, cfg["verifier"]), "restart note": prompt.RESTART_NOTE,
-           "API attempt allowance": prompt.API_ATTEMPT_NOTE,
+           "API attempt allowance": prompt.API_ATTEMPT_NOTE, "continuation note": prompt.continuation_texts(),
            "research system prompt": SYSTEM_PROMPT, "summary system prompt": SUMMARY_SYSTEM_PROMPT,
            "temporary folder's location": tempfile.gettempdir()}
     if ((cfg.get("orchestration") or {}).get("enabled")
@@ -240,6 +245,7 @@ def start(cfg: dict, fake_scripts=None, out=print, pause_after: int | None = Non
     path = run_config.run_path(cfg)
     if (path / "run.json").exists():
         raise RuntimeError(f"{path} is a run already: resume it, or give the config another run_id")
+    cfg = continuation.prepare(cfg)  # a run that goes on from an earlier one: its price and sample from that run
     model = load_model(cfg["model"])
     model.network(cfg["network"])
     control_cfg = global_baseline.preflight(cfg) if global_baseline.needs_validation(cfg) else None
@@ -269,7 +275,7 @@ def start(cfg: dict, fake_scripts=None, out=print, pause_after: int | None = Non
     elif (cfg.get("orchestration") or {}).get("enabled"):
         first_prompt = prompt.build_multi(cfg, model, 0, "lead", "Plan the regional investigations.", "", [])
     else:
-        first_prompt = prompt.build(cfg, model, 1, [], itself["parts"]["model_ops"], verifier.enumerated)
+        first_prompt = prompt.build(cfg, model, continuation.first_round(cfg), [], itself["parts"]["model_ops"], verifier.enumerated)
     hygiene.check({"prompt": first_prompt, **agent_surface(cfg, model, sb.mode)}, forbidden_strings(cfg, model))
     if global_baseline.enabled(cfg):
         from . import multi_agent
@@ -309,6 +315,14 @@ def start(cfg: dict, fake_scripts=None, out=print, pause_after: int | None = Non
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
         + (f"every one of {verifier.n_inputs():,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
+    d = continuation.derived(cfg)
+    if d:
+        lk = d["locked"]
+        log(f"going on from {d['from']}: its locked entry {lk['carried_as']} saves {lk['saved']:.4f} and is wrong on "
+            f"{lk['errors']:.5f} of all inputs; alpha {d['alpha_before']:g} -> {d['alpha']:g}, "
+            + (f"{d['sample_before']:,} -> {d['sample']:,} inputs per scoring; " if d["sampled"] else "")
+            + (f"its rounds are in the prompt and this run starts at round {d['first_round']}" if d["runs"]
+               else "a control: none of its rounds are in the prompt"), continuation=d)
     if (cfg.get("orchestration") or {}).get("enabled"):
         mode = research_modes.mode(cfg)
         log(f"workflow mode: {mode}; " + {"trained": "trained research only; no baseline search",
@@ -381,20 +395,22 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
         return multi_agent.drive(path, fake_scripts=fake_scripts, out=out, budget_usd=budget_usd, pause_after=pause_after)
     backend = make(cfg, log=log, fake_scripts=fake_scripts)
     forbidden = forbidden_strings(cfg, model)
+    # A run that goes on from earlier rounds shows them at its own price and numbers its rounds after them.
+    earlier, first = continuation.earlier_rounds(cfg), continuation.first_round(cfg)
     while True:
         done = completed(path)
         why = stop_reason(done, cfg)
-        if why is None and not backend.available(len(done)):
+        if why is None and not backend.available(first - 1 + len(done)):
             why = "the backend has no answer for another round"
         # A spent budget ends the rounds; a round that was under way runs first, and ends at once with what it
         # submitted, so that its submissions are kept.
-        if why is None and hasattr(backend, "exhausted") and not (path / f"round_{len(done) + 1:03d}").exists():
+        if why is None and hasattr(backend, "exhausted") and not (path / f"round_{first + len(done):03d}").exists():
             why = backend.exhausted(path)
         if why is not None:
             log(f"the rounds end: {why}", ended=why)
             break
         try:
-            run_round(path, cfg, model, len(done) + 1, done, backend, forbidden, run, log)
+            run_round(path, cfg, model, first + len(done), earlier + done, backend, forbidden, run, log)
         except StopRun as exc:
             log(f"stopped: {exc}. Continue with: python -m level1.loop resume --run {path}", stopped=str(exc))
             return "stopped"

@@ -25,6 +25,19 @@ prompt_template: round_v1
 rounds_max: 5
 patience: 2                           # stop after this many rounds in a row that did not raise the best reward
 
+# Going on from a finished single-agent run on the same network (level1/continuation.py, docs/CONTINUATION.md):
+# the price of a wrong answer is raised from that run's locked entry, so that its remaining errors are worth fixing.
+continue_from: null                   # the run_id of the earlier run, in runs_dir; null: a run of its own
+continuation:
+  memory: true                        # the earlier rounds' table, notes and entries in the prompt; false: a control
+  alpha: null                         # null: margin * (c_max - C) / e of the earlier locked entry, rounded up,
+                                      # never below the earlier price; a number: that price
+  c_max: 1.0                          # removing all its errors pays even if it raises its cost to this (1: the network)
+  margin: 2.0
+  inputs_per_alpha: 200               # a sample grows to this many inputs per unit of alpha, so that an entry right on
+                                      # every input drawn is charged about 3.84 / 200 = 0.02 for those not drawn
+  max_sample_size: 1000000
+
 # Optional research lead, regional investigators and global integration. The original loop is the default.
 # In this mode rounds_max counts research cycles; API, Python, turn and time allowances are shared across roles.
 orchestration:

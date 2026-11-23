@@ -1,0 +1,7 @@
+# The control for rnn-b-detail.yaml: the same price, sample and two rounds, worked out from pilot-rnn-b in the same
+# way, but none of pilot-rnn-b's rounds, notes or entries in the prompt. Read against rnn-b-detail, it shows what
+# the memory of the earlier rounds is worth.
+extends: rnn-b-detail.yaml
+run_id: pilot-rnn-b-detail-control
+continuation:
+  memory: false

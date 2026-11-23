@@ -260,7 +260,57 @@ def build(path: Path) -> dict:
         "auth": cfg.get("auth", "login"),
         "spend": budget.state(path, cfg["budget"]) if cfg.get("auth") == "api_key" else None,
         "baseline": _baseline(path),
+        "continuation": _continuation(cfg, lock),
     }
+
+
+def _continuation(cfg: dict, lock: dict | None) -> dict | None:
+    """For a run that went on from an earlier one: where its price came from, and how much of the earlier locked
+    entry's saving the entry locked here keeps if it is right on every input measured (level1/continuation.py)."""
+    from . import continuation
+
+    d = continuation.derived(cfg)
+    if not d:
+        return None
+    measured = ((lock.get("measured_again") or lock) if lock and lock.get("locked") else None)
+    parts = measured["parts"] if measured else None
+    here = rewards.terms(parts, parts["fidelity"]) if parts and parts.get("fidelity") is not None else None
+    return {**d, "options": {k: v for k, v in continuation.options(cfg).items() if k != "derived"},
+            "locked_here": None if here is None else {"saved": here["saved"], "errors": here["errors"],
+                                                      "measured_again": bool(lock.get("measured_again"))},
+            "understood_share": continuation.understood_share(cfg, parts)}
+
+
+def continuation_lines(rep: dict) -> list:
+    c = rep.get("continuation")
+    if not c:
+        return []
+    lk, o = c["locked"], c["options"]
+    out = ["## Going on from an earlier run", ""]
+    out.append(f"This run went on from `{c['from']}`" + (f" after its round {c['first_round'] - 1}, with the earlier rounds' table "
+               "(rewards recomputed at the new price), notes and entries in its prompt." if c["runs"] else
+               ", as a control: the same price and sample, without any of the earlier rounds in its prompt."))
+    out += ["",
+            f"- The entry `{c['from']}` locked ({lk['carried_as']}), " + ("measured again on fresh inputs" if lk["measured_again"] else "on every input")
+            + f": saves {lk['saved']:.4f} of the forward passes and is wrong on {lk['errors']:.6f} of all inputs "
+            f"(cost over all inputs C = {lk['cost_over_all_inputs']:.4f}).",
+            f"- Price: alpha = {c['alpha_before']:g} before, {c['alpha']:g} here"
+            + (f" = {o['margin']:g} x ({o['c_max']:g} - {lk['cost_over_all_inputs']:.4f}) / {lk['errors']:.6f}, rounded up"
+               + ("" if c["alpha"] == c["alpha_by_rule"] else ", or the earlier price where that is higher") if o.get("alpha") is None
+               else ", as configured") + "."]
+    if c["sampled"]:
+        out.append(f"- Sample: {c['sample_before']:,} inputs per scoring before, {c['sample']:,} here.")
+    here = c.get("locked_here")
+    if here is None:
+        out.append("- Understood share: none, as nothing was locked here.")
+    elif c.get("understood_share") is not None:
+        out.append(f"- Understood share: the entry locked here is right on every input it was measured on"
+                   + (" again" if here["measured_again"] else "") + f" and keeps {100 * c['understood_share']:.1f}% of the "
+                   f"earlier entry's saving: (1 - C_ex) / (1 - C) = {here['saved']:.4f} / {lk['saved']:.4f}.")
+    else:
+        out.append(f"- Understood share: none, as the entry locked here is wrong on {here['errors']:.6f} of all inputs "
+                   + ("measured again" if here["measured_again"] else "") + f"; it saves {here['saved']:.4f}.")
+    return out + [""]
 
 
 def _baseline(path: Path) -> dict:
@@ -414,6 +464,7 @@ def markdown(rep: dict) -> str:
             f"- Sandbox: {rep['sandbox']['mode']}" + _sandbox_note(rep) + ".",
             f"- The rounds ended: {rep['ended'] or 'not yet'}.", ""]
 
+    out += continuation_lines(rep)
     if rep.get("scope"):
         scope = rep["scope"]
         out += ["## Assigned input domain", "",

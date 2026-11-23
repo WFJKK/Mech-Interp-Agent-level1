@@ -11,6 +11,7 @@ from pathlib import Path
 import copy
 import json
 import re
+import textwrap
 
 from . import rewards
 from .util import REPO_ROOT
@@ -129,6 +130,62 @@ inside the entry, and every shortcut has to hold for any weights: a rule that ho
 network makes the entry fail on the others."""
 
 
+# A run that goes on from an earlier one with the earlier rounds in its prompt (level1/continuation.py) says what
+# changed, in these paragraphs, filled from the run's config. Every other run's prompt has nothing here.
+CONTINUATION_HEADING = "## These rounds go on from earlier ones"
+CONTINUATION_NOTE = (
+    "The earlier rounds on this network were scored with {prices}. The entry locked after round {last} "
+    "({carried_as}), {measured}, has coverage {coverage:.4f}, fidelity {fidelity:.5f} and cost {cost:.4f}: it saves "
+    "{saved:.4f} of the forward passes and is wrong on {errors:.6f} of all inputs. From round {first} on, the aim is "
+    "to go into more detail on what the earlier rounds did not understand: the inputs on which their entries "
+    "disagree with the network, why the network answers as it does there, and how to predict that cheaply.",
+    "To make that count, a wrong answer is now charged at alpha = {alpha:g} forward passes. {rule} At the new price "
+    "the entry locked after round {last} scores {reward_now:.4f}. {exact}",
+    "The rewards of the earlier rounds under \"Earlier rounds\" are recomputed at the new price from what was "
+    "measured then. Their notes were written at the earlier prices, so a fix they judged not worth its cost may be "
+    "worth it now. Their scored entries are in `entries` as before.",
+)
+CONTINUATION_RULE = ("That is {margin:g} times what makes removing all of that entry's errors worth it even if "
+                     "that cost {allowed:.4f} of its saving{whole}, rounded up and never below the earlier price: "
+                     "{margin:g} x {allowed:.4f} / {errors:.6f}.")
+CONTINUATION_FIXED = "That price is set for these rounds."
+CONTINUATION_SAMPLED = ("An entry right on every input of its sample is charged only {charge:.3f} at full coverage "
+                        "for the inputs not drawn, so among such entries the saving decides. To keep that charge "
+                        "small, each submission is now scored on {sample:,} inputs drawn afresh ({sample_before:,} "
+                        "before).")
+CONTINUATION_EVERY = "An entry right on every input loses nothing to errors, so among such entries the saving decides."
+
+
+def continuation_texts() -> str:
+    """The continuation note's parts as written, for the hygiene check of the agent's surface."""
+    return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, CONTINUATION_RULE, CONTINUATION_FIXED,
+                         CONTINUATION_SAMPLED, CONTINUATION_EVERY))
+
+
+def continuation_note(cfg: dict) -> str:
+    """What a run that goes on from earlier rounds tells its agent; empty for any other run."""
+    from . import continuation
+
+    d = continuation.derived(cfg)
+    if not d or not d["runs"]:
+        return ""
+    o, lk = continuation.options(cfg), d["locked"]
+    c_max = float(o["c_max"])
+    allowed = c_max - lk["cost_over_all_inputs"]
+    rule = (CONTINUATION_RULE.format(margin=float(o["margin"]), allowed=allowed, whole=" (all of it)" if c_max == 1 else "",
+                                     errors=lk["errors"])
+            if o.get("alpha") is None else CONTINUATION_FIXED)
+    exact = (CONTINUATION_SAMPLED.format(charge=d["exact_charge"], sample=d["sample"], sample_before=d["sample_before"])
+             if d["sampled"] else CONTINUATION_EVERY)
+    fields = {"prices": continuation.price_history(d), "last": d["first_round"] - 1, "first": d["first_round"],
+              "carried_as": lk["carried_as"], "measured": "measured again on fresh inputs" if lk["measured_again"] else "on every input",
+              "coverage": lk["coverage"], "fidelity": lk["fidelity"], "cost": lk["cost"], "saved": lk["saved"],
+              "errors": lk["errors"], "alpha": d["alpha"], "rule": rule, "reward_now": lk["reward_now"], "exact": exact}
+    paragraphs = [textwrap.fill(p.format(**fields), width=100, break_long_words=False, break_on_hyphens=False)
+                  for p in CONTINUATION_NOTE]
+    return "\n\n" + "\n\n".join([CONTINUATION_HEADING, *paragraphs])
+
+
 def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumerated: bool) -> str:
     if cfg["verifier"].get("scope") is not None:
         return build_multi(cfg, model, round_no - 1, "regional", "Improve the interpretation on the assigned input domain.",
@@ -137,8 +194,11 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
     sizes = ", ".join(f"{k} = {v}" for k, v in model.sizes.items()) + f", outputs: {model.config['n_outputs']}"
     inputs_note = (f"every input of the data set ({model.n_total:,} inputs)" if enumerated else
                    f"{int(cfg['verifier']['sample_size']):,} inputs drawn afresh from the data set for each submission")
+    from .continuation import first_round
+
     fields = {
-        "ROUND": round_no, "ROUNDS_MAX": cfg["rounds_max"], "MODEL_SOURCE": model.source().strip(), "SIZES": sizes,
+        "ROUND": round_no, "ROUNDS_MAX": first_round(cfg) - 1 + int(cfg["rounds_max"]), "MODEL_SOURCE": model.source().strip(),
+        "SIZES": sizes,
         "DATA_SET": model.data_set_text(), "MODEL_OPS": f"{model_ops:,}", "ENTRY_DOC": ENTRY_DOC.read_text().strip(),
         "INPUTS_NOTE": inputs_note, "SAMPLE_NOTE": "" if enumerated else SAMPLE_NOTE,
         "REWARD_FORMULA": rewards.formula(cfg["reward"]), "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
@@ -146,6 +206,7 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
         "MAX_CONST": cfg["entry"]["max_const_scalars"], "VERIFIER_SECONDS": f"{float(cfg['verifier']['time_limit_s']):g}",
         "HISTORY": history(rounds), "EXACT_NOTE": EXACT_NOTE if cfg.get("exact_on_any_weights") else "",
+        "CONTINUATION_NOTE": continuation_note(cfg),
     }
     text = template
     for k, v in fields.items():

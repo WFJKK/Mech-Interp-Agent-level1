@@ -1,0 +1,12 @@
+# Two more rounds on rnn-b-s0 after the pilot run pilot-rnn-b (config/pilot/rnn-b.yaml), at a higher price for a
+# wrong answer, so that what its five rounds left unexplained counts (level1/continuation.py,
+# docs/CONTINUATION.md). The price and the sample are worked out when the run starts, from the entry pilot-rnn-b
+# locked, as measured again on fresh inputs: alpha = 2 * (1 - C) / e, rounded up, and 200 * alpha inputs per
+# scoring. The agent sees the five earlier rounds (their rewards recomputed at the new price), their notes and their
+# entries, and a note on what changed and what these rounds are for. Everything else is as in pilot-rnn-b.
+#   rnn-b-detail-smoke.yaml     one short round first, to see that it all works on this machine
+#   rnn-b-detail-control.yaml   the same price, sample and rounds without the earlier rounds: what the memory is worth
+extends: rnn-b.yaml
+run_id: pilot-rnn-b-detail
+continue_from: pilot-rnn-b
+rounds_max: 2

@@ -58,6 +58,7 @@ def load(path, overrides: dict | None = None) -> dict:
         if isinstance(cfg[key], bool) or not isinstance(cfg[key], int) or cfg[key] < 1:
             raise ConfigError("rounds_max and patience must be positive whole numbers")
     check_orchestration(cfg)
+    check_continuation(cfg)
     try:
         rewards.check(cfg["reward"])
     except ValueError as exc:
@@ -75,6 +76,33 @@ def load(path, overrides: dict | None = None) -> dict:
         if errors:
             raise ConfigError("; ".join(errors))
     return cfg
+
+
+def check_continuation(cfg: dict) -> None:
+    """continue_from names an earlier run; the continuation block sets how the new price and sample follow from it
+    (level1/continuation.py). What the run's start works out is not the config's to set."""
+    earlier = cfg.get("continue_from")
+    if earlier is not None and (not isinstance(earlier, str) or not earlier or "/" in earlier or earlier in (".", "..")):
+        raise ConfigError("continue_from must be the run_id of a run in runs_dir, or null")
+    opts = cfg.get("continuation")
+    defaults = read_yaml(DEFAULTS)["continuation"]
+    if not isinstance(opts, dict) or sorted(set(opts) - set(defaults)):
+        raise ConfigError(f"continuation must be a mapping with the options {sorted(defaults)}")
+    if not isinstance(opts["memory"], bool):
+        raise ConfigError("continuation.memory must be true or false")
+
+    def number(key, low, high=math.inf, low_open=True):
+        v = opts[key]
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v > high or v < low or (low_open and v == low):
+            raise ConfigError(f"continuation.{key} must be a number {'above' if low_open else 'from'} {low:g}"
+                              + ("" if high == math.inf else f" up to {high:g}"))
+
+    number("c_max", 0.0, 1.0)
+    number("margin", 1.0, low_open=False)
+    number("inputs_per_alpha", 0.0)
+    number("max_sample_size", 1.0, low_open=False)
+    if opts["alpha"] is not None:
+        number("alpha", 0.0)
 
 
 def check_orchestration(cfg: dict) -> None:
