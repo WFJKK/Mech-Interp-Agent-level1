@@ -14,6 +14,7 @@
                                   rule, next to its earlier record; the runs it serves are read against the new one
     run and resume also take --with-baseline: the run's baseline goes alongside, in a second process
     python -m level1.loop rescore --run <run folder> --name r_alpha --alpha 1    the records under another reward
+    python -m level1.loop rescore --run <run folder> --pool     what a run made before pooling would have locked pooled
                                   (--param KEY=VALUE for any other parameter of a reward)
 
 A run folder (outside the repository, <runs_dir>/<run_id>):
@@ -679,6 +680,44 @@ def run_with_baseline(cfg: dict, fake_scripts=None, out=print, resume: Path | No
     return ended
 
 
+def rescore_pooled(path: Path, out=print) -> dict:
+    """What a run made before pooling (level1/pooling.py) would have locked had it pooled each entry's samples:
+    every entry submitted more than once, its pooled reward under the run's own reward, and the lock. Nothing is
+    written; the records stay as they are."""
+    path = Path(path)
+    run = read_json(path / "run.json")
+    cfg = run["config"]
+    if (cfg.get("orchestration") or {}).get("enabled"):
+        from . import multi_agent
+
+        return multi_agent.rescore_pooled(path, out=out)
+    subs = scored(completed(path))
+    if run.get("enumerated") or cfg["verifier"].get("sample_seed") is not None:
+        out("every scoring of this run used the same inputs: there is nothing to pool")
+        return {"run": run["run_id"], "pooled": [], "lock_then": None, "lock_pooled": None}
+    pooled = pooling.repooled(subs, cfg["reward"])
+    standing = pooling.standing(pooled)
+    rows = []
+    for s in standing:
+        if s.get("pooled"):
+            members = [t for t in subs if t["entry_sha256"] == s["entry_sha256"]]
+            rows.append({"entry": s["carried_as"], "submissions": [t["carried_as"] for t in members],
+                         "rewards_then": [t["reward"] for t in members], "pooled": s["reward"], "samples": s["pooled"]["samples"]})
+            out(f"{s['carried_as']:8s} {', '.join(rows[-1]['submissions'])}: best then {max(rows[-1]['rewards_then']):.4f}, "
+                f"pooled over {s['pooled']['samples']} samples {s['reward']:.4f}")
+    lock = read_json(path / "lock.json") if (path / "lock.json").is_file() else {}
+    best = max(standing, key=lambda s: s["reward"], default=None)
+    then = {"entry": lock.get("carried_as"), "reward": lock.get("reward"),
+            "fresh": (lock.get("measured_again") or {}).get("reward")} if lock.get("locked") else None
+    now = None if best is None else {"entry": best["carried_as"], "entry_sha256": best["entry_sha256"], "reward": best["reward"],
+                                     "same_entry": bool(then) and best["entry_sha256"] == lock.get("entry_sha256")}
+    if then:
+        out(f"locked then: {then['entry']} at {then['reward']:.4f}" + (f" (on a fresh sample {then['fresh']:.4f})" if then["fresh"] is not None else ""))
+    if now:
+        out(f"pooled, the lock would be {now['entry']} at {now['reward']:.4f}" + (" (the same entry)" if now["same_entry"] else ""))
+    return {"run": run["run_id"], "pooled": rows, "lock_then": then, "lock_pooled": now}
+
+
 def rescore(path: Path, reward_cfg: dict, out=print) -> list:
     """Every scored submission (and the seed check) under another reward, from the parts on record."""
     path = Path(path)
@@ -747,6 +786,8 @@ def main(argv=None) -> int:
     b.add_argument("--accept-changes", action="store_true", help="go on with a stopped baseline run although the code changed")
     c = sub.add_parser("rescore")
     c.add_argument("--run", required=True)
+    c.add_argument("--pool", action="store_true", help="what a run made before pooling would have locked had it pooled "
+                   "each entry's samples (level1/pooling.py); nothing is written")
     c.add_argument("--name", default="r_alpha", help="a reward of level1/rewards.py")
     c.add_argument("--alpha", type=float)
     c.add_argument("--penalty", type=float)
@@ -808,7 +849,10 @@ def main(argv=None) -> int:
                 cfg = {**cfg, "backend": "fake"}
             run_baseline(cfg, fake_scripts=args.fake, prices=prices, accept_changes=args.accept_changes, budget_usd=args.budget_usd)
             return 0
-        rescore(Path(args.run), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty))
+        if args.pool:
+            rescore_pooled(Path(args.run))
+        else:
+            rescore(Path(args.run), run_config.reward_from_args(args.name, args.param, args.alpha, args.penalty))
         return 0
     except (run_config.ConfigError, hygiene.HygieneError, BackendError, ModelError, SandboxError, RuntimeError, FileNotFoundError) as exc:
         print(f"error: {exc}", file=sys.stderr)  # what the user needs to read, without a traceback around it

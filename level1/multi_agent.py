@@ -1217,6 +1217,42 @@ def _write_baseline_report(path: Path, result: dict) -> None:
     atomic_write(path / "report.md", "\n".join(lines))
 
 
+def rescore_pooled(path: Path, out=print) -> dict:
+    """What a team run made before pooling would have selected had it pooled each entry's samples on each domain
+    (level1/pooling.py): its entries submitted more than once, their pooled development rewards, and the global
+    choice. Nothing is written."""
+    path = Path(path)
+    run = read_json(path / "run.json")
+    cfg = run["config"]
+    if _development_seed(cfg) is not None or run.get("enumerated"):
+        out("every development scoring of this run used the same inputs: there is nothing to pool")
+        return {"run": run["run_id"], "pooled": [], "lock_then": None, "lock_pooled": None}
+    archive = read_archive(path)
+    own = sorted((c for c in archive["candidates"] if not c.get("from_run") and c["submitted"].get("status") == "scored"),
+                 key=lambda c: (c["session_id"], c["submitted"]["submission"]))
+    receipts = [{**c["submitted"], "carried_as": c["id"]} for c in own]
+    standing = pooling.standing(pooling.repooled(receipts, cfg["reward"]))
+    rows = []
+    for r in standing:
+        if r.get("pooled"):
+            members = [t for t in receipts if t["entry_sha256"] == r["entry_sha256"] and pooling.domain(t) == pooling.domain(r)]
+            rows.append({"entry": r["carried_as"], "domain": pooling.domain(r), "submissions": [t["carried_as"] for t in members],
+                         "rewards_then": [t["reward"] for t in members], "pooled": r["reward"], "samples": r["pooled"]["samples"]})
+            out(f"{r['carried_as']:8s} on {pooling.domain(r)}: {', '.join(rows[-1]['submissions'])}: best then "
+                f"{max(rows[-1]['rewards_then']):.4f}, pooled over {r['pooled']['samples']} samples {r['reward']:.4f}")
+    lock = read_json(path / "lock.json") if (path / "lock.json").is_file() else {}
+    best = max((r for r in standing if pooling.domain(r) == "all"), key=lambda r: r["reward"], default=None)
+    then = {"entry": lock.get("candidate_id"), "reward": lock.get("reward"),
+            "fresh": (lock.get("measured_again") or {}).get("reward")} if lock.get("locked") else None
+    now = None if best is None else {"entry": best["carried_as"], "entry_sha256": best["entry_sha256"], "reward": best["reward"],
+                                     "same_entry": bool(then) and best["entry_sha256"] == lock.get("entry_sha256")}
+    if then:
+        out(f"locked then: {then['entry']} at {then['reward']:.4f}" + (f" (on a fresh sample {then['fresh']:.4f})" if then["fresh"] is not None else ""))
+    if now:
+        out(f"pooled, the global choice would be {now['entry']} at {now['reward']:.4f}" + (" (the same entry)" if now["same_entry"] else ""))
+    return {"run": run["run_id"], "pooled": rows, "lock_then": then, "lock_pooled": now}
+
+
 def rescore(path, reward_cfg: dict, out=print) -> list[dict]:
     """Read-only development rescoring, with independent selections per scope."""
     archive = read_archive(Path(path))

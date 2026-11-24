@@ -1050,6 +1050,7 @@ it and reports (`docs/SANDBOX.md`):
     python -m level1.loop finish --run <run folder>              # lock, seed check and report again; scores
                                                                  # any submission not yet on the second network
     python -m level1.loop rescore --run <run folder> --alpha 1   # the records under another reward
+    python -m level1.loop rescore --run <run folder> --pool      # an old run's lock had it pooled resubmissions
     python -m level1.report --model models/lin-a --alpha 1       # the reference entries under a reward
     python -m level1.report --model models/lin-a-1to4 --sample-size 16384
     python -m level1.verifier --model models/lin-a --network lin-a-s0 --entry entry.json

@@ -85,3 +85,35 @@ def test_a_run_made_before_pooling_does_not_pool(tmp_path, rnn_a):
     old_cfg = {k: v for k, v in cfg.items() if k != "pool_samples"}
     old = Session.create(tmp_path / "old", old_cfg, old_cfg["network"], tmp_path, draws=[])
     assert new.state["pool_samples"] is True and "pool_samples" not in old.state
+
+
+def test_a_run_made_before_pooling_can_be_read_as_if_it_had_pooled(tmp_path):
+    """rescore --pool: an old run that submitted one entry three times, read as a run that pools; nothing written."""
+    import hashlib
+
+    from level1 import loop, run_config
+    from level1.util import read_json, write_json
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    calls = [{"tool": "run_python", "args": {"code": "g = graph()\nsave_entry('shifted', g.entry(interpretation="
+                                                    "(g.tokens() + g.const([0.05, 0.0])).argmin()))"}}]
+    calls += [{"tool": "submit_entry", "args": {"name": "shifted", "claimed_fidelity": 0.99}}] * 3
+    write_json(scripts / "01.json", {"calls": calls, "response": "## What the network does\nThrice."})
+    cfg = run_config.load("config/pilot/rnn-a-smoke.yaml", run_config.merge(
+        {"backend": "fake", "sandbox": "process", "runs_dir": str(tmp_path), "run_id": "old", "rounds_max": 1,
+         "pool_samples": False, "verifier": {"sample_size": 500, "reference_samples": 2},
+         "session": {"python_calls": 3, "submissions": 3}}, {}))
+    path = loop.start(cfg, fake_scripts=scripts, out=lambda *_: None)
+    subs = read_json(path / "round_001/round.json")["submissions"]
+    assert not any(s.get("pooled") for s in subs)  # made without pooling
+    lock = read_json(path / "lock.json")
+    assert lock["reward"] == max(s["reward"] for s in subs)  # it took the luckiest of the three
+    before = hashlib.sha256(b"".join(f.read_bytes() for f in sorted(path.rglob("*.json")))).hexdigest()
+    res = loop.rescore_pooled(path, out=lambda *_: None)
+    assert hashlib.sha256(b"".join(f.read_bytes() for f in sorted(path.rglob("*.json")))).hexdigest() == before
+    expected = pooling.pooled(subs[2], [pooling.draw(subs[0]), pooling.draw(subs[1])], cfg["reward"])["reward"]
+    assert res["pooled"] == [{"entry": "r1s3", "submissions": ["r1s1", "r1s2", "r1s3"],
+                              "rewards_then": [s["reward"] for s in subs], "pooled": expected, "samples": 3}]
+    assert res["lock_then"]["reward"] == lock["reward"] and res["lock_pooled"] == {
+        "entry": "r1s3", "entry_sha256": subs[0]["entry_sha256"], "reward": expected, "same_entry": True}

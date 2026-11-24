@@ -110,3 +110,16 @@ def standing(receipts: list[dict]) -> list[dict]:
     """The scored receipts that can be selected: each entry's latest, with its samples pooled."""
     gone = superseded(receipts)
     return [r for i, r in enumerate(receipts) if r.get("status") == "scored" and i not in gone]
+
+
+def repooled(receipts: list[dict], reward_cfg: dict) -> list[dict]:
+    """Records made without pooling, as a run that pools would have scored them: every scored receipt (in
+    submission order) with the earlier scorings of its entry on its domain taken into it. Read only."""
+    out, earlier = [], {}
+    for r in receipts:
+        if r.get("status") != "scored":
+            continue
+        seen = earlier.setdefault((r["entry_sha256"], domain(r)), [])
+        out.append(pooled(r, list(seen), reward_cfg))
+        seen.append(draw(r))
+    return out

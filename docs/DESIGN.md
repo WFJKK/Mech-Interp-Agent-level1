@@ -241,7 +241,9 @@ A session that was cut off keeps its budgets, its saved entries and its submissi
 again, the prompt ends with a note that says what is left and what was already submitted. If the
 code, the prompt or the model folder changed since the run began, `resume` refuses unless told
 `--accept-changes`, and the log records it. `finish` redoes the lock, the seed check and the report
-from the records alone, and `rescore` prints the records under another reward.
+from the records alone, and `rescore` prints the records under another reward; `rescore --pool`
+prints what a run made before pooling would have locked had it pooled each entry's samples
+(`level1/pooling.py`), writing nothing.
 
 ## 8. Adding a model
 
