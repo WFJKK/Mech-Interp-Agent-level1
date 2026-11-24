@@ -171,7 +171,8 @@ def test_a_run_on_a_sampled_data_set(finished_1to4, model4):
     s1, s2 = r1["submissions"][0], r2["submissions"][0]
     assert s1["inputs"]["mode"] == "sample" and s1["inputs"]["seed"] != s2["inputs"]["seed"]
     assert 0.2 < s1["parts"]["coverage"] < 0.3 and s1["parts"]["fidelity_low"] < s1["parts"]["fidelity"] and 0.1 < s1["reward"] < 0.3
-    assert s2["reward"] > 0.6 and r2["improved"] and r1["notes"].startswith("## What the network does") and "## How you found it" in r1["notes"]
+    # one fresh sample of 1,500 inputs moves this reward by about 0.03 around 0.63: 0.5 is well clear of it and of s1
+    assert s2["reward"] > 0.5 and r2["improved"] and r1["notes"].startswith("## What the network does") and "## How you found it" in r1["notes"]
     out1 = (path / "round_001" / "session" / "python" / "001.txt").read_text()
     assert "inputs (1500, 4) forward operations 671 check sample tokens per input [1, 2, 3, 4]" in out1 and "True" in out1
 
