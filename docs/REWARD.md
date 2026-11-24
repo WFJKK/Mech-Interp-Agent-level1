@@ -96,6 +96,37 @@ gained. This is the claim-and-penalty form the levels were first described with.
 default because, with the verifier measuring every submission anyway, the claim adds nothing to the
 score that the measurement does not already give. The claims are recorded in every run either way.
 
+## 3b. `r_alpha_numbers`
+
+`r_alpha` less a price for what an entry stores:
+
+    reward = saved - alpha * errors - price * numbers
+
+Reading a number from a table costs one operation however long the table is, so `r_alpha` cannot
+tell an entry that stores what was observed of the network's outputs from one that computes its
+answers; only the limit on constants stood in the way. On ARC's challenge network the gains at
+alpha = 360 and at alpha = 30 came from fitted tables of more and more numbers, up to 491 of the
+512 allowed.
+Here every stored number has to earn its price.
+
+- `numbers` is what the entry stores beyond what the network's own definition stores: every number
+  in its constants and the length of every `arange`, each counted once per 4 significant decimal
+  digits it is written with and at least once (`lang.stored_numbers`). 0.25 counts once, 0.123456
+  twice, a full float five times. The verifier counts them for the entry and for the network's
+  definition and keeps both in the parts (`numbers`, `numbers_network`) when the reward asks.
+- What an entry computes from the weights is not counted here: it is charged as computation, in
+  the cost. So a table derived from the weights in the build is paid for by its operations, and a
+  table fitted outside the entry and written into it by its numbers.
+- The network itself stores nothing beyond its definition, so it scores what `r_alpha` gives it.
+- `price` (0.002 by default) is a dial like alpha: how much reward a stored number must earn. With
+  the single agent's entries on that network at alpha = 100: at 0.001 a table of 300 numbers no
+  longer pays and a fit of 50 does; at 0.005 a fit of 50 loses to a rule on two thresholds.
+
+A run can go on from rounds scored with `r_alpha` under this reward (`docs/CONTINUATION.md`): the
+earlier entries are counted from their files and their rewards recomputed, and the note says what
+changed. `python -m level1.loop rescore --run <run> --name r_alpha_numbers --alpha 100 --param
+price=0.002` reads a finished run under it without running anything.
+
 ## 4. The pilots' numbers
 
 ### On pairs (`models/lin-a`, every input checked)
@@ -227,6 +258,10 @@ construction. A hole found later gets its test there first.
 | Send one entry again and again and keep the luckiest scoring | an entry submitted again is scored on all of its samples together and stands as that one submission (`level1/pooling.py`); the locked entry is also scored once more on a fresh sample, and the report gives that number |
 | Send one entry again and again to narrow the confidence bound | a pooled entry keeps the bound of one sample |
 | Send trivially different copies of one entry, each scored on its own sample | not closed: they count as different entries; the fresh scoring of the locked entry in the report shows what luck added |
+| Store what was observed of the network in a table, read at one operation | the limit on numbers in constants; under `r_alpha_numbers` every stored number is charged |
+| Pack several numbers into the digits of one long number (`r_alpha_numbers`) | a number counts once per 4 significant digits |
+| Get a number without a constant, as the length of an `arange` (`r_alpha_numbers`) | the length of an `arange` is counted like a stored number |
+| Get small whole numbers from shapes and counts of slices (`r_alpha_numbers`) | not closed: a few nodes for each number, so bounded by the limit on nodes |
 | Convert for free what takes a computation | casts are charged (`tests/test_lang.py`) |
 | Claim more than is measured | the default reward ignores the claim; `r_alpha_claimed` penalises it |
 | Sit just inside a threshold or a budget | there is none |

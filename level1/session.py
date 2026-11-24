@@ -113,6 +113,8 @@ def make_result(weights, info, extra):
         x, answers, ops = network_outputs(scope)
         parts = regions.measure(entry, weights, n_ctx, x, answers, ops, how=cache[key]["how"],
                                 scope=cache[key]["scope"], verifier_cfg=cfg, limits=extra["limits"])
+        if rewards.needs_numbers(extra["reward"]):  # a reward that prices what an entry stores
+            parts["numbers"], parts["numbers_network"] = lv1.stored_numbers(entry), lv1.stored_numbers(reference_entry())
         parts["reward"] = rewards.compute(parts, extra["reward"])["reward"]
         if cache[key]["scope"] is not None:
             parts["scope"] = cache[key]["scope"]

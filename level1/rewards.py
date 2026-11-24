@@ -69,7 +69,31 @@ def r_alpha_claimed(parts: dict, alpha: float = 10.0, penalty: float = 2.0, clai
     return {"reward": t["saved"] - float(alpha) * t["errors"], "saved": t["saved"], "errors": t["errors"], "fidelity_used": credited}
 
 
-REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed}
+NUMBER_DIGITS = 4  # as lang.NUMBER_DIGITS, which does the counting (this file stands alone in the sandbox)
+
+
+def r_alpha_numbers(parts: dict, alpha: float = 10.0, price: float = 0.002, lower_bound: bool = True, **_) -> dict:
+    """r_alpha less a price for every number the entry stores beyond those of the network's own definition:
+    saved - alpha * errors - price * numbers.
+
+    Reading a number from a table costs one operation however long the table, so r_alpha cannot tell an entry
+    that stores what was observed of the network's outputs from one that computes its answers. Here every stored
+    number has to earn its price. The verifier counts them (lang.stored_numbers: the constants and the lengths of
+    aranges, once per NUMBER_DIGITS significant digits) for the entry and for the network's own definition, and
+    keeps both in the parts. The network itself stores nothing beyond its definition, so it still scores 0."""
+    if parts.get("numbers") is None or parts.get("numbers_network") is None:
+        raise ValueError("r_alpha_numbers needs the entry's stored numbers in the parts (numbers, numbers_network)")
+    out = r_alpha(parts, alpha, lower_bound)
+    extra = max(0, int(parts["numbers"]) - int(parts["numbers_network"]))
+    return {**out, "reward": out["reward"] - float(price) * extra, "numbers": extra}
+
+
+REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed, "r_alpha_numbers": r_alpha_numbers}
+NEEDS_NUMBERS = {"r_alpha_numbers"}  # rewards for which the verifier counts an entry's stored numbers into the parts
+
+
+def needs_numbers(cfg: dict | None) -> bool:
+    return (cfg or {}).get("name", "r_alpha") in NEEDS_NUMBERS
 
 # The reward as the agent's prompt states it, and one or two sentences on how to read it. Parameters in
 # braces are filled from the run config (or the function's defaults).
@@ -79,6 +103,8 @@ FORMULAS = {
         "reward = coverage * [ (1 - cost) - alpha * (1 - credited) ],   alpha = {alpha:g}\n"
         "    credited = the fidelity you claimed, if the measured fidelity is at least that;\n"
         "               otherwise measured - {penalty:g} * (claimed - measured)"),
+    "r_alpha_numbers": ("reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ] - price * numbers,"
+                        "   alpha = {alpha:g}, price = {price:g}"),
 }
 EXPLANATIONS = {
     "r_alpha": (
@@ -92,6 +118,16 @@ EXPLANATIONS = {
         "of wrong answers is taken from the fidelity you claimed when the measurement confirms it. A claim\n"
         "above what is measured costs more than it could have gained, and a claim below it gives credit\n"
         "away: claim what you expect to be measured. Coverage turns the result into a share of the data set."),
+    "r_alpha_numbers": (
+        "Read it for one input of the region: using the entry there in place of the network saves\n"
+        "(1 - cost) of a forward pass, and with probability (1 - fidelity) its answer is wrong, which is\n"
+        "charged at {alpha:g} forward passes. Coverage turns that into a share of the data set; the inputs\n"
+        "outside the region are left to the network and earn nothing.\n"
+        "numbers is what the entry stores: every number in its constants and the length of every arange,\n"
+        "beyond those of the network's own definition, each counted once per {digits} significant digits it\n"
+        "is written with (0.25 counts once, 0.123456 twice). Each is charged {price:g}, so a number is worth\n"
+        "storing only if it earns more than that. What the entry computes from the weights is not counted\n"
+        "here; it is charged as computation, in the cost."),
 }
 
 
@@ -143,7 +179,7 @@ def formula(cfg: dict) -> str:
 def explanation(cfg: dict) -> str:
     """How to read the formula, for the agent's prompt."""
     name, params = _filled(cfg)
-    return EXPLANATIONS[name].format(**params)
+    return EXPLANATIONS[name].format(**params, digits=NUMBER_DIGITS)
 
 
 def compute(parts: dict, cfg: dict, claimed: float | None = None) -> dict:

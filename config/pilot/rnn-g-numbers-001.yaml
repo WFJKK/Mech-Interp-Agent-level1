@@ -1,0 +1,20 @@
+# The single agent on ARC's 432-weight challenge network (models/rnn-g, rnn-g-s0), going on from its nine rounds
+# (pilot-rnn-g, pilot-rnn-g-detail, pilot-rnn-g-detail-2) under the reward that prices what an entry stores:
+#     reward = saved - alpha * errors - price * numbers          (rewards.r_alpha_numbers, docs/REWARD.md)
+# with price = 0.001 for every number in an entry's constants beyond those of the network's own definition. Under
+# r_alpha a number read from a table costs one operation however long the table, and this agent's locked entry held
+# 338 numbers, almost all of them tables fitted to the network's sampled outputs. One of three runs that differ
+# only in the price (0.001, 0.002, 0.005): the price says how much a stored number has to earn to be kept.
+#
+# alpha = 100, where an entry with few numbers sits at about 99.9% fidelity over all inputs. The room for numbers
+# stays at 512, so that the price and not the limit decides. Three rounds with patience three; at most $60.
+extends: rnn-g-detail-2.yaml
+run_id: pilot-rnn-g-numbers-001
+continue_from: pilot-rnn-g-detail-2
+rounds_max: 3
+patience: 3
+continuation:
+  alpha: 100
+reward:
+  name: r_alpha_numbers
+  price: 0.001

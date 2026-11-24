@@ -416,3 +416,57 @@ def test_submitting_one_entry_again_does_not_narrow_its_bound(model4):
         draws.append(pooling.draw(new))
     assert again["pooled"]["samples"] == 5 and again["parts"]["fidelity"] == once["parts"]["fidelity"] == 1.0
     assert again["reward"] == pytest.approx(once["reward"], abs=1e-12) and once["reward"] < 0
+
+
+# ---------------------------------------------------------------- a reward that prices stored numbers
+
+PRICED = {"reward": {"name": "r_alpha_numbers", "alpha": 10.0, "price": 0.01}}
+
+
+def test_a_stored_number_has_to_earn_its_price(model, nets):
+    """Under r_alpha_numbers a table read at one operation is no longer free: every number stored beyond those of
+    the network's own definition is charged, and the network itself, which stores no more than that, scores as
+    under r_alpha."""
+    w = nets["lin-a-s0"][0]
+    plain, priced = Verifier(model, "lin-a-s0", CFG), Verifier(model, "lin-a-s0", PRICED)
+    g = Graph(w, 2)
+    guess = lang.maximum(g.token(0), g.token(1))
+    table = g.const([float(i) / 8 for i in range(64)])  # 64 stored numbers, read at one operation per input
+    with_table = g.entry(predict=lang.where(table[g.token(0)] < 100.0, guess, guess))
+    a, b = plain.score(with_table), priced.score(with_table)
+    stored = lang.stored_numbers(with_table)
+    assert stored == 65 and b["parts"]["numbers"] == 65 and "numbers" not in a["parts"]
+    network = b["parts"]["numbers_network"]
+    assert b["reward"] == pytest.approx(a["reward"] - 0.01 * (65 - network)) and b["reward_detail"]["numbers"] == 65 - network
+    g2 = Graph(w, 2)
+    itself = g2.entry(predict=model.module().reference(g2, lang))
+    assert priced.score(itself)["reward"] == pytest.approx(plain.score(itself)["reward"])
+    with pytest.raises(ValueError, match="needs the entry's stored numbers"):  # never scored without the count
+        rewards.compute(a["parts"], PRICED["reward"])
+
+
+def test_numbers_packed_into_the_digits_of_one_are_counted_as_what_they_are(model, nets):
+    """Two thresholds written as one long number and taken apart again by arithmetic store what two numbers store,
+    and are counted so: a number counts once per four significant digits."""
+    w = nets["lin-a-s0"][0]
+    g = Graph(w, 2)
+    two = g.entry(predict=lang.where(g.token(0) > g.const(1234), g.token(0), lang.where(g.token(1) > g.const(5678), g.token(1), g.token(0))))
+    g = Graph(w, 2)
+    packed = g.const(12345678)
+    first, second = packed // g.const(10000), packed % g.const(10000)
+    one = g.entry(predict=lang.where(g.token(0) > first, g.token(0), lang.where(g.token(1) > second, g.token(1), g.token(0))))
+    assert lang.stored_numbers(two) == 2 and lang.stored_numbers(one) == 2 + 1  # the two halves, and the 10000 once
+    g = Graph(w, 2)
+    listed = g.const([0.5, 0.25, 0.123456, 0.1234567890123])[g.token(1) % g.const(4)]  # 1, 1, 2 and 4, and the 4 once
+    assert lang.stored_numbers(g.entry(predict=lang.where(listed < g.const(0.3), g.token(0), g.token(1)))) == 1 + 1 + 2 + 4 + 1 + 1
+
+
+def test_a_number_made_by_the_length_of_an_arange_is_counted(model, nets):
+    """arange(n) holds n without a constant: its length is counted like a stored number, so a number is not had
+    for nothing by measuring a list."""
+    w = nets["lin-a-s0"][0]
+    g = Graph(w, 2)
+    by_list = g.entry(predict=lang.where(g.token(0) > g.arange(1235).max(), g.token(0), g.token(1)))
+    g = Graph(w, 2)
+    by_const = g.entry(predict=lang.where(g.token(0) > g.const(1234), g.token(0), g.token(1)))
+    assert lang.stored_numbers(by_list) == lang.stored_numbers(by_const) == 1

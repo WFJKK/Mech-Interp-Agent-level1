@@ -187,6 +187,13 @@ CONTINUATION_LIMITS_LOWER = ("Entries may now have up to {nodes} nodes and {cons
                              "({nodes_before} and {consts_before} in the earlier rounds).{fewer} An earlier entry that is "
                              "over these limits is still in `entries`, to read and to take parts from, but it cannot be "
                              "measured, saved or submitted as it is.")
+# A run that goes on under a reward that prices stored numbers (rewards.r_alpha_numbers), after rounds scored without.
+CONTINUATION_NUMBERS = ("The reward now also charges for what an entry stores: every number in its constants and the "
+                        "length of every arange, beyond those of the network's own definition, at {price:g} each, a "
+                        "number counting once per {digits} significant digits it is written with. A number is worth "
+                        "storing only if it earns more than that. Many of the numbers in the earlier rounds' entries "
+                        "do not, and the rewards below show what those entries score now. What an entry computes from "
+                        "the weights is not charged this way: it is counted as computation, in the cost.")
 CONTINUATION_FEWER_NUMBERS = (" With so few numbers an entry cannot store what was observed of the network's outputs: "
                               "what it needs beyond a few constants it has to compute from the weights, inside the "
                               "entry, where that work is counted.")
@@ -280,7 +287,7 @@ def continuation_texts() -> str:
     """The continuation note's parts as written, for the hygiene check of the agent's surface."""
     return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, *CONTINUATION_NOTE_LOWER, CONTINUATION_RULE,
                          CONTINUATION_FIXED, CONTINUATION_SAMPLED, CONTINUATION_SAMPLED_SAME, CONTINUATION_EVERY,
-                         CONTINUATION_LIMITS, CONTINUATION_LIMITS_LOWER, CONTINUATION_FEWER_NUMBERS,
+                         CONTINUATION_LIMITS, CONTINUATION_LIMITS_LOWER, CONTINUATION_FEWER_NUMBERS, CONTINUATION_NUMBERS,
                          TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE,
                          *TEAM_CONTINUATION_NOTE_LOWER, *TEAM_EARLIER_WORK.values(),
                          TEAM_EARLIER_DRAFTS, TEAM_CONTINUATION_FIXED, TEAM_CONTINUATION_SAMPLED,
@@ -335,6 +342,10 @@ def continuation_note(cfg: dict) -> str:
         fields.update(nodes=now["max_nodes"], consts=now["max_const_scalars"], nodes_before=before["max_nodes"],
                       consts_before=before["max_const_scalars"],
                       fewer=CONTINUATION_FEWER_NUMBERS if int(now["max_const_scalars"]) < int(before["max_const_scalars"]) else "")
+    if rewards.needs_numbers(cfg["reward"]) and d.get("reward_before") != cfg["reward"].get("name"):
+        notes.insert(2, CONTINUATION_NUMBERS)  # after the price of a wrong answer, the price of a stored number
+        fields.update(price=float({**rewards.parameters(cfg["reward"]["name"]), **cfg["reward"]}["price"]),
+                      digits=rewards.NUMBER_DIGITS)
     paragraphs = [textwrap.fill(p.format(**fields), width=100, break_long_words=False, break_on_hyphens=False)
                   for p in notes]
     return "\n\n" + "\n\n".join([TEAM_CONTINUATION_HEADING if team else CONTINUATION_HEADING, *paragraphs])

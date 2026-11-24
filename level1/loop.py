@@ -727,14 +727,21 @@ def rescore(path: Path, reward_cfg: dict, out=print) -> list:
 
         return multi_agent.rescore(path, reward_cfg, out=out)
     rows = []
+
+    def parts_of(receipt: dict, entry) -> dict:
+        """The receipt's parts, with the entry's stored numbers when the reward prices them and the run did not."""
+        if rewards.needs_numbers(reward_cfg) and receipt["parts"].get("numbers") is None:
+            return {**receipt["parts"], **continuation._numbers(cfg, entry())}
+        return receipt["parts"]
+
     for s in scored(completed(path)):
-        r = rewards.compute(s["parts"], reward_cfg, s.get("claimed_fidelity"))
+        r = rewards.compute(parts_of(s, lambda: entry_of(path, s)), reward_cfg, s.get("claimed_fidelity"))
         rows.append({"entry": s["carried_as"], "name": s["name"], "recorded": s["reward"], "rescored": r["reward"]})
     seed = path / "seed_check.json"
     if seed.is_file():
         rec = read_json(seed)
         if rec["status"] == "scored":
-            r = rewards.compute(rec["parts"], reward_cfg, rec.get("claimed_fidelity"))
+            r = rewards.compute(parts_of(rec, lambda: read_json(path / "locked_entry.json")), reward_cfg, rec.get("claimed_fidelity"))
             rows.append({"entry": "locked entry on the second network", "name": "", "recorded": rec["reward"], "rescored": r["reward"]})
     for row in rows:
         out(f"{row['entry']:38s} {row['name'] or '':24s} recorded {row['recorded']:.4f}   {reward_cfg} -> {row['rescored']:.4f}")

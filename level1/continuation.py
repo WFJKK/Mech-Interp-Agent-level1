@@ -97,8 +97,12 @@ def prepare(cfg: dict) -> dict:
             raise RuntimeError(f"{earlier_id} ran on {key} {ecfg[key]}, and this run is on {cfg[key]}")
     if run.get("prices") != lang.PRICES:
         raise RuntimeError(f"{earlier_id} was measured under {run.get('prices')}, and this code prices under {lang.PRICES}")
-    if ecfg["reward"].get("name") != cfg["reward"].get("name") or "alpha" not in ecfg["reward"]:
+    names = (ecfg["reward"].get("name"), cfg["reward"].get("name"))
+    # the same reward, or r_alpha with a price for stored numbers on top: the earlier receipts can be scored under it
+    if (names[0] != names[1] and names != ("r_alpha", "r_alpha_numbers")) or "alpha" not in ecfg["reward"]:
         raise RuntimeError(f"{earlier_id} was scored with another reward, or one without a price for a wrong answer")
+    if team(cfg) and rewards.needs_numbers(cfg["reward"]):
+        raise RuntimeError("going on under a reward that prices stored numbers is for a single agent's run so far")
     if not (earlier / "lock.json").is_file():
         raise RuntimeError(f"{earlier_id} is not finished: it has no lock.json")
     lock = read_json(earlier / "lock.json")
@@ -125,6 +129,8 @@ def prepare(cfg: dict) -> dict:
     alpha = float(opts["alpha"]) if opts.get("alpha") is not None else float(max(alpha_before, by_rule))
     out = copy.deepcopy(cfg)
     out["reward"] = {**cfg["reward"], "alpha": alpha}
+    if rewards.needs_numbers(out["reward"]) and parts.get("numbers") is None:  # the earlier run did not count them
+        parts = {**parts, **_numbers(cfg, read_json(earlier / "locked_entry.json"))}
     sampled = not run["enumerated"]
     sample_before = int(ecfg["verifier"]["sample_size"])
     sample = sample_before
@@ -155,7 +161,7 @@ def prepare(cfg: dict) -> dict:
                    "coverage": parts["coverage"], "fidelity": parts["fidelity"], "cost": rewards.cost_of(parts),
                    "saved": saved, "errors": errors, "cost_over_all_inputs": cost, "reward_then": measured["reward"],
                    "reward_now": rewards.compute(parts, out["reward"], claimed)["reward"]},
-        "alpha_before": alpha_before, "alpha_by_rule": by_rule, "alpha": alpha,
+        "alpha_before": alpha_before, "alpha_by_rule": by_rule, "alpha": alpha, "reward_before": names[0],
         "limits_before": {k: ecfg.get("entry", {}).get(k) for k in ("max_nodes", "max_const_scalars")},
         "sampled": sampled, "sample_before": sample_before, "sample": sample,
         "exact_charge": alpha * (1.0 - lang.wilson_lower(sample, sample)) if sampled else 0.0,
@@ -188,9 +194,28 @@ def earlier_rounds(cfg: dict) -> list:
                 s["from_run"] = str(where)
                 if s["status"] == "scored":
                     s["reward_recorded"] = s["reward"]
+                    if rewards.needs_numbers(cfg["reward"]) and s["parts"].get("numbers") is None:
+                        entry = read_json(where / f"round_{s['round']:03d}" / "session" / "submissions"
+                                          / f"{s['submission']:03d}" / "entry.json")
+                        s["parts"] = {**s["parts"], **_numbers(cfg, entry)}
                     s["reward"] = rewards.compute(s["parts"], cfg["reward"], s.get("claimed_fidelity"))["reward"]
             out.append(rd)
     return out
+
+
+_NETWORK_NUMBERS: dict = {}
+
+
+def _numbers(cfg: dict, entry: dict) -> dict:
+    """What a reward that prices stored numbers needs of an entry scored before such a reward: the numbers it
+    stores and those of the network's own definition, as the verifier counts them (lang.stored_numbers)."""
+    key = (str(cfg["model"]), str(cfg["network"]))
+    if key not in _NETWORK_NUMBERS:
+        from .networks import load_model
+
+        model = load_model(cfg["model"])
+        _NETWORK_NUMBERS[key] = lang.stored_numbers(model.reference_entry(model.load_weights(cfg["network"])))
+    return {"numbers": lang.stored_numbers(entry), "numbers_network": _NETWORK_NUMBERS[key]}
 
 
 def understood_share(cfg: dict, parts: dict | None) -> float | None:

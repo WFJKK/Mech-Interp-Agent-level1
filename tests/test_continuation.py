@@ -282,3 +282,62 @@ def test_the_rnn_g_few_numbers_configs_go_on_with_room_for_64_numbers():
     for key in ("model", "network", "seed_check", "verifier", "session", "agent_model", "effort", "budget"):
         assert few[key] == last[key]
     assert smoke["budget"]["run_usd"] < few["budget"]["run_usd"]
+
+
+def test_going_on_under_a_reward_that_prices_stored_numbers(earlier):
+    """From rounds scored with r_alpha to r_alpha_numbers: the earlier rounds' rewards are recomputed with their
+    entries' stored numbers counted, the note says what changed, and this run's receipts carry the counts."""
+    where, _, path = earlier
+    before = folder_hash(path)
+    later_round = {"calls": [
+        {"tool": "run_python", "args": {"code": "m = measure(entries['r1s1'])\nprint('stored', m['numbers'], m['numbers_network'])\n"
+                                                "g = graph()\nsave_entry('half', g.entry(interpretation=g.tokens().argmin(), "
+                                                "region=g.token(0) > 0.0))"}},
+        {"tool": "submit_entry", "args": {"name": "half", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+    ], "response": LATER["response"]}
+    plays = scripts(where / "scripts-priced", EARLIER, later_round)
+    cfg = config(where, "priced", continue_from="early", reward={"name": "r_alpha_numbers", "price": 0.01})
+    later = loop.start(cfg, fake_scripts=plays, out=lambda *_: None)
+    assert folder_hash(path) == before  # the earlier run is read, never written
+    run = read_json(later / "run.json")["config"]
+    d = run["continuation"]["derived"]
+    assert run["reward"]["name"] == "r_alpha_numbers" and run["reward"]["price"] == 0.01 and d["reward_before"] == "r_alpha"
+    text = (later / "round_002" / "prompt.md").read_text()
+    flat = " ".join(text.split())
+    assert "- price * numbers" in text and f"alpha = {run['reward']['alpha']:g}, price = 0.01" in text
+    assert "The reward now also charges for what an entry stores" in flat and "at 0.01 each" in flat
+    # the earlier entry stores two numbers (0.05 and 0), the network's own definition fewer: it is charged for the rest
+    old = read_json(path / "round_001" / "round.json")["submissions"][0]
+    shown = continuation.earlier_rounds(run)[0]["submissions"][0]
+    network = shown["parts"]["numbers_network"]
+    assert shown["parts"]["numbers"] == 2 > network
+    plain = rewards.compute(old["parts"], {"name": "r_alpha", "alpha": run["reward"]["alpha"]})["reward"]
+    assert shown["reward"] == pytest.approx(plain - 0.01 * (2 - network))
+    again = read_json(path / "lock.json")["measured_again"]["parts"]  # the locked entry's fresh measurement, priced the same way
+    assert d["locked"]["reward_now"] == pytest.approx(
+        rewards.compute(again, {"name": "r_alpha", "alpha": run["reward"]["alpha"]})["reward"] - 0.01 * (2 - network))
+    assert f"stored 2 {network}" in (later / "round_002" / "session" / "python" / "001.txt").read_text()
+    # this run's receipt carries the counts, and its reward is r_alpha's less the price of what it stores
+    new = loop.completed(later)[0]["submissions"][0]
+    assert new["parts"]["numbers"] == lang.stored_numbers(read_json(later / "round_002/session/submissions/001/entry.json"))
+    again = rewards.compute(new["parts"], {"name": "r_alpha", "alpha": run["reward"]["alpha"]})["reward"]
+    assert new["reward"] == pytest.approx(again - 0.01 * max(0, new["parts"]["numbers"] - network))
+    lock = read_json(later / "lock.json")
+    assert lock["locked"] and lock["measured_again"]["parts"]["numbers"] == new["parts"]["numbers"] and (later / "report.md").is_file()
+    # an old run's records can be read under the new reward without running anything
+    rows = loop.rescore(path, {"name": "r_alpha_numbers", "alpha": 10.0, "price": 0.01}, out=lambda *_: None)
+    assert rows[0]["rescored"] == pytest.approx(rows[0]["recorded"] - 0.01 * (2 - network)) and folder_hash(path) == before
+    with pytest.raises(RuntimeError, match="another reward"):  # not from any reward to any other
+        continuation.prepare(config(where, "claimed", continue_from="early", reward={"name": "r_alpha_claimed"}))
+
+
+def test_the_rnn_g_numbers_configs_differ_only_in_the_price_of_a_stored_number():
+    last = run_config.load("config/pilot/rnn-g-detail-2.yaml")
+    runs = [run_config.load(f"config/pilot/rnn-g-numbers-{tag}.yaml") for tag in ("001", "002", "005")]
+    # the price of a wrong answer comes from continuation.alpha, as in every run that goes on
+    assert [c["reward"] for c in runs] == [{"name": "r_alpha_numbers", "price": p} for p in (0.001, 0.002, 0.005)]
+    assert len({c["run_id"] for c in runs}) == 3 and all(c["continue_from"] == last["run_id"] for c in runs)
+    for c in runs:
+        assert c["continuation"]["alpha"] == 100 and c["rounds_max"] == c["patience"] == 3 and c["entry"] == last["entry"]
+        for key in ("model", "network", "seed_check", "verifier", "session", "agent_model", "effort", "budget"):
+            assert c[key] == last[key]

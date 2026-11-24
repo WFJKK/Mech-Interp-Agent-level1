@@ -395,6 +395,42 @@ def check_structure(entry, max_nodes: int = MAX_NODES, max_const_scalars: int = 
     return {"nodes": len(nodes), "const_scalars": scalars}
 
 
+NUMBER_DIGITS = 4  # a stored number counts once per this many significant decimal digits it is written with
+
+
+def _digits(v) -> int:
+    """The significant decimal digits one number is written with (a truth value has one)."""
+    if isinstance(v, bool):
+        return 1
+    if isinstance(v, int):
+        text = str(abs(v))
+    else:
+        text = repr(abs(float(v))).split("e")[0].replace(".", "")
+    return max(1, len(text.strip("0")))
+
+
+def stored_numbers(entry: dict) -> int:
+    """How many numbers an entry stores, for a reward that prices them (rewards.r_alpha_numbers): every number in
+    its constants and the length of every arange, each counted once per NUMBER_DIGITS significant decimal digits
+    it is written with, and at least once. So several numbers packed into the digits of one long number count as
+    what they are, and a list of whole numbers made by arange counts by the one number that makes it. What an
+    entry computes from the weights is not counted: it is charged as computation."""
+    check_structure(entry)
+    total = 0
+    for node in entry["nodes"]:
+        if node["op"] == "const":
+            todo = [node["value"]]
+            while todo:
+                v = todo.pop()
+                if isinstance(v, list):
+                    todo.extend(v)
+                else:
+                    total += -(-_digits(v) // NUMBER_DIGITS)
+        elif node["op"] == "arange":
+            total += -(-_digits(node["n"]) // NUMBER_DIGITS)
+    return total
+
+
 def canonical(entry: dict) -> str:
     return json.dumps(entry, sort_keys=True, separators=(",", ":"), allow_nan=False)
 

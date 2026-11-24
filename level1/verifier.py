@@ -133,6 +133,8 @@ class Verifier:
             receipt["verifier_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
+        if rewards.needs_numbers(self.reward_cfg):  # a reward that prices what an entry stores
+            parts["numbers"], parts["numbers_network"] = lang.stored_numbers(entry), lang.stored_numbers(self.reference)
         r = rewards.compute(parts, self.reward_cfg, claimed)
         receipt.update(status="scored", parts=parts, reward=r["reward"],
                        reward_detail={k: v for k, v in r.items() if k != "reward"})

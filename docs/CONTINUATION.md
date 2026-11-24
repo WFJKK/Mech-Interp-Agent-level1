@@ -160,5 +160,17 @@ python -m level1.loop run --config config/pilot/rnn-g-few-numbers-smoke.yaml --a
 python -m level1.loop run --config config/pilot/rnn-g-few-numbers.yaml --auth api_key
 ```
 
+The same start under the reward that prices stored numbers (`r_alpha_numbers`, `docs/REWARD.md`), at
+three prices, with the room for numbers back at 512 so that the price decides:
+
+```bash
+python -m level1.loop run --config config/pilot/rnn-g-numbers-001.yaml --auth api_key
+python -m level1.loop run --config config/pilot/rnn-g-numbers-002.yaml --auth api_key
+python -m level1.loop run --config config/pilot/rnn-g-numbers-005.yaml --auth api_key
+```
+
+A single agent's run can go on from rounds scored with `r_alpha` under `r_alpha_numbers`; a team's
+cannot yet.
+
 The earlier run must be finished (it has a `lock.json`) and in the same `runs_dir`, on the same model
 and network, under the same prices and reward.
