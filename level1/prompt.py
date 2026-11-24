@@ -198,6 +198,44 @@ TEAM_CONTINUATION_NOTE = (
     "this phase on can be selected, so an earlier program counts only if it is submitted again. The notes of the "
     "earlier research were written at the earlier prices, so a fix it judged not worth its cost may be worth it now.",
 )
+# At a price below the earlier one the reason runs the other way: an input that the earlier programs get right only by
+# doing much of the network's own computation no longer earns every error that computing it avoids, so a cheaper
+# account that is right on most such inputs can beat computing them. These paragraphs then take the place of the
+# first three above (one researcher's rounds, then a team's).
+CONTINUATION_NOTE_LOWER = (
+    "The earlier rounds on this network were scored with {prices}. The entry locked after round {last} "
+    "({carried_as}), {measured}, has coverage {coverage:.4f}, fidelity {fidelity:.5f} and cost {cost:.4f}: it saves "
+    "{saved:.4f} of the forward passes and is wrong on {errors:.6f} of all inputs. From round {first} on, the aim is "
+    "to go into more detail on what the earlier rounds did not understand: the inputs on which their entries "
+    "disagree with the network or are right only by doing much of the network's own computation, why the network "
+    "answers as it does there, and how to predict that cheaply.",
+    "To make that count, a wrong answer is now charged at alpha = {alpha:g} forward passes, less than before. A cheaper "
+    "prediction that takes the place of computing pays wherever the share of those inputs it gets wrong stays below "
+    "what it saves per input, in forward passes, divided by alpha, so an account that is right on most of them counts "
+    "even where it is not exact. {rule} At this price the entry locked after round {last} scores {reward_now:.4f}. "
+    "{exact}",
+    "The rewards of the earlier rounds under \"Earlier rounds\" are recomputed at this price from what was "
+    "measured then. Their notes were written at the earlier prices, so an approximation they judged too often wrong "
+    "may be worth it now. Their scored entries are in `entries` as before.",
+)
+TEAM_CONTINUATION_NOTE_LOWER = (
+    "{earlier_work} The program for the whole network locked after it ({carried_as}), {measured}, has coverage "
+    "{coverage:.4f}, fidelity {fidelity:.5f} and cost {cost:.4f}: it saves {saved:.4f} of the forward passes and is "
+    "wrong on {errors:.6f} of all inputs. From this phase on, the aim is to go into more detail on what the earlier "
+    "research did not understand: the inputs on which its programs disagree with the network or are right only by "
+    "doing much of the network's own computation, why the network answers as it does there, and how to predict that "
+    "cheaply.",
+    "To make that count, a wrong answer is now charged at alpha = {alpha:g} forward passes, less than before. A cheaper "
+    "prediction that takes the place of computing pays wherever the share of those inputs it gets wrong stays below "
+    "what it saves per input, in forward passes, divided by alpha, so an account that is right on most of them counts "
+    "even where it is not exact. {rule} At this price the program locked after the earlier research scores "
+    "{reward_now:.4f}. {exact}",
+    "The checked archive below lists the earlier programs under \"Earlier research\", with rewards recomputed at this "
+    "price from what was measured then; they are in `entries` under those names{drafts}. Only programs submitted from "
+    "this phase on can be selected, so an earlier program counts only if it is submitted again. The notes of the "
+    "earlier research were written at the earlier prices, so an approximation it judged too often wrong may be worth "
+    "it now.",
+)
 TEAM_EARLIER_WORK = {
     "team": "The earlier research phases on this network were scored with {prices}.",
     "alone": "Before this team, one researcher worked on this network alone, in rounds scored with {prices}.",
@@ -227,9 +265,10 @@ TEAM_SINGLE_ROUND = "Round {round}, by one researcher working alone:"
 
 def continuation_texts() -> str:
     """The continuation note's parts as written, for the hygiene check of the agent's surface."""
-    return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, CONTINUATION_RULE, CONTINUATION_FIXED,
-                         CONTINUATION_SAMPLED, CONTINUATION_SAMPLED_SAME, CONTINUATION_EVERY, CONTINUATION_LIMITS,
-                         TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE, *TEAM_EARLIER_WORK.values(),
+    return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, *CONTINUATION_NOTE_LOWER, CONTINUATION_RULE,
+                         CONTINUATION_FIXED, CONTINUATION_SAMPLED, CONTINUATION_SAMPLED_SAME, CONTINUATION_EVERY,
+                         CONTINUATION_LIMITS, TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE,
+                         *TEAM_CONTINUATION_NOTE_LOWER, *TEAM_EARLIER_WORK.values(),
                          TEAM_EARLIER_DRAFTS, TEAM_CONTINUATION_FIXED, TEAM_CONTINUATION_SAMPLED,
                          TEAM_CONTINUATION_SAMPLED_SAME, TEAM_CONTINUATION_DRAWS, TEAM_CONTINUATION_LIMITS,
                          TEAM_EARLIER_ARCHIVE, TEAM_EARLIER_NOTES, TEAM_LATER_NOTES, TEAM_SINGLE_ROUND))
@@ -269,7 +308,9 @@ def continuation_note(cfg: dict) -> str:
         prices, who = continuation.team_price_history(d)
         fields.update(earlier_work=TEAM_EARLIER_WORK[who].format(prices=prices),
                       drafts="" if who == "alone" else TEAM_EARLIER_DRAFTS)
-    notes = list(TEAM_CONTINUATION_NOTE if team else CONTINUATION_NOTE)
+    lower = float(d["alpha"]) < float(d.get("alpha_before", d["alpha"]))  # a price set below the earlier one
+    notes = list((TEAM_CONTINUATION_NOTE_LOWER if lower else TEAM_CONTINUATION_NOTE) if team
+                 else (CONTINUATION_NOTE_LOWER if lower else CONTINUATION_NOTE))
     before = d.get("limits_before") or {}
     now = {k: cfg["entry"][k] for k in ("max_nodes", "max_const_scalars")}
     if all(before.get(k) is not None for k in now) and before != now:  # the earlier rounds' entries had other room

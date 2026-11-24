@@ -22,6 +22,22 @@ cost it adds. So that it pays even if the cost rises to `c_max` (1: a forward pa
 rounded up and never below the earlier price, with `margin` 2 so that an entry right on every input
 wins clearly rather than ties. A number in `continuation.alpha` sets the price instead.
 
+## At a lower price
+
+`continuation.alpha` can also be set below the earlier price. A higher price pays for being right by any
+means. On inputs that a program gets right only by doing much of the network's own computation, a
+cheaper prediction takes the place of that computation only where the share of those inputs it gets
+wrong stays below what it saves per input, in forward passes, divided by alpha. On ARC's challenge
+network the team's program computes a third of all inputs at about 0.63 of a forward pass each, so at
+alpha = 360 that bar is about 0.18%: an account of those inputs that is not exact earns nothing there,
+and the cheapest way to be right is to compute them more cheaply, which is what the team did. At
+alpha = 30 the bar is about 2.1%, so an account that is right on most of them counts. The note the
+agents get then says so (`prompt.CONTINUATION_NOTE_LOWER`, `prompt.TEAM_CONTINUATION_NOTE_LOWER`).
+
+Part of any gain at a lower price comes without new understanding, from computing fewer inputs and
+accepting more errors. To tell the two apart, compare with the earlier locked program with only its
+thresholds re-tuned to the new price.
+
 ## The sample
 
 On a sample, an entry right on every input drawn is still charged alpha times the gap below 1 of
@@ -110,6 +126,14 @@ alpha 360 and 72,000 inputs per scoring:
 ```bash
 python -m level1.loop run --config config/experiments/rnn-g-team-detail-smoke.yaml --auth api_key
 python -m level1.loop run --config config/experiments/rnn-g-team-detail.yaml --auth api_key
+```
+
+The same team going on from that run at a lower price, alpha = 30 (see "At a lower price"), two phases
+after a one-phase smoke run:
+
+```bash
+python -m level1.loop run --config config/experiments/rnn-g-team-alpha30-smoke.yaml --auth api_key
+python -m level1.loop run --config config/experiments/rnn-g-team-alpha30.yaml --auth api_key
 ```
 
 The earlier run must be finished (it has a `lock.json`) and in the same `runs_dir`, on the same model

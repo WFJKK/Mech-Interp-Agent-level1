@@ -1,0 +1,17 @@
+# A small first run of config/experiments/rnn-g-team-alpha30.yaml on the real backend: the same start, price and
+# sample, one research phase with two researchers, at most $15, to check that the team going on from
+# team-rnn-g-detail at a lower price works end to end before the two phases proper. It reads that run and writes
+# nothing there.
+extends: rnn-g-team-alpha30.yaml
+run_id: team-rnn-g-alpha30-smoke
+rounds_max: 1
+session:
+  python_calls: 25
+  submissions: 6
+  max_turns: 120
+  seconds: 7200
+budget:
+  run_usd: 15
+  round_usd: 10
+orchestration:
+  workers: 2

@@ -240,3 +240,19 @@ def test_the_second_rnn_g_continuation_keeps_the_price_and_doubles_the_room():
     assert second["continuation"]["alpha"] == 360 and second["rounds_max"] == 2 and smoke["rounds_max"] == 1
     assert second["entry"] == {"max_nodes": 800, "max_const_scalars": 512}
     assert second["verifier"] == first["verifier"] and second["session"] == first["session"]
+
+
+def test_a_price_set_below_the_earlier_one_says_why_an_approximate_account_can_now_count(earlier):
+    """A lower price makes computing an input worth less than the errors it avoids, so the note says that a cheaper
+    account right on most such inputs can beat computing them, in place of the reason a higher price has."""
+    where, _, _ = earlier
+    cfg = continuation.prepare(config(where, "cheaper", continue_from="early", continuation={"alpha": 5}))
+    d = cfg["continuation"]["derived"]
+    assert cfg["reward"]["alpha"] == d["alpha"] == 5 < d["alpha_before"] == 10
+    note = " ".join(prompt.continuation_note(cfg).split())
+    assert "a wrong answer is now charged at alpha = 5 forward passes, less than before" in note
+    assert "or are right only by doing much of the network's own computation" in note
+    assert "so an approximation they judged too often wrong may be worth it now" in note
+    assert "a fix they judged not worth its cost" not in note
+    dearer = " ".join(prompt.continuation_note(continuation.prepare(config(where, "dearer", continue_from="early"))).split())
+    assert "less than before" not in dearer and "so a fix they judged not worth its cost may be worth it now" in dearer

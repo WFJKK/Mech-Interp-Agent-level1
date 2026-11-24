@@ -347,3 +347,31 @@ def test_a_team_that_went_on_from_a_single_agent_can_itself_be_continued(tmp_pat
     rows = multi_agent._earlier_history(later, {"continuation": {"runs": d["runs"]}})
     assert [(r["from_run"], r["role"]) for r in rows] == [("alone", "single"), ("first-team", "lead"),
                                                           ("first-team", "regional"), ("first-team", "lead")]
+
+
+def test_a_team_at_a_price_below_the_earlier_one_is_told_why_an_approximate_account_can_now_count(earlier):
+    where, _, _ = earlier
+    cfg = continuation.prepare(config(where, "team-cheaper", continue_from="team-early", continuation={"alpha": 5}))
+    d = cfg["continuation"]["derived"]
+    assert cfg["reward"]["alpha"] == d["alpha"] == 5 < d["alpha_before"] == 10
+    note = " ".join(prompt.continuation_note(cfg).split())
+    assert "a wrong answer is now charged at alpha = 5 forward passes, less than before" in note
+    assert "its programs disagree with the network or are right only by doing much of the network's own computation" in note
+    assert "so an approximation it judged too often wrong may be worth it now" in note
+    assert "a fix it judged not worth its cost" not in note
+    dearer = " ".join(prompt.continuation_note(continuation.prepare(
+        config(where, "team-dearer", continue_from="team-early"))).split())
+    assert "less than before" not in dearer and "so a fix it judged not worth its cost may be worth it now" in dearer
+
+
+def test_the_rnn_g_alpha30_configs_go_on_from_the_team_at_a_lower_price():
+    earlier = run_config.load("config/experiments/rnn-g-team-detail.yaml")
+    team, smoke = (run_config.load(f"config/experiments/rnn-g-team-alpha30{s}.yaml") for s in ("", "-smoke"))
+    assert team["continue_from"] == smoke["continue_from"] == earlier["run_id"]
+    assert len({earlier["run_id"], team["run_id"], smoke["run_id"]}) == 3
+    assert team["continuation"]["alpha"] == smoke["continuation"]["alpha"] == 30 < earlier["continuation"]["alpha"]
+    assert team["rounds_max"] == 2 and smoke["rounds_max"] == 1
+    for key in ("model", "network", "seed_check", "entry", "verifier", "agent_model", "effort", "session", "budget",
+                "patience", "orchestration"):
+        assert team[key] == earlier[key]
+    assert smoke["budget"]["run_usd"] < team["budget"]["run_usd"] and smoke["orchestration"]["workers"] == 2

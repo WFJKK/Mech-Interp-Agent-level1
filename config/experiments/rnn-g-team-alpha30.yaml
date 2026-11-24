@@ -1,0 +1,20 @@
+# The team on ARC's 432-weight challenge network again (models/rnn-g, rnn-g-s0), going on from its own run
+# team-rnn-g-detail at a lower price: alpha = 30 instead of 360. At 360, a cheaper prediction takes the place of
+# computing an input only where it is wrong on fewer than about 0.18% of the inputs it takes over (what computing
+# them costs, about 0.63 of a forward pass, over 360), so the team made its exact computation of the hard inputs
+# cheaper rather than explain them. At 30 the bar is about 2.1%: an account that is right on most of the inputs
+# that are now computed counts even where it is not exact (docs/CONTINUATION.md, "At a lower price").
+#
+# Every session's prompt carries team-rnn-g-detail's archive and notes, and through them the single agent's, every
+# reward recomputed at alpha = 30, and the note for a lower price. Its sessions are numbered after the earlier
+# team's (a0012 on). The sample stays at 72,000 inputs drawn afresh for every submission, the room at 800 nodes and
+# 512 numbers, the team at a lead and four researchers.
+#
+# Two research phases, each capped at $45 as before; with the planning lead and the closing summary the run can
+# spend at most about $130 (team-rnn-g-detail spent $52 on two phases).
+extends: rnn-g-team-detail.yaml
+run_id: team-rnn-g-alpha30
+continue_from: team-rnn-g-detail
+continuation:
+  alpha: 30
+rounds_max: 2
