@@ -524,10 +524,20 @@ standard normal, and the reward uses the 95% lower bound of that share.
 | Brute force (the network itself) | both seeds | 1 | 100% | 1 | -0.0023 |
 | Pure second argmax | first seed | 1 | 94.84% | 0.014 | 0.436 |
 | Pure second argmax | second seed | 1 | 93.24% | 0.014 | 0.271 |
-| Agent on trained | first seed | 1 | 99.58% | 0.130 | 0.818 |
-| Agent on trained | second seed | 1 | 97.66% | 0.142 | 0.600 |
+| Agent on trained<sup>1</sup> | first seed | 1 | 99.57% | 0.132 | 0.813 |
+| Agent on trained<sup>1</sup> | second seed | 1 | 97.68% | 0.144 | 0.600 |
 | Agent on baseline | first seed | 1 | 100% | 0.743 | 0.255 |
 | Agent on baseline | second seed | 1 | 100% | 0.804 | 0.193 |
+
+<sup>1</sup> This is the entry locked when an entry submitted more than once is scored on all of its
+samples together (`level1/pooling.py`), so that submitting it again buys no second chance. The run
+was made before that and locked its last submission, the sixth of one entry, which its own sample
+put at 0.823; the entry's six samples together give 0.813, below the 0.821 this entry got on its one
+sample. The rows give this entry on the same fresh inputs as the run's lock, which scored 99.58%,
+0.130 and 0.818 there on the first seed and 97.66%, 0.142 and 0.600 on the second (the run's records
+keep that lock). The two entries are close: on 16 more samples of 16,384 inputs each, the same for
+both, this entry averages 0.814 on the first seed and 0.600 on the second, the run's lock 0.816 and
+0.598.
 
 #### RNN second argmax of 10 numbers, ARC's challenge network
 

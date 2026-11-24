@@ -249,9 +249,12 @@ or less, the lower bound switched off, a penalty of 0.
   pasted table out; a table computed from the weights is allowed and is charged to the build
   (0.7908 above). The pilot on 1 to 4 tokens cannot be enumerated within a run.
 - **Choosing the best of many submissions** on a sampled data set favours lucky samples a little,
-  even with the lower bound. The lock still picks by the recorded rewards; the second scoring of
-  the locked entry is the number to quote. Two scorings of one entry on 16,384 inputs typically
-  differ by a little under 0.01.
+  even with the lower bound. Pooling (`level1/pooling.py`) takes out the luck of submitting one
+  entry again, not that of choosing between entries. The lock still picks by the recorded rewards;
+  the second scoring of the locked entry is the number to quote. Two scorings of one entry on 16,384
+  inputs typically differ by a little under 0.01. Read as pooled, the run on rnn-c locks an entry
+  scored once at 0.821 over one whose six scorings together give 0.813; on 16 more samples of the
+  first network the two average 0.814 and 0.816.
 - **A sampled reward depends on the sample size**, through the lower bound and through the build.
   Compare runs made with the same `verifier.sample_size`.
 - **The agent learns the data set, not the training.** On the pilot on 1 to 4 tokens it is told how
