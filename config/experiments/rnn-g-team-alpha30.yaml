@@ -7,12 +7,12 @@
 #
 # Every session's prompt carries team-rnn-g-detail's archive and notes, and through them the single agent's, every
 # reward recomputed at alpha = 30, and the note for a lower price. Its sessions are numbered after the earlier
-# team's (a0012 on). The sample stays at 72,000 inputs drawn afresh for every submission and the room at 800 nodes
-# and 512 numbers. The team is a lead and six researchers instead of four, so that more accounts of those inputs
-# can be tried side by side: each researcher gets what each of the four got (37 Python calls, 2 submissions,
-# 81 turns, 49 minutes and $7.50 a phase), and the lead, which now reads six researchers' work, 112 calls,
-# 4 submissions, 243 turns, 146 minutes and $22.50. Six researchers' Python programs may use up to 4 GB each at
-# the same time.
+# team's, whose closing summary was a0012 (a0013 on). The sample stays at 72,000 inputs drawn afresh for every
+# submission and the room at 800 nodes and 512 numbers. The team is a lead and six researchers instead of four, so
+# that more accounts of those inputs can be tried side by side: each researcher gets what each of the four got (37
+# Python calls, 2 submissions, 81 turns, 49 minutes and $7.50 a phase), and the lead, which now reads six
+# researchers' work, 112 calls, 4 submissions, 243 turns, 146 minutes and $22.50. Six researchers' Python programs
+# may use up to 4 GB each at the same time.
 #
 # What to compare with: at alpha = 30 the earlier lock (a0011s1) scores 0.759. The same program with only its
 # thresholds re-tuned to that price (gate at -3.6 instead of -6.2, the near-tie bounds 0.03 and 0.02 instead of 0.05
