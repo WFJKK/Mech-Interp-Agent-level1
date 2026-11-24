@@ -470,3 +470,39 @@ def test_a_number_made_by_the_length_of_an_arange_is_counted(model, nets):
     g = Graph(w, 2)
     by_const = g.entry(predict=lang.where(g.token(0) > g.const(1234), g.token(0), g.token(1)))
     assert lang.stored_numbers(by_list) == lang.stored_numbers(by_const) == 1
+
+
+OPEN = "not closed yet: found by the agents of pilot-rnn-g-numbers-002 and -005 (docs/REWARD.md, the table of ways to game)"
+
+
+@pytest.mark.xfail(strict=True, reason=OPEN)
+def test_numbers_held_as_positions_in_a_counter_are_counted(model, nets):
+    """A table written as places in one long arange, a slice for each number, holds what the same table holds as a
+    constant, and must be counted so. The agent of pilot-rnn-g-numbers-002 held about 290 fitted numbers this
+    way and was charged for one."""
+    w = nets["lin-a-s0"][0]
+    values = [16.03, 2.72, 50.0, 33.97, 47.53, 46.85, 54.6, 45.4]
+    g = Graph(w, 2)
+    as_const = g.entry(predict=lang.where(g.const(values)[g.token(0) % g.const(8)] < 40.0, g.token(0), g.token(1)))
+    g = Graph(w, 2)
+    counter = g.arange(100000)
+    held = lang.cast(lang.stack([counter[int(round(v * 1000))] for v in values]), "float") / lang.cast(counter[1000], "float")
+    as_places = g.entry(predict=lang.where(held[g.token(0) % counter[8]] < lang.cast(counter[40], "float"), g.token(0), g.token(1)))
+    assert Graph.load(as_places, w, 2)[0] is not None and Graph.load(as_const, w, 2)[0] is not None
+    assert lang.stored_numbers(as_places) >= lang.stored_numbers(as_const)
+
+
+@pytest.mark.xfail(strict=True, reason=OPEN)
+def test_numbers_made_from_the_input_by_arithmetic_are_counted(model, nets):
+    """A token minus itself is 0 on every input, e to that power is 1, and sums and quotients of 1 give any
+    threshold: a number that is the same on every input and for every weight is a stored number, however it is
+    made. The agent of pilot-rnn-g-numbers-005 made its thresholds this way and was charged for none."""
+    w = nets["lin-a-s0"][0]
+    g = Graph(w, 2)
+    plain = g.entry(predict=lang.where(lang.cast(g.token(0), "float") > g.const(0.75), g.token(0), g.token(1)))
+    g = Graph(w, 2)
+    one = lang.exp(lang.cast(g.token(0) - g.token(0), "float"))
+    two = one + one
+    made = (two + one) / (two + two)                              # 0.75, with no constant
+    hidden = g.entry(predict=lang.where(lang.cast(g.token(0), "float") > made, g.token(0), g.token(1)))
+    assert lang.stored_numbers(plain) == 1 and lang.stored_numbers(hidden) >= lang.stored_numbers(plain)

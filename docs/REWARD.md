@@ -122,6 +122,13 @@ Here every stored number has to earn its price.
   the single agent's entries on that network at alpha = 100: at 0.001 a table of 300 numbers no
   longer pays and a fit of 50 does; at 0.005 a fit of 50 loses to a rule on two thresholds.
 
+The count as it stands can be sidestepped: it counts what is written in constants and in `arange`
+lengths, not what an entry holds. Two of the first three runs under this reward did so within two
+rounds (the table of ways to game below, and the two tests expected to fail in
+`tests/test_gaming.py`). Until the count is of the values an entry computes whatever the input and
+the weights, a reward under `r_alpha_numbers` says what the entry was charged, and the entry has to
+be read to see what it stores.
+
 A run can go on from rounds scored with `r_alpha` under this reward (`docs/CONTINUATION.md`): the
 earlier entries are counted from their files and their rewards recomputed, and the note says what
 changed. `python -m level1.loop rescore --run <run> --name r_alpha_numbers --alpha 100 --param
@@ -261,7 +268,9 @@ construction. A hole found later gets its test there first.
 | Store what was observed of the network in a table, read at one operation | the limit on numbers in constants; under `r_alpha_numbers` every stored number is charged |
 | Pack several numbers into the digits of one long number (`r_alpha_numbers`) | a number counts once per 4 significant digits |
 | Get a number without a constant, as the length of an `arange` (`r_alpha_numbers`) | the length of an `arange` is counted like a stored number |
-| Get small whole numbers from shapes and counts of slices (`r_alpha_numbers`) | not closed: a few nodes for each number, so bounded by the limit on nodes |
+| Hold numbers as places in one long `arange`, a slice for each (`r_alpha_numbers`) | not closed: the count sees one number. The agent of `pilot-rnn-g-numbers-002` held about 290 fitted numbers this way from its second round on, so its rewards from then on are those of an entry that pays nothing for them. One node for each number: the limit on nodes does not bound it |
+| Make numbers by arithmetic that gives the same value on every input, such as a token minus itself and e to that power (`r_alpha_numbers`) | not closed: the count sees none. The agent of `pilot-rnn-g-numbers-005` made about a dozen thresholds this way |
+| The same through the wiring: a `stack` of up to 64 nodes that each hold a digit (`r_alpha_numbers`) | not closed, and not seen in a run yet. A count of what is written cannot close it; a count of the values an entry computes whatever the input and the weights closes the three, but for values tied to one weight's value |
 | Convert for free what takes a computation | casts are charged (`tests/test_lang.py`) |
 | Claim more than is measured | the default reward ignores the claim; `r_alpha_claimed` penalises it |
 | Sit just inside a threshold or a budget | there is none |
