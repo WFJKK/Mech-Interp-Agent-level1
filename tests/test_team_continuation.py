@@ -296,10 +296,52 @@ def test_a_team_goes_on_from_a_single_agents_rounds(after_single):
     assert any("going on from alone" in line and "start at a0001" in line for line in lines)
 
 
-def test_a_team_keeps_at_least_the_entry_room_of_the_run_it_goes_on_from(after_single):
+def test_a_team_can_go_on_with_less_room_than_the_run_it_goes_on_from(after_single):
+    """With fewer nodes the note says that the earlier programs over the limit can only be read; the reason given
+    for fewer numbers is not said, as the numbers are as they were."""
     where, _, _, _ = after_single
-    with pytest.raises(RuntimeError, match="its limits cannot be lower"):
-        continuation.prepare(config(where, "team-cramped", continue_from="alone", entry={"max_nodes": 100}))
+    cfg = continuation.prepare(config(where, "team-cramped", continue_from="alone", entry={"max_nodes": 100}))
+    note = " ".join(prompt.continuation_note(cfg).split())
+    assert "Entries may now have up to 100 nodes and" in note and "With so few numbers" not in note
+    assert ("An earlier program that is over these limits is still in `entries`, to read and to take parts from, but "
+            "it cannot be measured, saved or submitted as it is.") in note
+    assert "so an idea that did not fit then may fit now" not in note
+
+
+def test_with_fewer_numbers_the_earlier_programs_over_the_limit_are_read_and_not_submitted(earlier):
+    """A team that goes on with room for one number in an entry's constants, where the earlier program holds two:
+    the earlier program is in `entries` to read, is not measured and is refused when submitted as it is; a program
+    within the limit is scored and locked; the earlier run is not written."""
+    where, _, path = earlier
+    before = folder_hash(path)
+    probe = {"calls": [
+        {"tool": "run_python", "args": {"code": (
+            "old = entries['a0002s1']\nprint('carried with', lv1.check_structure(old)['const_scalars'], 'numbers')\n"
+            "try:\n    measure(old)\nexcept Exception as exc:\n    print('not measured:', exc)\n"
+            "g = graph()\nprint('saved', save_entry('half', g.entry(interpretation=g.tokens().argmin(), "
+            "region=g.token(0) > 0.0)))")}},
+        {"tool": "submit_entry", "args": {"name": "a0002s1", "claimed_fidelity": 0.99}},
+        {"tool": "submit_entry", "args": {"name": "half", "claimed_fidelity": 1.0, "expected_fidelity_other": 1.0}},
+    ], "response": "## What the network does\nThe lowest number, where the first is positive." + NOTES.format(best="half")}
+    plays = scripts(where / "scripts-few", PLANNING, RESEARCHER, LEAD, PLANNING_AGAIN, probe, LEAD_AGAIN)
+    cfg = config(where, "team-few", continue_from="team-early", entry={"max_const_scalars": 1})
+    later = loop.start(cfg, fake_scripts=plays, out=lambda *_: None)
+    assert folder_hash(path) == before
+    state = read_json(later / "multi_agent/state.json")
+    session = later / state["sessions"]["a0005"]["directory"] / "session"
+    printed = (session / "python/001.txt").read_text()
+    assert "carried with 2 numbers" in printed and "not measured:" in printed and "limit of 1 numbers" in printed
+    refused, scored = (read_json(session / f"submissions/00{i}/receipt.json") for i in (1, 2))
+    assert refused["status"] == "refused" and "more than the limit of 1 numbers" in refused["reason"]
+    assert scored["status"] == "scored" and scored["size"]["const_scalars"] == 1
+    lock = read_json(later / "lock.json")
+    assert lock["locked"] and lock["candidate_id"] == "a0005s2"
+    flat = " ".join((later / state["sessions"]["a0004"]["directory"] / "prompt.md").read_text().split())
+    limits = read_json(path / "run.json")["config"]["entry"]
+    assert (f"Entries may now have up to {limits['max_nodes']} nodes and 1 numbers in their constants "
+            f"({limits['max_nodes']} and {limits['max_const_scalars']} in the earlier research). With so few numbers an "
+            "entry cannot store what was observed of the network's outputs") in flat
+    assert "but it cannot be measured, saved or submitted as it is." in flat
 
 
 def test_the_rnn_g_team_configs_go_on_from_the_single_agents_last_run():

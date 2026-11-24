@@ -38,6 +38,24 @@ Part of any gain at a lower price comes without new understanding, from computin
 accepting more errors. To tell the two apart, compare with the earlier locked program with only its
 thresholds re-tuned to the new price.
 
+## With less room
+
+A run that goes on can give entries less room than the earlier one: fewer nodes (`entry.max_nodes`)
+or fewer numbers in their constants (`entry.max_const_scalars`). Fewer numbers are the way to keep
+an entry from storing what was observed of the network's outputs. On ARC's challenge network the
+single agent's locked entry held 338 numbers and the team's 460, in both almost all of them tables
+fitted to millions of sampled outputs, which say where a rule fails and not why. With room for 64
+there is room for the exact computation of the network (41 numbers in the team's) and a few
+thresholds, and for no such table. What an entry needs beyond its constants it computes from the
+weights, in its build, where the work is counted.
+
+The earlier entries that are over the new limits are still carried in `entries`, to read and to
+take parts from; they cannot be measured, saved or submitted as they are, and the note says so
+(`prompt.CONTINUATION_LIMITS_LOWER`, `prompt.TEAM_CONTINUATION_LIMITS_LOWER`). Their rewards stay in
+the earlier rounds' table, so the best reward on record can be one that no entry within the limits
+reaches: a single agent's run then needs a `patience` as long as its `rounds_max`, or it stops for
+want of an improvement.
+
 ## The sample
 
 On a sample, an entry right on every input drawn is still charged alpha times the gap below 1 of
@@ -87,9 +105,7 @@ start at a0001. Every session's prompt carries:
 
 The earlier programs are shown and carried but never selected: only a program submitted in the new
 run can be locked, as in a single agent's continuation, so an earlier program counts only if it is
-submitted again. A team saves the programs it carries under its own entry limits, so they cannot be
-lower than the earlier run's. The control (`continuation.memory: false`) starts at a0001 with none
-of this.
+submitted again. The control (`continuation.memory: false`) starts at a0001 with none of this.
 
 ## How much is understood
 
@@ -134,6 +150,14 @@ after a one-phase smoke run:
 ```bash
 python -m level1.loop run --config config/experiments/rnn-g-team-alpha30-smoke.yaml --auth api_key
 python -m level1.loop run --config config/experiments/rnn-g-team-alpha30.yaml --auth api_key
+```
+
+The single agent going on from its own nine rounds on that network with room for 64 numbers, at
+alpha = 100, three rounds after a short smoke run:
+
+```bash
+python -m level1.loop run --config config/pilot/rnn-g-few-numbers-smoke.yaml --auth api_key
+python -m level1.loop run --config config/pilot/rnn-g-few-numbers.yaml --auth api_key
 ```
 
 The earlier run must be finished (it has a `lock.json`) and in the same `runs_dir`, on the same model

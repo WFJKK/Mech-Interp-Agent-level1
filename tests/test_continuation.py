@@ -256,3 +256,29 @@ def test_a_price_set_below_the_earlier_one_says_why_an_approximate_account_can_n
     assert "a fix they judged not worth its cost" not in note
     dearer = " ".join(prompt.continuation_note(continuation.prepare(config(where, "dearer", continue_from="early"))).split())
     assert "less than before" not in dearer and "so a fix they judged not worth its cost may be worth it now" in dearer
+
+
+def test_with_less_room_the_note_says_the_earlier_entries_over_it_can_only_be_read(earlier):
+    where, _, path = earlier
+    before = read_json(path / "run.json")["config"]["entry"]
+    cfg = continuation.prepare(config(where, "fewer", continue_from="early", entry={"max_const_scalars": 8}))
+    note = " ".join(prompt.continuation_note(cfg).split())
+    assert (f"Entries may now have up to {before['max_nodes']} nodes and 8 numbers in their constants "
+            f"({before['max_nodes']} and {before['max_const_scalars']} in the earlier rounds). With so few numbers an entry "
+            "cannot store what was observed of the network's outputs: what it needs beyond a few constants it has to "
+            "compute from the weights, inside the entry, where that work is counted. An earlier entry that is over "
+            "these limits is still in `entries`, to read and to take parts from, but it cannot be measured, saved or "
+            "submitted as it is.") in note
+    assert "so an idea that did not fit then may fit now" not in note
+
+
+def test_the_rnn_g_few_numbers_configs_go_on_with_room_for_64_numbers():
+    last = run_config.load("config/pilot/rnn-g-detail-2.yaml")
+    few, smoke = (run_config.load(f"config/pilot/rnn-g-few-numbers{s}.yaml") for s in ("", "-smoke"))
+    assert few["continue_from"] == smoke["continue_from"] == last["run_id"]
+    assert len({last["run_id"], few["run_id"], smoke["run_id"]}) == 3
+    assert few["entry"] == smoke["entry"] == {"max_nodes": 800, "max_const_scalars": 64} and last["entry"]["max_const_scalars"] == 512
+    assert few["continuation"]["alpha"] == 100 and few["rounds_max"] == few["patience"] == 3 and smoke["rounds_max"] == 1
+    for key in ("model", "network", "seed_check", "verifier", "session", "agent_model", "effort", "budget"):
+        assert few[key] == last[key]
+    assert smoke["budget"]["run_usd"] < few["budget"]["run_usd"]

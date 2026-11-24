@@ -181,6 +181,15 @@ CONTINUATION_SAMPLED_SAME = ("An entry right on every input of its sample is cha
 CONTINUATION_EVERY = "An entry right on every input loses nothing to errors, so among such entries the saving decides."
 CONTINUATION_LIMITS = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants ({nodes_before} "
                        "and {consts_before} in the earlier rounds), so an idea that did not fit then may fit now.")
+# With less room than before, the earlier entries that are over it stay in `entries` to read; with fewer numbers, the
+# reason is said: an entry is not to store what was observed of the network's outputs.
+CONTINUATION_LIMITS_LOWER = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants "
+                             "({nodes_before} and {consts_before} in the earlier rounds).{fewer} An earlier entry that is "
+                             "over these limits is still in `entries`, to read and to take parts from, but it cannot be "
+                             "measured, saved or submitted as it is.")
+CONTINUATION_FEWER_NUMBERS = (" With so few numbers an entry cannot store what was observed of the network's outputs: "
+                              "what it needs beyond a few constants it has to compute from the weights, inside the "
+                              "entry, where that work is counted.")
 
 # The same for a team run that goes on from earlier work (level1/multi_agent.py): a team's research phases (its
 # cycles) or a single agent's rounds, which reach its sessions through the checked archive and the research notes.
@@ -255,6 +264,10 @@ TEAM_CONTINUATION_DRAWS = ("A domain given by a saved entry's region test is sam
 TEAM_CONTINUATION_LIMITS = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants "
                             "({nodes_before} and {consts_before} in the earlier research), so an idea that did not fit "
                             "then may fit now.")
+TEAM_CONTINUATION_LIMITS_LOWER = ("Entries may now have up to {nodes} nodes and {consts} numbers in their constants "
+                                  "({nodes_before} and {consts_before} in the earlier research).{fewer} An earlier "
+                                  "program that is over these limits is still in `entries`, to read and to take parts "
+                                  "from, but it cannot be measured, saved or submitted as it is.")
 # In the checked archive and the research notes of such a run (multi_agent.archive_summary, build_multi).
 TEAM_EARLIER_ARCHIVE = ("Earlier research, with rewards recomputed at the current price. These programs are in "
                         "`entries` under these names; they can be selected only if submitted again.")
@@ -267,10 +280,12 @@ def continuation_texts() -> str:
     """The continuation note's parts as written, for the hygiene check of the agent's surface."""
     return "\n\n".join((CONTINUATION_HEADING, *CONTINUATION_NOTE, *CONTINUATION_NOTE_LOWER, CONTINUATION_RULE,
                          CONTINUATION_FIXED, CONTINUATION_SAMPLED, CONTINUATION_SAMPLED_SAME, CONTINUATION_EVERY,
-                         CONTINUATION_LIMITS, TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE,
+                         CONTINUATION_LIMITS, CONTINUATION_LIMITS_LOWER, CONTINUATION_FEWER_NUMBERS,
+                         TEAM_CONTINUATION_HEADING, *TEAM_CONTINUATION_NOTE,
                          *TEAM_CONTINUATION_NOTE_LOWER, *TEAM_EARLIER_WORK.values(),
                          TEAM_EARLIER_DRAFTS, TEAM_CONTINUATION_FIXED, TEAM_CONTINUATION_SAMPLED,
                          TEAM_CONTINUATION_SAMPLED_SAME, TEAM_CONTINUATION_DRAWS, TEAM_CONTINUATION_LIMITS,
+                         TEAM_CONTINUATION_LIMITS_LOWER,
                          TEAM_EARLIER_ARCHIVE, TEAM_EARLIER_NOTES, TEAM_LATER_NOTES, TEAM_SINGLE_ROUND))
 
 
@@ -314,9 +329,12 @@ def continuation_note(cfg: dict) -> str:
     before = d.get("limits_before") or {}
     now = {k: cfg["entry"][k] for k in ("max_nodes", "max_const_scalars")}
     if all(before.get(k) is not None for k in now) and before != now:  # the earlier rounds' entries had other room
-        notes.insert(2, TEAM_CONTINUATION_LIMITS if team else CONTINUATION_LIMITS)
+        less = any(int(now[k]) < int(before[k]) for k in now)  # then the earlier entries over it can only be read
+        notes.insert(2, (TEAM_CONTINUATION_LIMITS_LOWER if team else CONTINUATION_LIMITS_LOWER) if less
+                     else (TEAM_CONTINUATION_LIMITS if team else CONTINUATION_LIMITS))
         fields.update(nodes=now["max_nodes"], consts=now["max_const_scalars"], nodes_before=before["max_nodes"],
-                      consts_before=before["max_const_scalars"])
+                      consts_before=before["max_const_scalars"],
+                      fewer=CONTINUATION_FEWER_NUMBERS if int(now["max_const_scalars"]) < int(before["max_const_scalars"]) else "")
     paragraphs = [textwrap.fill(p.format(**fields), width=100, break_long_words=False, break_on_hyphens=False)
                   for p in notes]
     return "\n\n" + "\n\n".join([TEAM_CONTINUATION_HEADING if team else CONTINUATION_HEADING, *paragraphs])

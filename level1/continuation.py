@@ -115,12 +115,6 @@ def prepare(cfg: dict) -> dict:
                            "error to price higher")
     if cost >= c_max:
         raise RuntimeError(f"the entry {earlier_id} locked costs {cost:.4f} over all inputs, not less than c_max {c_max:g}")
-    if team(cfg):  # a team saves the programs it carries under its own limits (artifacts.collect checks them)
-        for key in ("max_nodes", "max_const_scalars"):
-            here, then = cfg["entry"].get(key), (ecfg.get("entry") or {}).get(key)
-            if here is not None and then is not None and int(here) < int(then):
-                raise RuntimeError(f"entry.{key} is {here} here and was {then} in {earlier_id}: a team carries the earlier "
-                                   "programs, so its limits cannot be lower")
     claimed = lock.get("claimed_fidelity", measured.get("claimed_fidelity"))
     name = lock.get("name")
     if team(ecfg):  # a team's lock names its candidate; the name it was submitted under is in the archive

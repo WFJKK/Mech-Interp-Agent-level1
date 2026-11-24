@@ -1,0 +1,14 @@
+# A small first run of config/pilot/rnn-g-few-numbers.yaml on the real backend: the same start, price, sample and
+# room for numbers, one short round, at most $5, to check that going on with less room works end to end.
+extends: rnn-g-few-numbers.yaml
+run_id: pilot-rnn-g-few-numbers-smoke
+rounds_max: 1
+patience: 1
+session:
+  python_calls: 6
+  submissions: 2
+  max_turns: 40
+  seconds: 1500
+budget:
+  run_usd: 5
+  round_usd: 5

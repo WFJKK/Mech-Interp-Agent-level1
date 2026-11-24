@@ -37,10 +37,10 @@ def collect(path: Path, cfg: dict, archive: dict, plan: dict) -> None:
         if source.is_symlink() or not source.is_file() or not ENTRY_NAME.fullmatch(source.stem):
             continue
         entry = read_json(source)
-        lang.check_structure(entry, cfg["entry"]["max_nodes"], cfg["entry"]["max_const_scalars"])
         digest = lang.entry_hash(entry)
         if inherited.get(source.stem) == digest or (source.stem, digest) in submitted:
-            continue
+            continue  # carried or scored as it is: not a new draft (a carried one may be over this run's limits)
+        lang.check_structure(entry, cfg["entry"]["max_nodes"], cfg["entry"]["max_const_scalars"])
         alias = "draft_" + digest[:32]
         if any(item["id"] == alias and item["entry_sha256"] != digest for item in drafts):
             raise RuntimeError("two saved drafts have conflicting immutable aliases")
