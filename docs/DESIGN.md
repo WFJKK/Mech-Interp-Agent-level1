@@ -169,9 +169,12 @@ Three things carry it:
 - **The rounds end** at `rounds_max` (5), after `patience` (2) rounds in a row that did not raise
   the best reward, or after two refusals in a row.
 - **The lock**: the scored submission with the highest reward, the earliest on a tie, byte for byte
-  as it was submitted (its hash is checked). When the verifier samples, the locked entry is the
-  best of several scorings and its recorded reward leans high, so it is scored once more on a fresh
-  sample, and the report gives both numbers.
+  as it was submitted (its hash is checked). When the verifier samples, an entry submitted again is
+  scored on all of its samples together, with the confidence bound of one sample, and stands as that
+  one submission (`pool_samples`, `level1/pooling.py`), so submitting it again makes its reward less
+  noisy and buys neither another draw nor a narrower bound. The locked entry is
+  still the best of several entries' measurements and its recorded reward leans a little high, so it
+  is scored once more on a fresh sample, and the report gives both numbers.
 - **The seed check**: the locked entry on the second network. What the entry computes from the
   weights is computed afresh there; a number read off the first network and written in as a
   constant stays what it was. This is the check on hard-coded exceptions.

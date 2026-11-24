@@ -13,7 +13,7 @@ import json
 import re
 import textwrap
 
-from . import rewards
+from . import pooling, rewards
 from .util import REPO_ROOT
 
 TEMPLATES = REPO_ROOT / "prompts"
@@ -30,6 +30,9 @@ def history(rounds: list) -> str:
         return "None: this is the first round."
     out = []
     best = None
+    # In a run that pools its samples, an entry submitted again stands as its latest submission (level1/pooling.py).
+    every = [s for rd in rounds for s in rd.get("submissions") or [] if s["status"] == "scored"]
+    pooled_into = {every[i]["carried_as"]: every[j]["carried_as"] for i, j in pooling.superseded(every).items()}
     for rd in rounds:
         out.append(f"### Round {rd['round']}")
         subs = rd.get("submissions") or []
@@ -40,9 +43,14 @@ def history(rounds: list) -> str:
             for s in subs:
                 p = s.get("parts") or {}
                 if s["status"] == "scored":
-                    row = [s["carried_as"], "scored", _fmt(s["reward"]), _fmt(p.get("coverage")), _fmt(p.get("fidelity"), 5),
+                    status = "scored"
+                    if s.get("pooled"):
+                        status += f", {s['pooled']['samples']} samples together"
+                    if s["carried_as"] in pooled_into:
+                        status += f"; pooled into {pooled_into[s['carried_as']]}"
+                    row = [s["carried_as"], status, _fmt(s["reward"]), _fmt(p.get("coverage")), _fmt(p.get("fidelity"), 5),
                            _fmt(rewards.cost_of(p)), _fmt(s.get("claimed_fidelity"), 5), _fmt(s.get("expected_fidelity_other"), 5)]
-                    if best is None or s["reward"] > best[1]:
+                    if s["carried_as"] not in pooled_into and (best is None or s["reward"] > best[1]):
                         best = (s["carried_as"], s["reward"])
                 else:
                     row = [s.get("name") or "", f"refused: {str(s.get('reason'))[:120]}", "", "", "", "", "", ""]
@@ -116,6 +124,20 @@ of its 95% confidence interval on that sample: a lucky sample does not pay, and 
 right on every sampled input is charged a little (the network itself then scores just under 0). And
 the same entry submitted twice gets two slightly different rewards.
 """
+# The same, for a run that pools an entry's samples (run config: pool_samples; level1/pooling.py).
+SAMPLE_NOTE_POOLED = """
+Because the verifier scores a sample, two things follow. The fidelity the reward uses is the lower end
+of its 95% confidence interval on that sample: a lucky sample does not pay, and even an entry that is
+right on every sampled input is charged a little (the network itself then scores just under 0). And
+an entry submitted again is scored on a fresh sample, and that submission's reward is worked out from
+all of the entry's samples so far: their fidelity taken together, with the confidence bound of one
+sample. It then stands for the entry in place of its earlier submissions. Submitting an entry again
+makes its reward less noisy; it buys neither another chance nor a narrower bound.
+"""
+TEAM_SAMPLE_POOLED = ("Submissions receive fresh development samples. An identical entry submitted again on the same "
+                      "domain is scored on all of its samples together, their fidelity pooled with the confidence bound "
+                      "of one sample, and that submission then stands for it in place of the earlier ones: repeating it "
+                      "makes the score less noisy, and buys neither another chance nor a narrower bound. ")
 
 
 # A baseline run (level1/baseline.py) asks for an entry that is exact whatever the weights; a usual run's prompt
@@ -273,7 +295,8 @@ def build(cfg: dict, model, round_no: int, rounds: list, model_ops: int, enumera
         "ROUND": round_no, "ROUNDS_MAX": first_round(cfg) - 1 + int(cfg["rounds_max"]), "MODEL_SOURCE": model.source().strip(),
         "SIZES": sizes,
         "DATA_SET": model.data_set_text(), "MODEL_OPS": f"{model_ops:,}", "ENTRY_DOC": ENTRY_DOC.read_text().strip(),
-        "INPUTS_NOTE": inputs_note, "SAMPLE_NOTE": "" if enumerated else SAMPLE_NOTE,
+        "INPUTS_NOTE": inputs_note,
+        "SAMPLE_NOTE": "" if enumerated else SAMPLE_NOTE_POOLED if pooling.enabled(cfg) else SAMPLE_NOTE,
         "REWARD_FORMULA": rewards.formula(cfg["reward"]), "REWARD_EXPLANATION": rewards.explanation(cfg["reward"]),
         "PYTHON_CALLS": cfg["session"]["python_calls"], "PYTHON_SECONDS": cfg["python"]["time_limit_s"],
         "SUBMISSIONS": cfg["session"]["submissions"], "MAX_NODES": cfg["entry"]["max_nodes"],
@@ -504,7 +527,7 @@ def build_multi(cfg: dict, model, session_index: int, role: str, task: str,
     sample_note = ("The exact fidelity is used when every task input is checked." if verifier.enumerated else
                    "The reward uses the lower end of the fidelity's 95% confidence interval. " +
                    ("Repeating an identical entry uses the same development inputs and does not draw a luckier score. " if fixed else
-                    "Submissions receive fresh development samples. ") +
+                    TEAM_SAMPLE_POOLED if pooling.enabled(cfg) else "Submissions receive fresh development samples. ") +
                    "Adaptive search can fit development evidence, so final locked evaluation is reported separately.")
     research = cfg.get("research_task") or {}
     count = int(research.get("max_assignments", 0))

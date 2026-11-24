@@ -32,7 +32,7 @@ import time
 from dataclasses import replace
 from pathlib import Path
 
-from . import lang
+from . import lang, pooling, rewards
 from .networks import load_model
 from .util import append_jsonl, atomic_write, now, read_json, write_json
 
@@ -270,9 +270,12 @@ class Session:
 
     # creation --------------------------------------------------------------------------------
     @classmethod
-    def create(cls, path: Path, cfg: dict, network_id: str, run_path: Path, carried: dict | None = None) -> "Session":
+    def create(cls, path: Path, cfg: dict, network_id: str, run_path: Path, carried: dict | None = None,
+               draws: list | None = None) -> "Session":
         """Make (or reopen) a round's session folder. Budgets carry over if it exists. `carried` are entries
-        of earlier rounds, {name: entry}, placed in the workspace."""
+        of earlier rounds, {name: entry}, placed in the workspace. `draws` are the run's earlier scorings
+        ({entry_sha256, domain, parts, inputs, reward}), with which a submission of the same entry is pooled
+        when the run pools its samples (level1/pooling.py)."""
         path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
         state_path = path / "session.json"
@@ -291,6 +294,9 @@ class Session:
                 "reward": dict(cfg["reward"]), "sandbox": cfg["sandbox"], "sandbox_image": cfg.get("sandbox_image"),
                 "sandbox_dir": cfg.get("sandbox_dir"), "runs_dir": cfg.get("runs_dir"), "created": now(),
             }
+            if pooling.enabled(cfg):
+                state["pool_samples"] = True
+                state["draws"] = list(draws or [])
             if research:
                 state["research_task"] = research
                 state["assignments"] = []
@@ -598,6 +604,14 @@ class Session:
                        else verifier.score(entry, claimed=float(claimed_fidelity)))
             receipt.update(name=name, submission=n, at=now(),
                            expected_fidelity_other=None if expected_fidelity_other is None else float(expected_fidelity_other), **claim)
+            if receipt["status"] == "scored" and self.state.get("pool_samples"):
+                # Its earlier scorings in the run, and in this session, are pooled with it (level1/pooling.py).
+                same = lambda d: (d["entry_sha256"] == receipt["entry_sha256"]
+                                  and d.get("domain", pooling.domain(d)) == pooling.domain(receipt))
+                earlier = [d for d in self.state.get("draws") or [] if same(d)]
+                earlier += [{**pooling.draw(r), "entry_sha256": r["entry_sha256"]} for r in self.receipts()
+                            if r["status"] == "scored" and same({**pooling.draw(r), "entry_sha256": r["entry_sha256"]})]
+                receipt = pooling.pooled(receipt, earlier, verifier.reward_cfg)
             write_json(folder / "receipt.json", receipt)
             self._log("submit_entry", args, {"status": receipt["status"], "reward": receipt["reward"], "reason": receipt["reason"]}, time.monotonic() - t0)
             out = {"status": receipt["status"], "reason": receipt["reason"], "reward": receipt["reward"], "parts": receipt["parts"],
@@ -605,6 +619,11 @@ class Session:
                    "remaining": self.remaining()}
             if "scope" in receipt:
                 out["scope"] = receipt["scope"]
+            if receipt.get("pooled"):
+                own = receipt["draw"]
+                out["pooled"] = {"samples": receipt["pooled"]["samples"], "inputs": receipt["pooled"]["n_inputs"],
+                                 "this_sample": {"reward": own["reward"], "coverage": own["parts"]["coverage"],
+                                                 "fidelity": own["parts"]["fidelity"], "cost": rewards.cost_of(own["parts"])}}
             return out
         except ToolError as exc:
             self._log("submit_entry", args, {"error": str(exc)}, time.monotonic() - t0)

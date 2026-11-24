@@ -24,6 +24,8 @@ max_consecutive_refusals: 2
 prompt_template: round_v1
 rounds_max: 5
 patience: 2                           # stop after this many rounds in a row that did not raise the best reward
+pool_samples: true                    # an entry submitted again is scored on all of its samples together, and stands
+                                      # as that one submission (level1/pooling.py); runs made before have no such key
 
 # Going on from a finished single-agent run on the same network (level1/continuation.py, docs/CONTINUATION.md):
 # the price of a wrong answer is raised from that run's locked entry, so that its remaining errors are worth fixing.

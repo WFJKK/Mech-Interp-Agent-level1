@@ -695,7 +695,13 @@ will know of this one.
   > Because the verifier scores a sample, two things follow. The fidelity the reward uses is the lower end
   > of its 95% confidence interval on that sample: a lucky sample does not pay, and even an entry that is
   > right on every sampled input is charged a little (the network itself then scores just under 0). And
-  > the same entry submitted twice gets two slightly different rewards.
+  > an entry submitted again is scored on a fresh sample, and that submission's reward is worked out from
+  > all of the entry's samples so far: their fidelity taken together, with the confidence bound of one
+  > sample. It then stands for the entry in place of its earlier submissions. Submitting an entry again
+  > makes its reward less noisy; it buys neither another chance nor a narrower bound.
+
+  (Runs made before `pool_samples` read "And the same entry submitted twice gets two slightly different
+  rewards.")
 
 - `{{PYTHON_CALLS}}`, `{{PYTHON_SECONDS}}`, `{{SUBMISSIONS}}`: 40, 300 and 4.
 - `{{MAX_NODES}}`, `{{MAX_CONST}}`, `{{VERIFIER_SECONDS}}`: 400, 256 and 120.

@@ -224,7 +224,9 @@ construction. A hole found later gets its test there first.
 | Do work outside the count: code, files, other weights | an entry is data; only the listed operations and the network's own weights exist |
 | Charge an expensive branch as a cheap one | a lazy branch is charged on every input that takes it |
 | Fit to the verifier's sample | a fresh sample per scoring, and the fidelity's lower bound |
-| Send one entry again and again and keep the luckiest scoring | the locked entry is scored once more on a fresh sample, and the report gives that number |
+| Send one entry again and again and keep the luckiest scoring | an entry submitted again is scored on all of its samples together and stands as that one submission (`level1/pooling.py`); the locked entry is also scored once more on a fresh sample, and the report gives that number |
+| Send one entry again and again to narrow the confidence bound | a pooled entry keeps the bound of one sample |
+| Send trivially different copies of one entry, each scored on its own sample | not closed: they count as different entries; the fresh scoring of the locked entry in the report shows what luck added |
 | Convert for free what takes a computation | casts are charged (`tests/test_lang.py`) |
 | Claim more than is measured | the default reward ignores the claim; `r_alpha_claimed` penalises it |
 | Sit just inside a threshold or a budget | there is none |

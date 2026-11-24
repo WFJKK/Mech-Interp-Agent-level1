@@ -152,7 +152,9 @@ def describe(receipt: dict) -> str:
     fid = "none" if p["fidelity"] is None else f"{p['fidelity']:.5f}"
     cost = rewards.cost_of(p)
     cost = "none" if cost is None else f"{cost:.4f}"
-    return f"reward {receipt['reward']:.4f}  coverage {p['coverage']:.4f}  fidelity {fid}  cost {cost}"
+    pooled = receipt.get("pooled")
+    tail = f"  ({pooled['samples']} samples pooled, {pooled['n_inputs']:,} inputs)" if pooled else ""
+    return f"reward {receipt['reward']:.4f}  coverage {p['coverage']:.4f}  fidelity {fid}  cost {cost}{tail}"
 
 
 def main(argv=None) -> int:

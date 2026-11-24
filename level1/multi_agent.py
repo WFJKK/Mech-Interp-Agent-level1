@@ -29,8 +29,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from pathlib import Path
 
-from . import (artifacts, budget, continuation, global_baseline, hygiene, lang, prompt, regions, report, research_modes,
-               rewards, synthesis)
+from . import (artifacts, budget, continuation, global_baseline, hygiene, lang, pooling, prompt, regions, report,
+               research_modes, rewards, synthesis)
 from .backends import StopRun, make
 from .networks import load_model
 from .session import Session
@@ -115,7 +115,8 @@ def update_frontiers(archive: dict) -> dict:
     """Rebuild selections from development receipts, never from final audits. A candidate carried from an earlier
     run (from_run) is shown and carried, never selected: only this run's submissions can be."""
     archive["candidates"].sort(key=lambda c: (c["session_id"], c["submitted"]["submission"]))
-    own = [c for c in archive["candidates"] if not c.get("from_run")]
+    # an entry submitted again on one domain stands as its latest submission, all of its samples pooled
+    own = [c for c in archive["candidates"] if not c.get("from_run") and not c.get("superseded_by")]
     global_candidates = [c for c in own if c["scope_id"] == "all"]
     scored_global = [c for c in global_candidates if _usable(c)]
     best = max(scored_global, key=lambda c: c["selection"]["reward"], default=None)
@@ -234,6 +235,8 @@ def archive_summary(archive: dict, limit: int) -> str:
         then = (f" ({receipt['reward_recorded']:.6f} at the price it was measured at)"
                 if receipt.get("reward_recorded") is not None and abs(receipt["reward_recorded"] - receipt["reward"]) > 1e-12
                 else "")
+        if receipt.get("pooled"):
+            then += f"; {receipt['pooled']['samples']} samples pooled ({receipt['pooled']['n_inputs']:,} inputs)"
         # a single agent's submission was scored on the whole input distribution, with no domain of its own
         where = ("" if candidate["role"] == "single" else
                  f"outer scope mass {scope_meta.get('mass')} (exact: {scope_meta.get('mass_exact')}); "
@@ -251,7 +254,7 @@ def archive_summary(archive: dict, limit: int) -> str:
                         "\n".join(row(cid) for cid in ids[:limit]))
     earlier = {}
     for candidate in archive["candidates"]:
-        if candidate.get("from_run") and _usable(candidate):
+        if candidate.get("from_run") and _usable(candidate) and not candidate.get("superseded_by"):
             earlier.setdefault(candidate["scope_id"], []).append(candidate)
     if earlier:  # a run that goes on from an earlier one: that run's frontiers, at this run's price
         shown = [prompt.TEAM_EARLIER_ARCHIVE]
@@ -298,15 +301,16 @@ def _single_candidates(runs_dir: Path, runs: list) -> list[dict]:
 
     out = []
     for rid in runs:
-        for rd in completed(Path(runs_dir) / rid):
-            for receipt in rd["submissions"]:
-                if receipt["status"] == "scored":
-                    out.append({"id": receipt["carried_as"], "role": "single", "session_id": f"round_{rd['round']:03d}",
-                                "cycle": None, "scope": ALL, "scope_id": regions.scope_id(ALL),
-                                "entry_path": f"round_{rd['round']:03d}/session/submissions/{receipt['submission']:03d}/entry.json",
-                                "entry_sha256": receipt["entry_sha256"], "selection": copy.deepcopy(receipt),
-                                "submitted": copy.deepcopy(receipt), "expected_fidelity_other": receipt.get("expected_fidelity_other"),
-                                "from_run": rid})
+        scored = [dict(receipt, round=rd["round"]) for rd in completed(Path(runs_dir) / rid)
+                  for receipt in rd["submissions"] if receipt["status"] == "scored"]
+        gone = pooling.superseded(scored)  # an entry its run pooled stands as its latest submission there
+        for i, receipt in enumerate(scored):
+            out.append({"id": receipt["carried_as"], "role": "single", "session_id": f"round_{receipt['round']:03d}",
+                        "cycle": None, "scope": ALL, "scope_id": regions.scope_id(ALL),
+                        "entry_path": f"round_{receipt['round']:03d}/session/submissions/{receipt['submission']:03d}/entry.json",
+                        "entry_sha256": receipt["entry_sha256"], "selection": copy.deepcopy(receipt),
+                        "submitted": copy.deepcopy(receipt), "expected_fidelity_other": receipt.get("expected_fidelity_other"),
+                        "from_run": rid, **({"superseded_by": scored[gone[i]]["carried_as"]} if i in gone else {})})
     return out
 
 
@@ -551,7 +555,10 @@ def _run_session(path: Path, cfg: dict, model, state: dict, plan: dict, fake_scr
                 raise StopRun(exhausted)
     archive = plan["snapshot"]
     carried = {} if plan["role"] == "baseline" else _carried(path, cfg, archive)
-    session = Session.create(directory / "session", role_cfg, role_cfg["network"], path, carried)
+    # This run's scorings so far, with which a submission of the same entry on the same domain is pooled
+    draws = [{**pooling.draw(c["submitted"]), "entry_sha256": c["entry_sha256"], "domain": c["scope_id"]}
+             for c in archive["candidates"] if not c.get("from_run") and c["submitted"].get("status") == "scored"]
+    session = Session.create(directory / "session", role_cfg, role_cfg["network"], path, carried, draws)
     history = _safe_history(path, state, plan["history"] or [])
     prompt_path = directory / ("prompt.history_safe.md" if history != (plan["history"] or []) else "prompt.md")
     if not prompt_path.exists():
@@ -630,9 +637,35 @@ def _ingest(path: Path, cfg: dict, model, archive: dict, plan: dict, record: dic
                                       "entry_path": entry_path, "entry_sha256": digest, "selection": selection,
                                       "submitted": receipt,
                                       "expected_fidelity_other": receipt.get("expected_fidelity_other")})
+    _pool(archive, cfg)
     artifacts.collect(path, cfg, archive, plan)
     update_frontiers(archive)
     write_json(_archive_path(path), archive)
+
+
+def _pool(archive: dict, cfg: dict) -> None:
+    """In a run that pools its samples (level1/pooling.py), the submissions of one entry on one domain are one
+    candidate: the latest of them is selected on all of their samples together, worked out afresh here from what
+    each submission measured, and the earlier ones are marked superseded_by it and never selected on their own.
+    A fixed development sample is the same sample every time, so there is nothing to pool."""
+    if not pooling.enabled(cfg) or _development_seed(cfg) is not None:
+        return
+    groups = {}
+    for candidate in archive["candidates"]:
+        if not candidate.get("from_run") and candidate["submitted"].get("status") == "scored":
+            groups.setdefault((candidate["entry_sha256"], candidate["scope_id"]), []).append(candidate)
+    for members in groups.values():
+        members.sort(key=lambda c: (c["session_id"], c["submitted"]["submission"]))
+        last = members[-1]
+        own = pooling.draw(last["submitted"])
+        alone = {**{k: v for k, v in last["submitted"].items() if k not in ("draw", "pooled")},
+                 "parts": own["parts"], "inputs": own["inputs"], "reward": own["reward"],
+                 "reward_detail": own.get("reward_detail") or last["submitted"].get("reward_detail")}
+        last["selection"] = pooling.pooled(alone, [pooling.draw(c["submitted"]) for c in members[:-1]], cfg["reward"])
+        last.pop("superseded_by", None)
+        for candidate in members[:-1]:
+            candidate["superseded_by"] = last["id"]
+            candidate["selection"] = candidate["submitted"]
 
 
 def _assignments(cfg: dict, record: dict) -> list[dict]:
@@ -1102,6 +1135,7 @@ def write_report(path) -> None:
         cost = rewards.cost_of(p)
         cost = "none" if cost is None else f"{cost:.6f}"
         name = candidate["id"] + (f" (from {candidate['from_run']})" if candidate.get("from_run") else "")
+        name += f" (pooled into {candidate['superseded_by']})" if candidate.get("superseded_by") else ""
         lines.append(f"| {name} | {candidate['role']} | {key} | {p['coverage']:.6f} | {fidelity} | {cost} | {receipt['reward']:.6f} | {gap} |")
     if any(candidate.get("from_run") for candidate in archive["candidates"]):
         lines += ["", "A candidate marked with a run comes from that earlier run: its reward is recomputed at this run's price "
@@ -1189,8 +1223,8 @@ def rescore(path, reward_cfg: dict, out=print) -> list[dict]:
     rows = []
     for candidate in archive["candidates"]:
         receipt = candidate["selection"]
-        if receipt["status"] != "scored" or candidate.get("from_run"):  # an earlier run's are rescored in that run
-            continue
+        if receipt["status"] != "scored" or candidate.get("from_run") or candidate.get("superseded_by"):
+            continue  # an earlier run's are rescored in that run; a superseded one is in the submission that pooled it
         claimed = receipt.get("claimed_fidelity", candidate["submitted"].get("claimed_fidelity"))
         value = rewards.compute(receipt["parts"], reward_cfg, claimed)["reward"]
         rows.append({"entry": candidate["id"], "name": candidate["submitted"].get("name"),

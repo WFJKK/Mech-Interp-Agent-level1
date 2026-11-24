@@ -52,7 +52,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from . import budget, continuation, global_baseline, hygiene, lang, prompt, research_modes, rewards, run_config
+from . import budget, continuation, global_baseline, hygiene, lang, pooling, prompt, research_modes, rewards, run_config
 from .backends import StopRun, make
 from .networks import load_model
 from .session import RESEARCH_SUBMIT_TOOL, RESEARCH_TOOLS, Session, surface
@@ -109,9 +109,11 @@ def scored(rounds: list) -> list:
 
 
 def best_submission(rounds: list) -> dict | None:
-    """The scored submission with the highest reward; the earliest one on a tie."""
+    """The scored submission with the highest reward; the earliest one on a tie. In a run that pools its samples,
+    an entry submitted again stands only as its latest submission, which counts all of its samples
+    (level1/pooling.py), so submitting it again never buys another draw."""
     best = None
-    for s in scored(rounds):
+    for s in pooling.standing(scored(rounds)):
         if best is None or s["reward"] > best["reward"]:
             best = s
     return best
@@ -425,7 +427,10 @@ def drive(path: Path, fake_scripts=None, out=print, accept_changes: bool = False
 
 def run_round(path: Path, cfg: dict, model, k: int, done: list, backend, forbidden: list, run: dict, log) -> dict:
     rdir = path / f"round_{k:03d}"
-    session = Session.create(rdir / "session", cfg, cfg["network"], path, carried_entries(path, done))
+    # This run's earlier scorings, with which a submission of the same entry is pooled (level1/pooling.py)
+    draws = [{**pooling.draw(s), "entry_sha256": s["entry_sha256"], "domain": pooling.domain(s)}
+             for s in scored(done) if not s.get("from_run")]
+    session = Session.create(rdir / "session", cfg, cfg["network"], path, carried_entries(path, done), draws)
     text = prompt.build(cfg, model, k, done, run["model_ops"], run["enumerated"])
     # What the pipeline itself says is checked; the history is the agent's own words about what it found.
     ours = prompt.build(cfg, model, k, [], run["model_ops"], run["enumerated"])
@@ -441,12 +446,13 @@ def run_round(path: Path, cfg: dict, model, k: int, done: list, backend, forbidd
         subs.append({"round": k, "submission": r["submission"], "name": r.get("name"), "carried_as": f"r{k}s{r['submission']}",
                      "status": r["status"], "reason": r["reason"], "reward": r["reward"], "parts": r["parts"], "size": r["size"],
                      "entry_sha256": r["entry_sha256"], "inputs": r["inputs"], "claimed_fidelity": r.get("claimed_fidelity"),
-                     "expected_fidelity_other": r.get("expected_fidelity_other"), "overclaim": r.get("overclaim")})
+                     "expected_fidelity_other": r.get("expected_fidelity_other"), "overclaim": r.get("overclaim"),
+                     **{key: r[key] for key in ("draw", "pooled") if r.get(key)}})
     before = best_submission(done)
-    got = [s["reward"] for s in subs if s["status"] == "scored"]
-    improved = bool(got) and (before is None or max(got) > before["reward"] + 1e-12)
+    after = best_submission(done + [{"submissions": subs}])
+    improved = after is not None and (before is None or after["reward"] > before["reward"] + 1e-12)
     record = {"round": k, "submissions": subs, "improved": improved, "best_reward_before": None if before is None else before["reward"],
-              "best_reward_after": max(got + ([before["reward"]] if before else [])) if (got or before) else None,
+              "best_reward_after": None if after is None else after["reward"],
               "stop_reason": response.meta.get("stop_reason"), "notes": notes_of(response.text), "tools_used": dict(session.state["used"]),
               "at": now()}
     write_json(rdir / "round.json", record)
@@ -492,13 +498,15 @@ def finish(path: Path, out=print) -> dict:
         write_json(path / "locked_entry.json", entry)
         lock = {"locked": True, "entry_sha256": best["entry_sha256"], "network": cfg["network"],
                 **{k: best[k] for k in ("round", "submission", "name", "carried_as", "reward", "parts", "size", "claimed_fidelity",
-                                        "expected_fidelity_other")}}
+                                        "expected_fidelity_other")}, **({"pooled": best["pooled"]} if best.get("pooled") else {})}
         first = Verifier(model, cfg["network"], cfg)
         if old_lock.get("entry_sha256") == lock["entry_sha256"] and old_lock.get("measured_again"):
             lock["measured_again"] = old_lock["measured_again"]
         elif not first.enumerated:
-            # The locked entry was picked as the best of several scorings, each on its own sample, so its recorded
-            # reward leans high. One more scoring on a fresh sample is a fair measurement of it.
+            # The locked entry was picked as the best of several measurements, each on samples of its own, so its
+            # recorded reward leans high: without pooling, an entry submitted again is the best of its scorings,
+            # and even pooled it is the best of several entries' measurements. One more scoring on a fresh
+            # sample is a fair measurement of it.
             if cfg["verifier"].get("sample_seed") is not None:
                 again = first.score(entry, claimed=best.get("claimed_fidelity"),
                                     seed=int.from_bytes(os.urandom(8), "big"))

@@ -356,14 +356,14 @@ def test_submitting_one_entry_again_does_not_buy_another_draw(tmp_path):
     subs = read_json(path / "round_001/round.json")["submissions"]
     assert [s["status"] for s in subs] == ["scored"] * 4 and len({s["entry_sha256"] for s in subs}) == 1
     draws = [s.get("draw", s)["parts"] for s in subs]
-    # the reward the lock stands on is that of all four samples together, as one sample of 2,400 inputs
+    # the reward the lock stands on is that of all four samples together: their fidelity, with one sample's bound
     agree = sum(d["n_agree"] for d in draws)
     inside = sum(d["n_in_region"] for d in draws)
     n = sum(d["n_inputs"] for d in draws)
     f = float(draws[0]["model_ops"])
     parts = {"coverage": inside / n, "r": sum(d["predict_ops"] for d in draws) / (inside * f),
              "r_rule": sum(d["rule_ops"] for d in draws) / (n * f), "b": draws[0]["b"],
-             "fidelity": agree / inside, "fidelity_low": lang.wilson_lower(agree, inside)}
+             "fidelity": agree / inside, "fidelity_low": lang.wilson_lower(agree / 4, inside / 4)}  # one sample's bound
     expected = rewards.compute(parts, cfg["reward"])["reward"]
     lock = read_json(path / "lock.json")
     assert lock["carried_as"] == "r1s4" and loop.best_submission(loop.completed(path))["carried_as"] == "r1s4"
@@ -397,3 +397,22 @@ def test_a_team_member_submitting_one_entry_again_does_not_buy_another_draw(tmp_
     assert first.get("superseded_by") == "a0002s2" and second["selection"]["pooled"]["samples"] == 2
     assert second["selection"]["parts"]["n_inputs"] == 1200
     assert archive["global"]["best"] == "a0002s2" and archive["global"]["frontier"] == ["a0002s2"]
+
+
+def test_submitting_one_entry_again_does_not_narrow_its_bound(model4):
+    """Pooled naively, every submission again would narrow the fidelity's confidence bound and raise the reward of
+    an entry that predicts no better. A pooled entry keeps the bound of one sample: the network itself, right on
+    every input, scores the same however often it is submitted."""
+    from level1 import pooling
+
+    w = model4.load_weights("lin-a-1to4-s0")
+    v = Verifier(model4, "lin-a-1to4-s0", {**CFG, "verifier": {"sample_size": 400}})
+    entry = model4.reference_entry(w)
+    once = v.score(entry, seed=1)
+    draws = [pooling.draw(once)]
+    for seed in (2, 3, 4, 5):
+        new = v.score(entry, seed=seed)
+        again = pooling.pooled(new, draws, CFG["reward"])
+        draws.append(pooling.draw(new))
+    assert again["pooled"]["samples"] == 5 and again["parts"]["fidelity"] == once["parts"]["fidelity"] == 1.0
+    assert again["reward"] == pytest.approx(once["reward"], abs=1e-12) and once["reward"] < 0

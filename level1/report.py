@@ -28,7 +28,7 @@ import re
 import sys
 from pathlib import Path
 
-from . import budget, lang, rewards, run_config
+from . import budget, lang, pooling, rewards, run_config
 from .networks import load_model
 from .util import atomic_write, read_json, read_jsonl, write_json
 from .verifier import DEFAULTS, Verifier
@@ -231,7 +231,10 @@ def build(path: Path) -> dict:
     notes = next((rd["notes"] for rd in reversed(rounds) if rd.get("notes")), "")
     entry = read_json(path / "locked_entry.json") if (path / "locked_entry.json").is_file() else None
     subs = [dict(s) for rd in rounds for s in rd["submissions"]]
-    on_frontier = frontier(subs)
+    every = [s for s in subs if s["status"] == "scored"]
+    for i, j in pooling.superseded(every).items():  # an entry submitted again stands as its latest submission
+        every[i]["pooled_into"] = every[j]["carried_as"]
+    on_frontier = frontier([s for s in subs if not s.get("pooled_into")])
     on_second = {(e.get("carried_as"), e.get("entry_sha256")): e for e in read_jsonl(path / "seed_scores.jsonl")}
     for s in subs:
         scored = s["status"] == "scored"
@@ -506,7 +509,13 @@ def markdown(rep: dict) -> str:
             out += ["| " + " | ".join([f"{second} (the seed check)"] + _parts_row(seed) + [_f(lock.get("expected_fidelity_other"), 5)]) + " |"]
             if seed.get("status") != "scored":
                 out += ["", f"The seed check was refused: {seed.get('reason')}"]
-        if lock.get("measured_again"):
+        if lock.get("measured_again") and lock.get("pooled"):
+            pooled = lock["pooled"]
+            out += ["", f"The first row takes this entry's {pooled['samples']} scorings in the rounds together "
+                    f"({pooled['n_inputs']:,} inputs; their fidelity pooled, with the confidence bound of one sample, "
+                    "level1/pooling.py); it was still chosen as the best of several entries' measurements, so it leans a "
+                    "little high. The second row is one more scoring, on a fresh sample."]
+        elif lock.get("measured_again"):
             out += ["", "The first row is the best of several scorings, each on its own sample, so it leans high; the second "
                     "row is one more scoring of the same entry."]
         out += ["", "```", rep["locked_entry_shown"] or "", "```", ""]
@@ -580,7 +589,9 @@ def markdown(rep: dict) -> str:
         there = [_f(two.get("reward")), _f((two.get("parts") or {}).get("fidelity"), 5)] if two.get("status") == "scored" else \
             ([f"refused: {str(two.get('reason'))[:60]}", ""] if two else ["", ""])
         if s["status"] == "scored":
-            out.append("| " + " | ".join([s["carried_as"], f"`{s['name']}`"] + _parts_row(s) + [
+            name = s["carried_as"] + (f" ({s['pooled']['samples']} samples)" if s.get("pooled") else "") + (
+                f" (pooled into {s['pooled_into']})" if s.get("pooled_into") else "")
+            out.append("| " + " | ".join([name, f"`{s['name']}`"] + _parts_row(s) + [
                 _f(s.get("right_share")), _f(s.get("wrong_share"), 5), "yes" if s.get("on_frontier") else "no",
                 _f(s.get("claimed_fidelity"), 5), _f(s.get("overclaim"), 5)] + there) + " |")
         else:

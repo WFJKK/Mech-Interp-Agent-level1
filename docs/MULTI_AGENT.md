@@ -143,7 +143,8 @@ Each file's comments give what every role gets. The two `rnn-b` files run no bas
 (`orchestration.mode: trained`); `rnn-b-team.yaml` is set up to be read against the single-agent
 run `pilot-rnn-b`, with the same networks, five rounds as five cycles, patience, sample size,
 reward and agent. Like the single agent, they score every submission on a fresh sample and choose
-the best by those scores (`orchestration.development_seed: null`); runs with a baseline comparison
+the best by those scores (`orchestration.development_seed: null`), an identical program on one
+domain counted once with its samples pooled (`level1/pooling.py`); runs with a baseline comparison
 keep one fixed development sample. Run the smoke configuration first:
 
 ```bash
@@ -584,8 +585,9 @@ See `RANDOM_BASELINES.md` for these distinctions.
 
 ## Development, locking and reports
 
-Development uses fixed samples per task so resubmitting an identical program cannot obtain a new
-lucky draw. This does not prevent adaptive overfitting. The global winner and regional frontier
+Development uses a fixed sample per task, on which an identical program always scores the same, or a
+fresh sample per submission with an identical program's samples pooled (`level1/pooling.py`): either
+way, resubmitting it cannot obtain a new lucky draw. This does not prevent adaptive overfitting. The global winner and regional frontier
 portfolio are frozen before fresh-input evaluation or second-network evaluation. Final results never
 enter research-session prompts and do not select the winners. A terminal synthesis session may read
 them to explain the already frozen results; it cannot restart research or alter selection.
