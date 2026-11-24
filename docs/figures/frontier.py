@@ -5,10 +5,15 @@
 The frontier of a run is over three numbers per submission: the share of the inputs answered rightly,
 the share answered wrongly and the cost. Every submission of these runs covers the whole data set, so
 its right share is one less its wrong share, and the frontier is a frontier in two: cost against wrong
-answers. One panel per run shows every scored submission on the run's own network, the ones the report
-marks as on the frontier, the locked entry, the line of equal reward through it, and the frozen
-baseline entry scored on the same network. It reads each run's report.json and baseline_scores.jsonl
-and writes frontier.png next to this file.
+answers. One panel per run shows every scored entry on the run's own network, the ones on the
+frontier, the locked entry, the line of equal reward through it, and the frozen baseline entry scored
+on the same network. It reads each run's report.json and baseline_scores.jsonl and writes frontier.png
+next to this file.
+
+An entry submitted more than once is one point: its latest submission, with all of its samples pooled
+(level1/pooling.py), as a run that pools scores it. The runs drawn here were made before pooling, so
+they are read as if they had pooled (as `python -m level1.loop rescore --pool` reads them); the
+frontier and the locked entry are those of the entries as pooled.
 """
 
 from __future__ import annotations
@@ -18,6 +23,9 @@ import sys
 from pathlib import Path
 
 import matplotlib
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))  # the repository, for level1
+from level1 import pooling, report  # noqa: E402
 
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt  # noqa: E402
@@ -48,14 +56,22 @@ def names_from_readme() -> dict:
 
 
 def load(folder: Path, run: str) -> tuple:
-    """(the run's scored submissions, the locked one's name, the frozen baseline entry's receipt on the run's
-    own network or None)."""
-    report = json.loads((folder / run / "report.json").read_text())
-    subs = [s for s in report["submissions"] if s.get("status") == "scored"]
+    """(the run's scored entries, each submitted one standing for all of its submissions with their samples
+    pooled, the names of those on the frontier, the locked one's name, the frozen baseline entry's receipt on
+    the run's own network or None)."""
+    rep = json.loads((folder / run / "report.json").read_text())
+    subs = [s for s in rep["submissions"] if s.get("status") == "scored"]  # in submission order
+    if not any(s.get("pooled") for s in subs):  # a run made before pooling, read as if it had pooled
+        subs = pooling.repooled(subs, rep["reward"])
+    subs = pooling.standing(subs)
     for s in subs:
         if abs(s["parts"]["coverage"] - 1.0) > 1e-12:
             raise SystemExit(f"{run} {s['carried_as']} covers less than the data set: two axes are not enough")
-    baseline = report.get("baseline") or {}
+    locked = None
+    for s in subs:  # the highest reward, the earliest on a tie (loop.best_submission)
+        if locked is None or s["reward"] > locked["reward"]:
+            locked = s
+    baseline = rep.get("baseline") or {}
     first, frozen = (baseline.get("networks") or {}).get("first"), baseline.get("baseline_run")
     base = None
     scores = folder / run / "baseline_scores.jsonl"
@@ -64,11 +80,12 @@ def load(folder: Path, run: str) -> tuple:
             e = json.loads(line)
             if e.get("network") == first and e.get("baseline_run") == frozen and e.get("status") == "scored":
                 base = e
-    return subs, report["lock"]["carried_as"], base
+    return subs, report.frontier(subs), locked["carried_as"], base
 
 
-def panel(ax, subs: list, locked: str, base: dict | None, title: str) -> None:
-    pts = [(s["whole_cost"], s["wrong_share"] * PER, bool(s.get("on_frontier")), s["carried_as"] == locked) for s in subs]
+def panel(ax, subs: list, front_names: set, locked: str, base: dict | None, title: str) -> None:
+    pts = [(report.whole_cost(s["parts"]), report.shares(s["parts"])[1] * PER, s["carried_as"] in front_names,
+            s["carried_as"] == locked) for s in subs]
     bc = bw = None
     if base:
         p = base["parts"]
@@ -115,9 +132,11 @@ def main(argv=None) -> int:
     fig, axes = plt.subplots(3, 2, figsize=(8.2, 9.4), dpi=200, facecolor=SURFACE)
     names = names_from_readme()
     for ax, (run, name, design) in zip(axes.flat, RUNS):
-        subs, locked, base = load(folder, run)
-        panel(ax, subs, locked, base, f"{names[name]}   ({name}, {design})" if name in names else f"{name}   {design}")
-    handles = [Line2D([], [], marker="o", ls="", color=GREY, markeredgecolor=SURFACE, markersize=7, label="a submission"),
+        subs, front_names, locked, base = load(folder, run)
+        panel(ax, subs, front_names, locked, base,
+              f"{names[name]}   ({name}, {design})" if name in names else f"{name}   {design}")
+    handles = [Line2D([], [], marker="o", ls="", color=GREY, markeredgecolor=SURFACE, markersize=7,
+                      label="an entry (submitted again: its samples pooled)"),
                Line2D([], [], marker="o", color=BLUE, markeredgecolor=SURFACE, markersize=7, lw=2, label="on the Pareto frontier"),
                Line2D([], [], marker="D", ls="", color=ORANGE, markeredgecolor=SURFACE, markersize=7,
                       label="the frozen baseline entry, same network"),
