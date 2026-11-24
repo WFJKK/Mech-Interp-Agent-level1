@@ -324,3 +324,76 @@ def test_an_entry_that_leans_on_small_weights_does_not_become_the_baseline(tmp_p
     assert (f["name"], f["label"], f["established"]) == ("itself", "passes", True) and f["rule"] == baseline.RULE
     assert sorted(f["confirmation"]["twin_networks"]) == twin_ids and sorted(f["confirmation"]["networks"]) == [f"lin-e-s{k}" for k in (2, 3, 4, 5)]
     assert all(baseline.exact(r) for r in {**f["confirmation"]["networks"], **f["confirmation"]["twin_networks"]}.values())
+
+
+def _shifted_scripts(where, times, sessions=1):
+    """One script per session: save an entry that is wrong on about one input in a hundred (rnn-a's lower number,
+    the first shifted up), then submit that same entry `times` times."""
+    from level1.util import write_json
+
+    where.mkdir(parents=True, exist_ok=True)
+    calls = [{"tool": "run_python", "args": {"code": "g = graph()\nsave_entry('shifted', g.entry(interpretation="
+                                                    "(g.tokens() + g.const([0.05, 0.0])).argmin()))"}}]
+    calls += [{"tool": "submit_entry", "args": {"name": "shifted", "claimed_fidelity": 0.99}}] * times
+    for i in range(sessions):
+        write_json(where / f"{i + 1:02d}.json", {"calls": calls, "response": "## What the network does\nThe same entry, again."})
+    return where
+
+
+def test_submitting_one_entry_again_does_not_buy_another_draw(tmp_path):
+    """Each scoring draws its own sample, so one entry scores a little differently each time, and the lock takes
+    the best submission: an agent that submits one entry again and again raises the reward it is locked on without
+    predicting better or computing less (pilot-rnn-g-detail-2 did, three times in one round). Pooled, every
+    submission of an entry counts its samples together, and only the latest, which carries them all, can be
+    locked: submitting again adds evidence, not another draw."""
+    from level1 import loop, run_config
+    from level1.util import read_json
+
+    cfg = run_config.load("config/pilot/rnn-a-smoke.yaml", run_config.merge(
+        {"backend": "fake", "sandbox": "process", "runs_dir": str(tmp_path), "run_id": "again", "rounds_max": 1,
+         "verifier": {"sample_size": 600, "reference_samples": 2}, "session": {"python_calls": 3, "submissions": 4}}, {}))
+    path = loop.start(cfg, fake_scripts=_shifted_scripts(tmp_path / "scripts", 4), out=lambda *_: None)
+    subs = read_json(path / "round_001/round.json")["submissions"]
+    assert [s["status"] for s in subs] == ["scored"] * 4 and len({s["entry_sha256"] for s in subs}) == 1
+    draws = [s.get("draw", s)["parts"] for s in subs]
+    # the reward the lock stands on is that of all four samples together, as one sample of 2,400 inputs
+    agree = sum(d["n_agree"] for d in draws)
+    inside = sum(d["n_in_region"] for d in draws)
+    n = sum(d["n_inputs"] for d in draws)
+    f = float(draws[0]["model_ops"])
+    parts = {"coverage": inside / n, "r": sum(d["predict_ops"] for d in draws) / (inside * f),
+             "r_rule": sum(d["rule_ops"] for d in draws) / (n * f), "b": draws[0]["b"],
+             "fidelity": agree / inside, "fidelity_low": lang.wilson_lower(agree, inside)}
+    expected = rewards.compute(parts, cfg["reward"])["reward"]
+    lock = read_json(path / "lock.json")
+    assert lock["carried_as"] == "r1s4" and loop.best_submission(loop.completed(path))["carried_as"] == "r1s4"
+    assert lock["reward"] == pytest.approx(expected, abs=1e-12)
+    assert subs[-1]["pooled"]["samples"] == 4 and subs[-1]["parts"]["n_inputs"] == 2400
+
+
+def test_a_team_member_submitting_one_entry_again_does_not_buy_another_draw(tmp_path):
+    """The same in a team: two submissions of one entry on one domain are one candidate whose development score
+    counts both samples, and the earlier is never selected on its own."""
+    from level1 import loop, multi_agent, run_config
+    from level1.util import write_json
+
+    cfg = run_config.load("config/experiments/rnn-a-team.yaml", run_config.merge(
+        {"backend": "fake", "sandbox": "process", "runs_dir": str(tmp_path), "run_id": "team-again", "rounds_max": 1,
+         "patience": 2, "verifier": {"sample_size": 600, "workload_size": 600, "reference_samples": 2},
+         "session": {"python_calls": 8, "submissions": 4},
+         "orchestration": {"mode": "trained", "workers": 1, "parallel": False, "final_summary": False,
+                           "development_seed": None, "checkpoint_python_calls": None}}, {}))
+    scripts = tmp_path / "team-scripts"
+    scripts.mkdir()
+    write_json(scripts / "01.json", {"calls": [{"tool": "assign_task", "args": {"task": "Find a cheap program."}}],
+                                     "response": "## What the network does\nOne task."})
+    _shifted_scripts(scripts / "researcher", 2)
+    (scripts / "researcher" / "01.json").rename(scripts / "02.json")
+    write_json(scripts / "03.json", {"calls": [], "response": "## What the network does\nNothing to add."})
+    path = loop.start(cfg, fake_scripts=scripts, out=lambda *_: None)
+    archive = multi_agent.read_archive(path)
+    first, second = (next(c for c in archive["candidates"] if c["id"] == cid) for cid in ("a0002s1", "a0002s2"))
+    assert first["entry_sha256"] == second["entry_sha256"]
+    assert first.get("superseded_by") == "a0002s2" and second["selection"]["pooled"]["samples"] == 2
+    assert second["selection"]["parts"]["n_inputs"] == 1200
+    assert archive["global"]["best"] == "a0002s2" and archive["global"]["frontier"] == ["a0002s2"]
