@@ -7,8 +7,12 @@
 #
 # Every session's prompt carries team-rnn-g-detail's archive and notes, and through them the single agent's, every
 # reward recomputed at alpha = 30, and the note for a lower price. Its sessions are numbered after the earlier
-# team's (a0012 on). The sample stays at 72,000 inputs drawn afresh for every submission, the room at 800 nodes and
-# 512 numbers, the team at a lead and four researchers.
+# team's (a0012 on). The sample stays at 72,000 inputs drawn afresh for every submission and the room at 800 nodes
+# and 512 numbers. The team is a lead and six researchers instead of four, so that more accounts of those inputs
+# can be tried side by side: each researcher gets what each of the four got (37 Python calls, 2 submissions,
+# 81 turns, 49 minutes and $7.50 a phase), and the lead, which now reads six researchers' work, 112 calls,
+# 4 submissions, 243 turns, 146 minutes and $22.50. Six researchers' Python programs may use up to 4 GB each at
+# the same time.
 #
 # What to compare with: at alpha = 30 the earlier lock (a0011s1) scores 0.759. The same program with only its
 # thresholds re-tuned to that price (gate at -3.6 instead of -6.2, the near-tie bounds 0.03 and 0.02 instead of 0.05
@@ -16,11 +20,21 @@
 # the inputs instead of 33% and is wrong on 54 in 72,000 instead of 3 (3 million inputs simulated; the verifier
 # gave 0.792 and 0.793 on two fresh samples). A reward above about 0.79 is what this research adds.
 #
-# Two research phases, each capped at $45 as before; with the planning lead and the closing summary the run can
-# spend at most about $130 (team-rnn-g-detail spent $52 on two phases).
+# Two research phases, each capped at $67.50; with the planning lead ($18) and the closing summary ($20) the run
+# can spend at most $173 (team-rnn-g-detail, with four researchers, spent $52 on two phases).
 extends: rnn-g-team-detail.yaml
 run_id: team-rnn-g-alpha30
 continue_from: team-rnn-g-detail
 continuation:
   alpha: 30
 rounds_max: 2
+session:                 # one and a half times team-rnn-g-detail's, for six researchers instead of four
+  python_calls: 375
+  submissions: 16
+  max_turns: 900
+  seconds: 32400
+budget:
+  run_usd: 200
+  round_usd: 67.5
+orchestration:
+  workers: 6

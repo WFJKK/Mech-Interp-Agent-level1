@@ -371,7 +371,13 @@ def test_the_rnn_g_alpha30_configs_go_on_from_the_team_at_a_lower_price():
     assert len({earlier["run_id"], team["run_id"], smoke["run_id"]}) == 3
     assert team["continuation"]["alpha"] == smoke["continuation"]["alpha"] == 30 < earlier["continuation"]["alpha"]
     assert team["rounds_max"] == 2 and smoke["rounds_max"] == 1
-    for key in ("model", "network", "seed_check", "entry", "verifier", "agent_model", "effort", "session", "budget",
-                "patience", "orchestration"):
+    for key in ("model", "network", "seed_check", "entry", "verifier", "agent_model", "effort", "patience"):
         assert team[key] == earlier[key]
+    # six researchers, each with what each of the four had; the lead keeps its four submissions
+    assert team["orchestration"]["workers"] == 6 and earlier["orchestration"]["workers"] == 4
+    assert multi_agent._allocation(team, "regional", 1, 6)[:3] == multi_agent._allocation(earlier, "regional", 1, 4)[:3]
+    for key in ("max_turns", "seconds"):
+        assert multi_agent._quota(team, team["session"][key], "regional", 1, 6, key == "max_turns") == pytest.approx(
+            multi_agent._quota(earlier, earlier["session"][key], "regional", 1, 4, key == "max_turns"))
+    assert multi_agent._allocation(team, "lead", 1, 6)[1] == multi_agent._allocation(earlier, "lead", 1, 4)[1] == 4
     assert smoke["budget"]["run_usd"] < team["budget"]["run_usd"] and smoke["orchestration"]["workers"] == 2
