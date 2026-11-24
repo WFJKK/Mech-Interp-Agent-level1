@@ -10,6 +10,12 @@
 # team's (a0012 on). The sample stays at 72,000 inputs drawn afresh for every submission, the room at 800 nodes and
 # 512 numbers, the team at a lead and four researchers.
 #
+# What to compare with: at alpha = 30 the earlier lock (a0011s1) scores 0.759. The same program with only its
+# thresholds re-tuned to that price (gate at -3.6 instead of -6.2, the near-tie bounds 0.03 and 0.02 instead of 0.05
+# and 0.03, the tie rule's 0.08 instead of 0.15 and its per-cell table times 0.8) scores 0.792: it computes 24% of
+# the inputs instead of 33% and is wrong on 54 in 72,000 instead of 3 (3 million inputs simulated; the verifier
+# gave 0.792 and 0.793 on two fresh samples). A reward above about 0.79 is what this research adds.
+#
 # Two research phases, each capped at $45 as before; with the planning lead and the closing summary the run can
 # spend at most about $130 (team-rnn-g-detail spent $52 on two phases).
 extends: rnn-g-team-detail.yaml
