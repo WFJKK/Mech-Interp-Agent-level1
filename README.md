@@ -76,12 +76,12 @@ on at most $1 - q$ of the inputs of the region, we have there: $|A - A_I| \le 1 
 ### Mech interp
 
 An interpretation as defined above models the network's outputs, not its accuracy. We are trying
-to understand how the network works, and for that its errors matter most: where it does its task,
-many different mechanisms give the same answers, and only where it fails does its own mechanism
-show. This holds especially for the networks considered so far, which were all trained on a task:
-on ARC's 432-weight network the task alone gives the network's output on 95.3% of inputs, and all
-that is specific to the network lies in the remaining 4.7%. It may also matter for safety, where
-what one looks for are rare departures from the intended behaviour.
+to understand how the network works, and for that its errors might matter. This holds especially
+for the networks considered so far, which were all trained on a task. With regard to safety this
+may be important, as rare departures from intended behaviour play an important role. Ideally we
+would like an understanding to be mechanistic. It is somewhat clear what this means intuitively,
+namely that the prediction of behaviour should follow from the weights and a limited number of
+forward passes, but it is difficult to formalise.
 
 ### Relationship to compact proofs
 
