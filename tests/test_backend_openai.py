@@ -255,3 +255,61 @@ def test_the_real_http_path_against_a_stand_in_on_this_machine(tmp_path):
     for path in (tmp_path / "run").rglob("*"):
         if path.is_file():
             assert KEY not in path.read_text(errors="replace"), path
+
+
+def test_a_whole_run_through_the_api_backend(tmp_path, monkeypatch):
+    """The loop itself with backend openai_api: the rounds, the budget's log, the lock and the report, the model's part
+    played by the scripted rounds of tests/fake_run sent as tool calls by a stand-in on this machine."""
+    from pathlib import Path
+
+    from level1 import loop
+    from level1.backends.fake import FakeBackend
+    from level1.backends.standin import StandIn as Server, message
+
+    scripts = sorted((Path(__file__).parent / "fake_run").glob("*.json"))
+    state = {"round": -1, "step": 0}
+
+    def answers(body, k):
+        fresh = not any(i.get("type") == "function_call_output" for i in body["input"])
+        if fresh:
+            state["round"], state["step"] = state["round"] + 1, 0
+        script = json.loads(scripts[min(state["round"], len(scripts) - 1)].read_text())
+        calls = script.get("calls", [])
+        if state["step"] < len(calls):
+            c = calls[state["step"]]
+            state["step"] += 1
+            args = FakeBackend._resolve(c.get("args", {}), scripts[0].parent)
+            return [call(c["tool"], args, f"call_{state['round']}_{state['step']}")]
+        return [message(script.get("response", "notes"))]
+
+    monkeypatch.setenv("CPL_OPENAI_KEY", KEY)
+    with Server(answers, usage=usage(3000, 1000, 200), model=MODEL) as server:
+        cfg = run_config.load("config/pilot/lin-a.yaml", {"runs_dir": str(tmp_path), "sandbox": "process", **OVER, "run_id": "through-the-api",
+                                                          "rounds_max": 2, "session": {"python_calls": 3, "submissions": 2},
+                                                          "openai": {"base_url": server.url}, "budget": {"run_usd": 5, "round_usd": 2}})
+        lines = []
+        path = loop.start(cfg, out=lines.append)
+    text = "\n".join(lines)
+    assert (path / "lock.json").exists() and (path / "report.md").exists()
+    assert "billed to the API key in CPL_OPENAI_KEY" in text and "counted from the tokens OpenAI's API reports" in text
+    spend = read_jsonl(path / "spend.jsonl")
+    assert [e["event"] for e in spend].count("end") >= 1 and all(e["cost_usd"] > 0 for e in spend if e["event"] == "end")
+    meta = json.loads((path / "round_001" / "meta.json").read_text())
+    assert meta["backend"] == "openai_api" and meta["submissions"] >= 1 and meta["cost_usd"] > 0
+    assert "openai_api" in (path / "report.md").read_text()
+    for f in path.rglob("*"):
+        if f.is_file():
+            assert KEY not in f.read_text(errors="replace"), f
+
+
+def test_a_team_sessions_share_of_the_budget_is_claimed_and_settled(tmp_path):
+    """In a team run each session claims its cap against the run, its own count and its cycle (budget.claim)."""
+    cfg, session, where = setup(tmp_path, budget={"run_usd": 1.0, "round_usd": 0.5})
+    cfg = {**cfg, "budget": {**cfg["budget"], "cycle_id": "c1", "cycle_usd": 0.25}}
+    b, t, _ = backend(cfg, [answer(said("done"))])
+    r = b.respond("the prompt", 0, where, session)
+    spend = read_jsonl(tmp_path / "run" / "spend.jsonl")
+    assert spend[0]["event"] == "start" and spend[0]["cycle_id"] == "c1" and spend[0]["cap_usd"] == 0.25
+    assert spend[1]["event"] == "end" and spend[1]["cost_usd"] == pytest.approx(r.meta["cost_usd"])
+    assert r.meta["budget"]["cycle_id"] == "c1" and r.meta["budget"]["cycle_counted_usd"] == pytest.approx(r.meta["cost_usd"])
+    assert "$0.25" in t.posts[0]["body"]["input"][1]["content"]

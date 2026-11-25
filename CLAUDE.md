@@ -25,6 +25,14 @@ that predicts a small network's outputs in fewer operations, and a verifier meas
   `auth: api_key`: then the key comes from the variable `api_key_env` names (`CPL_ANTHROPIC_KEY`),
   reaches the CLI only through its `apiKeyHelper` under `--bare`, is never written to a file or a
   log, and the run stops at its budget. Tests use stand-ins for the CLI and the API.
+- The same for OpenAI (`docs/OPENAI.md`): never read or set `OPENAI_API_KEY` or `CODEX_API_KEY`. The
+  `openai_api` backend takes its key from the variable `api_key_env` names (`CPL_OPENAI_KEY`), sends it
+  in the request's Authorization header only, and stops at the run's budget, which it counts from the
+  API's token counts at the prices in the config. The `codex` backend runs under the user's ChatGPT
+  login only, with the key variables removed from the CLI's environment. A Codex session must have
+  nothing that reads a file or the web: the backend checks that against a stand-in before a run and in
+  every session's events; a change to its switches keeps `tests/test_backend_codex.py` passing with
+  the CLI installed.
 - Nothing model-specific goes in `level1/`: an architecture lives only in its
   `models/<name>/model.py`, and numbers live only in config files.
 - Run small tests before large runs, and keep logs append-only so any run can resume.

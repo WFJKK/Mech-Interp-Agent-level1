@@ -1,0 +1,17 @@
+# A first contact with an OpenAI model through the Codex CLI under a ChatGPT login (backend: codex,
+# docs/OPENAI.md): the lin-a smoke run's one short round. No key is used and nothing is billed per call. Before
+# the round the CLI is run once against a stand-in on this machine and what it would give the model is read
+# (the round's codex_check.json): the run starts only if that is the session's tools and nothing that reads a
+# file or the web.
+#
+#   npm install -g @openai/codex     once
+#   codex login                      once, with ChatGPT
+#   python -m level1.loop run --config config/pilot/lin-a-codex-smoke.yaml
+#
+# If the Codex home (~/.codex) holds an AGENTS.md the run refuses it, since the CLI would give that file to
+# the model: set codex_home below to an empty folder and sign in there, CODEX_HOME=<that folder> codex login.
+extends: lin-a-smoke.yaml
+run_id: pilot-lin-a-codex-smoke
+backend: codex
+agent_model: gpt-6.2-astra
+# codex_home: ~/.codex-level1
