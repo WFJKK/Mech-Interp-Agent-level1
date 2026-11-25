@@ -59,18 +59,11 @@ Now in our setup we do not estimate accuracy but fidelity to the model. In the n
 section fidelity would be defined as
 
 ```math
-q = \mathbb{E}_x \big[ \mathbf{1}\{I(x) = M(x)\} \mid x \in S \big]
+q = \mathbb{E}_x \big[ \mathbf{1}\{I(x) = M(x)\} \mid x \in S \big].
 ```
-
-Hence, in short, in our setup the average is not part of the interpretation's answer but part of
-how the verifier checks it.
 
 We can of course calculate our interpretation's accuracy $A_I$. As interpretation and model differ
-on at most $1 - q$ of the inputs of the region, we have there:
-
-```math
-| A - A_I | \le 1 - q
-```
+on at most $1 - q$ of the inputs of the region, we have there: $|A - A_I| \le 1 - q$.
 
 ## Reward function
 
