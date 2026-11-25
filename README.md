@@ -50,15 +50,6 @@ $x$ drawn from $D$:
 A = \mathbb{E}_x \big[ \mathbf{1}\{M(x) = y(x)\} \big]
 ```
 
-Sampling runs $M$ on $n$ inputs drawn from $D$ and takes the share it gets right. That estimate is
-off by $A(1 - A)/n$ in mean squared error, at the cost of $n$ forward passes. The principle asks
-of an estimate $\hat{A}$ that is worked out from the weights with the compute of $n$ forward passes
-that it does no worse, for every $n$:
-
-```math
-\mathbb{E} \big[ (\hat{A} - A)^2 \big] \le \frac{A (1 - A)}{n}
-```
-
 ## Reward function
 
 ### What we use
