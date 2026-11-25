@@ -16,6 +16,8 @@ from .util import REPO_ROOT, read_yaml
 DEFAULTS = REPO_ROOT / "config" / "defaults.yaml"
 REQUIRED = ("run_id", "model", "network")
 KEY_VARIABLES = ("ANTHROPIC_API_KEY", "ANTHROPIC_AUTH_TOKEN")  # the CLI's own; the backend removes them
+OPENAI_KEY_VARIABLES = ("OPENAI_API_KEY", "CODEX_API_KEY")  # the Codex CLI's own; a run's key has a variable of its own
+BACKENDS = ("claude_code", "codex", "openai_api", "fake")
 
 
 class ConfigError(ValueError):
@@ -65,10 +67,20 @@ def load(path, overrides: dict | None = None) -> dict:
         raise ConfigError(str(exc)) from None
     if cfg.get("auth") not in ("login", "api_key"):
         raise ConfigError(f"auth must be login or api_key, not {cfg.get('auth')!r}")
+    if cfg.get("backend") not in BACKENDS:
+        raise ConfigError(f"no backend named {cfg.get('backend')!r}; there are {', '.join(BACKENDS)}")
+    reserved = KEY_VARIABLES + OPENAI_KEY_VARIABLES
     for key in ("api_key_env", "api_workspace_env"):
         var = cfg.get(key)
-        if var is not None and (not isinstance(var, str) or not var.isidentifier() or var in KEY_VARIABLES):
-            raise ConfigError(f"{key} must name an environment variable other than {' and '.join(KEY_VARIABLES)}, not {var!r}")
+        if var is not None and (not isinstance(var, str) or not var.isidentifier() or var in reserved):
+            raise ConfigError(f"{key} must name an environment variable other than {' and '.join(reserved)}, not {var!r}")
+    if cfg["backend"] == "codex" and cfg["auth"] != "login":
+        raise ConfigError("the codex backend runs under a ChatGPT login only (auth: login): the Codex CLI has no spending cap, "
+                          "so a key is billed through the openai_api backend, which has one")
+    if cfg["backend"] == "openai_api":
+        if cfg["auth"] != "api_key":
+            raise ConfigError("the openai_api backend bills an API key: set auth: api_key (or --auth api_key) and api_key_env")
+        check_openai(cfg)
     if cfg["auth"] == "api_key":
         if not cfg.get("api_key_env"):
             raise ConfigError("auth api_key needs api_key_env: the variable that holds the key")
@@ -76,6 +88,55 @@ def load(path, overrides: dict | None = None) -> dict:
         if errors:
             raise ConfigError("; ".join(errors))
     return cfg
+
+
+def openai_prices(cfg: dict) -> dict:
+    """The prices of the run's model, dollars per million tokens (config: openai.prices.<agent_model>)."""
+    table = (cfg.get("openai") or {}).get("prices") or {}
+    prices = table.get(cfg.get("agent_model")) if isinstance(table, dict) else None
+    if not isinstance(prices, dict):
+        raise ConfigError(f"openai.prices has no entry for the model {cfg.get('agent_model')!r}: without its prices "
+                          "(dollars per million tokens: input, cached_input, output) the run's budget cannot be counted")
+    return prices
+
+
+def check_openai(cfg: dict) -> None:
+    """The openai block of a run billed through OpenAI's API: where it is, and the prices its budget is counted at."""
+    opts = cfg.get("openai")
+    defaults = read_yaml(DEFAULTS)["openai"]
+    if not isinstance(opts, dict) or sorted(set(opts) - set(defaults)):
+        raise ConfigError(f"openai must be a mapping with the options {sorted(defaults)}")
+    if not isinstance(opts.get("base_url"), str) or not opts["base_url"].startswith(("https://", "http://127.0.0.1:", "http://localhost:")):
+        raise ConfigError("openai.base_url must be an https address (or a stand-in on this machine)")
+    if not isinstance(opts.get("request"), dict):
+        raise ConfigError("openai.request must be a mapping of request fields (empty for none)")
+    held = sorted(set(opts["request"]) & {"model", "input", "tools", "stream", "store", "include"})
+    if held:
+        raise ConfigError(f"openai.request cannot set {held}: the backend sets them")
+    idle = opts.get("idle_seconds")
+    if isinstance(idle, bool) or not isinstance(idle, (int, float)) or not idle > 0:
+        raise ConfigError("openai.idle_seconds must be a positive number")
+
+    def priced(block, where, need):
+        for key in need:
+            v = block.get(key)
+            if isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) or v < 0 or (key in ("input", "output") and v == 0):
+                raise ConfigError(f"{where}.{key} must be a price in dollars per million tokens, not {v!r}")
+
+    prices = openai_prices(cfg)
+    where = f"openai.prices.{cfg['agent_model']}"
+    unknown = sorted(set(prices) - {"input", "cached_input", "cache_write", "output", "long_context"})
+    if unknown:
+        raise ConfigError(f"{where} has unknown keys {unknown}")
+    priced(prices, where, ["input", "output"] + [k for k in ("cached_input", "cache_write") if k in prices])
+    long = prices.get("long_context")
+    if long is not None:
+        if not isinstance(long, dict) or sorted(set(long) - {"above_input_tokens", "input", "cached_input", "cache_write", "output"}):
+            raise ConfigError(f"{where}.long_context must be a mapping with above_input_tokens, input, output (and cached_input, cache_write)")
+        n = long.get("above_input_tokens")
+        if isinstance(n, bool) or not isinstance(n, int) or n < 1:
+            raise ConfigError(f"{where}.long_context.above_input_tokens must be a positive whole number of tokens")
+        priced(long, where + ".long_context", ["input", "output"] + [k for k in ("cached_input", "cache_write") if k in long])
 
 
 def check_continuation(cfg: dict) -> None:

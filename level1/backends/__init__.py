@@ -7,6 +7,10 @@ closing notes; what it did, it did through the session's tools.
 
     claude_code   the Claude Code CLI, headless, with the two tools attached; under the user's own login, or
                   billed to an API key within a budget (auth: api_key)
+    codex         OpenAI's Codex CLI, headless, with the two tools attached and its own switched off; under the
+                  user's ChatGPT login only (docs/OPENAI.md)
+    openai_api    OpenAI's API itself (the Responses API), the tools run in this process; billed to an API key
+                  within a budget (docs/OPENAI.md)
     fake          scripted tool calls replayed from JSON files: tests, dry runs
 """
 
@@ -40,4 +44,12 @@ def make(cfg: dict, log=print, fake_scripts=None):
         from .claude_code import ClaudeCodeBackend
 
         return ClaudeCodeBackend(cfg, log=log)
-    raise BackendError(f"no backend named {cfg['backend']!r}; there are claude_code and fake")
+    if cfg["backend"] == "codex":
+        from .codex import CodexBackend
+
+        return CodexBackend(cfg, log=log)
+    if cfg["backend"] == "openai_api":
+        from .openai_api import OpenAIBackend
+
+        return OpenAIBackend(cfg, log=log)
+    raise BackendError(f"no backend named {cfg['backend']!r}; there are claude_code, codex, openai_api and fake")

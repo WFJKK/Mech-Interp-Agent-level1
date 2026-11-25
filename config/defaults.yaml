@@ -4,18 +4,50 @@
 runs_dir: ~/mech-interp-level1-runs   # run folders live outside the repository
 run_id: null                          # a run config sets it; the run folder is <runs_dir>/<run_id>
 
-# who answers a round (docs/DESIGN.md, section 6)
-backend: claude_code                  # claude_code: the Claude Code CLI; fake: scripted
+# who answers a round (docs/DESIGN.md, section 6; docs/OPENAI.md for the two OpenAI backends)
+backend: claude_code                  # claude_code: the Claude Code CLI; codex: OpenAI's Codex CLI, under a ChatGPT
+                                      # login; openai_api: OpenAI's API, billed to a key; fake: scripted
 auth: login                           # who pays: login, the CLI's own login (a subscription is not billed per
-                                      # call); api_key, the key in api_key_env, billed per token, within budget
-api_key_env: CPL_ANTHROPIC_KEY        # never ANTHROPIC_API_KEY: the backend removes that from the CLI's environment
+                                      # call); api_key, the key in api_key_env, billed per token, within budget.
+                                      # codex takes login only and openai_api takes api_key only
+api_key_env: CPL_ANTHROPIC_KEY        # never ANTHROPIC_API_KEY: the backend removes that from the CLI's environment.
+                                      # An openai_api run names its own (CPL_OPENAI_KEY), never OPENAI_API_KEY
 api_workspace_env: CPL_ANTHROPIC_WORKSPACE  # a workspace ID (wrkspc_...), for a key not scoped to one; unset: none sent
-budget:                               # api_key: dollars, by Claude Code's own count (level1/budget.py)
+budget:                               # api_key: dollars, by Claude Code's own count, or for openai_api by the
+                                      # tokens the API reports at openai.prices (level1/budget.py)
   run_usd: 60                         # the rounds end when the run has spent this; resume --budget-usd changes it
   round_usd: 20                       # a round ends when it has spent this; what it submitted stands
 agent_model: claude-fable-5-1
 effort: high                          # low, medium, high, xhigh, max; null leaves it to the CLI
 claude_code_command: claude
+codex_command: codex                  # backend codex: the Codex CLI
+# backend openai_api (level1/backends/openai_api.py). The budget is counted from the tokens the API reports, at
+# the prices here: dollars per million tokens, as OpenAI's pricing page gave them on 25 November 2026. Check
+# them against that page before a run: a wrong price makes the run's count, and so its budget, wrong.
+# cached_input is for input tokens read from the prompt cache; cache_write, where a model has one, for those
+# written to it (billed as input when absent). A request with more input tokens than long_context's
+# above_input_tokens is billed at long_context's prices throughout.
+openai:
+  base_url: https://api.openai.com/v1
+  request: {}                         # more fields of every request, as the API names them (context_management,
+                                      # service_tier, max_output_tokens, ...); none by default
+  idle_seconds: 900                   # a response that sends nothing for this long is taken as lost, and asked again
+  prices:
+    gpt-6.2-astra:
+      {input: 8.00, cached_input: 0.40, output: 40.00,
+       long_context: {above_input_tokens: 272000, input: 16.00, cached_input: 0.80, output: 60.00}}
+    gpt-6.2-sol:
+      {input: 2.00, cached_input: 0.10, output: 10.00,
+       long_context: {above_input_tokens: 272000, input: 4.00, cached_input: 0.20, output: 15.00}}
+    gpt-6.1-terra:
+      {input: 1.00, cached_input: 0.05, output: 5.00,
+       long_context: {above_input_tokens: 272000, input: 2.00, cached_input: 0.10, output: 7.50}}
+    gpt-6-luna:
+      {input: 0.10, cached_input: 0.01, output: 0.50,
+       long_context: {above_input_tokens: 272000, input: 0.20, cached_input: 0.02, output: 0.75}}
+    gpt-5.5:
+      {input: 5.00, cached_input: 0.50, output: 30.00,
+       long_context: {above_input_tokens: 272000, input: 10.00, cached_input: 1.00, output: 45.00}}
 python_executable: null               # the Python that serves the tools; null: the one running the loop
 api_retries: {tries: 12, first_wait_s: 60, max_wait_s: 1800}
 max_consecutive_refusals: 2
