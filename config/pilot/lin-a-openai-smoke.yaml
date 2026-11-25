@@ -13,7 +13,7 @@ run_id: pilot-lin-a-openai-smoke
 backend: openai_api
 auth: api_key
 api_key_env: CPL_OPENAI_KEY
-agent_model: gpt-6.2-sol
+agent_model: gpt-6.2-astra
 budget:
-  run_usd: 5
-  round_usd: 5
+  run_usd: 10
+  round_usd: 10

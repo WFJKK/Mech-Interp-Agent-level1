@@ -29,7 +29,7 @@ own:
 
 ```bash
 python -m level1.loop run --config config/pilot/lin-b.yaml --backend openai_api --auth api_key \
-    --api-key-env CPL_OPENAI_KEY --agent-model gpt-6.2-sol --run-id pilot-lin-b-gpt --budget-usd 40
+    --api-key-env CPL_OPENAI_KEY --agent-model gpt-6.2-astra --run-id pilot-lin-b-gpt --budget-usd 40
 ```
 
 What happens (`level1/backends/openai_api.py`):
