@@ -55,9 +55,17 @@ error $(\hat{A}(B) - A)^2$ at a compute budget of $B$ forward passes. It is set 
 sampling achieves at that budget: running $M$ on $B$ inputs drawn from $D$ and taking the share it
 gets right is off by $A (1 - A) / B$ in mean squared error.
 
-Now in our setup we do not estimate accuracy but fidelity to the model. We can of course calculate
-our interpretation's accuracy $A_I$. As interpretation and model differ on at most $1 - q$ of the
-inputs of the region, we have there:
+Now in our setup we do not estimate accuracy but fidelity to the model. In the notation of this
+section fidelity would be defined as
+
+```math
+q = \mathbb{E}_x \big[ \mathbf{1}\{I(x) = M(x)\} \mid x \in S \big]
+```
+
+Hence, in short, the average for our setup here is part of the grading, not part of the answer.
+
+We can of course calculate our interpretation's accuracy $A_I$. As interpretation and model differ
+on at most $1 - q$ of the inputs of the region, we have there:
 
 ```math
 | A - A_I | \le 1 - q
