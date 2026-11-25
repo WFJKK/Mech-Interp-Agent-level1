@@ -62,7 +62,8 @@ section fidelity would be defined as
 q = \mathbb{E}_x \big[ \mathbf{1}\{I(x) = M(x)\} \mid x \in S \big]
 ```
 
-Hence, in short, the average for our setup here is part of the grading, not part of the answer.
+Hence, in short, in our setup the average is not part of the interpretation's answer but part of
+how the verifier checks it.
 
 We can of course calculate our interpretation's accuracy $A_I$. As interpretation and model differ
 on at most $1 - q$ of the inputs of the region, we have there:
