@@ -38,6 +38,27 @@ Nothing is proved: a claim is checked by measuring it.
 
 ### Relationship to ARC's approach and to accuracy
 
+ARC has set itself the goal to deductively estimate properties of networks instead of merely
+sampling by running the network. This is usually (perhaps not conclusively) formulated via the
+matching sampling principle, which states that such an estimate should be at least as accurate as
+random sampling at the same compute ([ARC progress update: Competing with
+sampling](https://www.lesswrong.com/posts/XdQd9gELHakd5pzJA/arc-progress-update-competing-with-sampling)).
+Take as the property the accuracy of a model $M$ on a task with right answers $y(x)$, for inputs
+$x$ drawn from $D$:
+
+```math
+A = \mathbb{E}_x \big[ \mathbf{1}\{M(x) = y(x)\} \big]
+```
+
+Sampling runs $M$ on $n$ inputs drawn from $D$ and takes the share it gets right. That estimate is
+off by $A(1 - A)/n$ in mean squared error, at the cost of $n$ forward passes. The principle asks
+of an estimate $\hat{A}$ that is worked out from the weights with the compute of $n$ forward passes
+that it does no worse, for every $n$:
+
+```math
+\mathbb{E} \big[ (\hat{A} - A)^2 \big] \le \frac{A (1 - A)}{n}
+```
+
 ## Reward function
 
 ### What we use
