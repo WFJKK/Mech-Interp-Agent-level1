@@ -87,41 +87,21 @@ tightness of the bound.
 
 ### What we use
 
-Each claim gets one number from what the verifier measured. With $\mu$ the coverage, $c$ the cost
-and $q_{\text{low}}$ the lower end of the fidelity's 95% interval on the sample (the fidelity itself
-when every input is checked):
+The idea is now to combine the three metrics of an interpretation into a single scalar reward, one
+that rises with coverage and fidelity and falls with cost; and ideally one that is difficult to
+game. With $\mu$, $c$ and $q$ defined as in the previous sections, we consider:
 
 ```math
-R = \mu \, \big[ (1 - c) - \alpha \, (1 - q_{\text{low}}) \big], \qquad \alpha = 10
+R = \mu \, \big[ (1 - c) - \alpha \, (1 - q) \big]
 ```
 
-Read it for one input of the region: answering it with the interpretation instead of the network
-saves $1 - c$ of a forward pass, and a wrong answer is charged $\alpha$ forward passes. Multiplied
-out over the $n$ inputs scored, with $F$ the operations of one forward pass and the measured
-fidelity in place of its lower bound:
+Here $\alpha$ is a hyperparameter, which determines the punishment for wrong answers.
 
-```math
-R = \mu - \frac{\text{operations spent}}{n F} - \alpha \, \frac{\text{wrong answers}}{n}
-```
-
-In units of $1/n$: every input covered earns 1, every operation costs $1/F$, and every wrong answer
-costs $\alpha$.
-
-- **The network itself scores 0**: $\mu = q = c = 1$. An input on which the network itself is run
-  earns nothing, so a positive score has to come from computing less than the network does.
-- **1 is the most**: right on every input at no cost. On a sample of 16,384 inputs the lower bound
-  caps it at about 0.998.
-- **Errors are expensive**: a claim gains only where $q > 1 - (1 - c)/\alpha$, so at $\alpha = 10$
-  it must be right more than 90% of the time even if it is free. $\alpha$ must exceed 1: at
-  $\alpha = 1$ the reward is $q - c$, and a free constant guess, right on 1 input in 64, would beat
-  the network.
-- **It adds up over the data set**: an input left out of the region earns 0, the same as an input on
-  which the network itself is run, so a claim's score is the sum of what its parts earn.
-- **As a speed-up**: run the network wherever the claim does not apply and count each wrong answer as
-  $\alpha$ forward passes. Then $R$ is 1 less the compute with the claim over the compute without it,
-  and $1/(1 - R)$ is the speed-up: 0.99 is about a hundredfold.
-- **The frontier needs no $\alpha$**: the reports also mark the Pareto frontier of right share, wrong
-  share and cost; $R$ picks one point on it.
+- **The network itself scores 0**: $\mu = q = c = 1$.
+- **1 is the upper bound**: right on every input at no cost.
+- **Hyperparameter $\alpha$**: a claim only gains when $q > 1 - (1 - c)/\alpha$. Even a free claim
+  ($c = 0$) must therefore be right on more than a share $1 - 1/\alpha$ of its region: 90% at
+  $\alpha = 10$, 99% at $\alpha = 100$.
 
 Rewards are functions in `level1/rewards.py`, chosen by the run config. Every receipt keeps the
 measured parts, so a finished run can be scored again under another reward
