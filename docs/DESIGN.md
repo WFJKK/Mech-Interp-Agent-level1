@@ -219,6 +219,12 @@ Anthropic's Claude Agent SDK.") and the run's system prompt and prompt, nothing 
 it also adds a short note on its environment (working folder, platform, date). Neither says
 anything about the network.
 
+`backend: codex` and `backend: openai_api` put an OpenAI model in the agent's place: the first runs
+OpenAI's Codex CLI under a ChatGPT login, with everything of its own that reads a file or the web
+switched off and checked to be off before a model is asked; the second talks to OpenAI's API itself,
+billed to a key within the run's budget, which it counts from the tokens the API reports. Both are
+described in `docs/OPENAI.md`.
+
 `backend: fake` replays scripted tool calls from JSON files against the real session, sandbox and
 verifier. The tests and dry runs use it; no model is called.
 

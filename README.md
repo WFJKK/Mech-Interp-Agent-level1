@@ -964,7 +964,9 @@ reads the path of the Python that runs the agent's code, because a traceback sho
 agent: an environment that lives in a folder named after the proof pipeline is refused.
 
 Rounds run under your own Claude Code login, so the CLI (`claude`) has to be installed and signed
-in. To bill an API key instead, see "On an API key" below.
+in. To bill an API key instead, see "On an API key" below. To put an OpenAI model in the agent's
+place, through the Codex CLI under a ChatGPT login or through OpenAI's API on a key, see
+`docs/OPENAI.md`.
 
 ### Run a pilot
 
@@ -1081,12 +1083,12 @@ the release [Run records for the README's experiments](https://github.com/WFJKK/
       networks.py      model folders: the networks, the network written as an entry, what the agent is given
       prompt.py        a round's prompt
       session.py       one agent session: the two tools, budgets, log
-      mcp_server.py    the session's tools as an MCP server, for the Claude Code CLI
+      mcp_server.py    the session's tools as an MCP server, for the Claude Code and Codex CLIs
       loop.py          rounds, lock, seed check; the command line
       baseline.py      the baseline of a run's shape: found, run, frozen, and a run read against it
       report.py        the report; the reference entries under any reward
       hygiene.py       the check that the agent is not told what the model does
-      backends/        who answers a round: claude_code, fake
+      backends/        who answers a round: claude_code, codex, openai_api (docs/OPENAI.md), fake
       budget.py        what a run billed to an API key may spend, and what it has spent
       run_config.py    run configs: defaults, then what a config extends, then the config
       sandbox.py, runner.py, harness.py    where the agent's code runs

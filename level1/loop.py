@@ -2,6 +2,7 @@
 
     python -m level1.loop run --config config/pilot/lin-a.yaml [--run-id X] [--sandbox hardened] [--fake DIR]
                               [--auth api_key] [--budget-usd 60]
+                              [--backend codex|openai_api --agent-model M --run-id ID]
     python -m level1.loop resume --run <run folder> [--budget-usd 80]
     python -m level1.loop finish --run <run folder>     the lock, the seed check and the report again, from the records
     python -m level1.loop baseline --config <config> | --run <run folder>    the baseline for that shape and those
@@ -255,12 +256,17 @@ def start(cfg: dict, fake_scripts=None, out=print) -> Path:
     })
     log(f"run {cfg['run_id']} at {path}: {cfg['model']} / {cfg['network']}, sandbox {sb.mode}, backend {cfg['backend']}, "
         + (f"every one of {model.n_total:,} inputs checked" if verifier.enumerated else f"{verifier.n_inputs():,} inputs sampled per scoring"))
-    if cfg["backend"] == "claude_code" and cfg["auth"] == "api_key":
+    if cfg["backend"] in ("claude_code", "openai_api") and cfg["auth"] == "api_key":
         b = cfg["budget"]
+        count = ("by Claude Code's count" if cfg["backend"] == "claude_code"
+                 else f"counted from the tokens OpenAI's API reports at the config's prices for {cfg['agent_model']}")
         log(f"billed to the API key in {cfg['api_key_env']}: at most ${float(b['run_usd']):.2f} for the run and "
-            f"${float(b['round_usd']):.2f} a round, by Claude Code's count (spend.jsonl)")
+            f"${float(b['round_usd']):.2f} a round, {count} (spend.jsonl)")
     elif cfg["backend"] == "claude_code":
         log("under your Claude Code login: no API key is used")
+    elif cfg["backend"] == "codex":
+        log("under your Codex (ChatGPT) login: no API key is used, and the CLI is checked to offer the model the session's "
+            "tools and nothing that reads a file or the web before the first round")
     drive(path, fake_scripts=fake_scripts, out=out)
     return path
 
@@ -565,6 +571,11 @@ def main(argv=None) -> int:
     r.add_argument("--sandbox", help="auto, hardened, container, landlock, seatbelt or process (default: the config's)")
     r.add_argument("--auth", choices=("login", "api_key"), help="who pays for the rounds (default: the config's)")
     r.add_argument("--budget-usd", type=float, help="api_key: what the whole run may spend, in dollars (default: the config's)")
+    r.add_argument("--backend", choices=("claude_code", "codex", "openai_api"), help="who answers the rounds (default: the config's); "
+                   "with another backend give the run its own --run-id and --agent-model (docs/OPENAI.md)")
+    r.add_argument("--agent-model", help="the model that answers (default: the config's)")
+    r.add_argument("--effort", help="the model's reasoning effort (default: the config's)")
+    r.add_argument("--api-key-env", help="api_key: the variable that holds the key (default: the config's)")
     r.add_argument("--with-baseline", action="store_true", help="run the baseline of this shape and these conditions alongside, "
                    "unless it is on record (level1/baseline.py)")
     s = sub.add_parser("resume")
@@ -602,7 +613,8 @@ def main(argv=None) -> int:
     try:
         if args.cmd == "run":
             over = {k: v for k, v in (("run_id", args.run_id), ("runs_dir", args.runs_dir), ("sandbox", args.sandbox),
-                                      ("auth", args.auth)) if v}
+                                      ("auth", args.auth), ("backend", args.backend), ("agent_model", args.agent_model),
+                                      ("effort", args.effort), ("api_key_env", args.api_key_env)) if v}
             if args.budget_usd is not None:
                 over["budget"] = {"run_usd": args.budget_usd}
             if args.fake:

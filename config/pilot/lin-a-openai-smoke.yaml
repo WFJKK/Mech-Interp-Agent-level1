@@ -1,0 +1,19 @@
+# A first contact with an OpenAI model through OpenAI's API (backend: openai_api, docs/OPENAI.md): the lin-a
+# smoke run's one short round, billed to the key in CPL_OPENAI_KEY (never OPENAI_API_KEY) within the budget
+# below. It shows that the key, the model's name, the prices in config/defaults.yaml (openai.prices), the tools,
+# the sandbox and the verifier work together on this machine before anything longer is started.
+#
+#   export CPL_OPENAI_KEY=...        the key, in this terminal only
+#   python -m level1.loop run --config config/pilot/lin-a-openai-smoke.yaml
+#
+# The budget is this pipeline's count: the tokens each answer reports, at the config's prices for the model.
+# Compare the first run's count (spend.jsonl, the report) with what OpenAI's usage page shows for it.
+extends: lin-a-smoke.yaml
+run_id: pilot-lin-a-openai-smoke
+backend: openai_api
+auth: api_key
+api_key_env: CPL_OPENAI_KEY
+agent_model: gpt-6.2-astra
+budget:
+  run_usd: 10
+  round_usd: 10
