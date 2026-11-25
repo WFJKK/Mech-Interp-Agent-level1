@@ -51,14 +51,9 @@ A = \mathbb{E}_x \big[ \mathbf{1}\{M(x) = y(x)\} \big]
 ```
 
 The goal is to construct a mechanistic estimate $\hat{A}$, which we would judge by its squared
-error at a compute budget of $B$ forward passes:
-
-```math
-(\hat{A}(B) - A)^2
-```
-
-It is set against what sampling achieves at that budget: running $M$ on $B$ inputs drawn from $D$
-and taking the share it gets right is off by $A (1 - A) / B$ in mean squared error.
+error $(\hat{A}(B) - A)^2$ at a compute budget of $B$ forward passes. It is set against what
+sampling achieves at that budget: running $M$ on $B$ inputs drawn from $D$ and taking the share it
+gets right is off by $A (1 - A) / B$ in mean squared error.
 
 Now in our setup we do not estimate accuracy but fidelity to the model. We can of course calculate
 our interpretation's accuracy $A_I$. As interpretation and model differ on at most $1 - q$ of the
