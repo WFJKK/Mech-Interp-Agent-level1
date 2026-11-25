@@ -73,6 +73,8 @@ q = \mathbb{E}_x \big[ \mathbf{1}\{I(x) = M(x)\} \mid x \in S \big].
 We can of course calculate our interpretation's accuracy $A_I$. As interpretation and model differ
 on at most $1 - q$ of the inputs of the region, we have there: $|A - A_I| \le 1 - q$.
 
+### Mech interp
+
 ### Relationship to compact proofs
 
 Let us compare what we are doing here to the idea of compact proofs, for which we have designed an
