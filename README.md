@@ -36,67 +36,7 @@ Nothing is proved: a claim is checked by measuring it.
 
 ### Relationship to compact proofs
 
-A compact proof ([Gross et al., Compact Proofs of Model Performance via Mechanistic
-Interpretability](https://arxiv.org/abs/2406.11779)) is a proof of a lower bound on a model's
-accuracy, judged by two things at once: how tight the bound is and how long the proof is, the
-length being the computation it takes to check. Running the model on every input is a proof too,
-with the tightest bound and the greatest length. A shorter proof has to use what the weights do, so
-the trade between length and tightness measures understanding.
-
-A claim here is judged on the same two axes with the proof left out:
-
-| Compact proof | Here |
-|---|---|
-| Length: the computation to check the proof | Cost $c$: the computation of the interpretation, per input, in forward passes |
-| Brute force: the model on every input | The network itself: $c = 1$ |
-| Tightness of the proved bound | Fidelity $q$ on the region, and its coverage $\mu$ |
-| The bound holds for every input, by proof | $q$ is measured on a sample, or on every input when they are few |
-
-So a claim is what a compact proof would be about, and the verifier's measurement takes the place
-of the proof. What is given up is the guarantee: a measured fidelity of 99.9% on a sample says
-nothing certain about an input that was not drawn. What is gained is that any program can be
-scored at once, without a proof strategy for it, also where the inputs are real numbers and cannot
-be listed. One difference in the object remains: a compact proof bounds the model's accuracy on a
-task, and a claim here predicts the model's outputs, right or wrong. The next subsection relates
-the two.
-
 ### Relationship to ARC's approach and to accuracy
-
-ARC's bottom-up approach takes explaining a network to mean estimating a property of it, such as
-its accuracy, mechanistically: by reasoning from its weights instead of from samples of its
-outputs. Such an estimate should compete with random sampling, that is, be more accurate than
-sampling at the same compute ([ARC progress update: Competing with
-sampling](https://www.lesswrong.com/posts/XdQd9gELHakd5pzJA/arc-progress-update-competing-with-sampling)).
-
-A claim here predicts outputs, input by input. It gives an estimate of accuracy as follows. Let
-$y(x)$ be the right answer of a task, $A = P(M(x) = y(x))$ the model's accuracy, and
-$A_I = P(I(x) = y(x) \mid x \in S)$ the interpretation's accuracy on its region. The two disagree
-only where $I(x) \neq M(x)$, so on the region
-
-```math
-| A_M - A_I | \le 1 - q
-```
-
-with $A_M$ the model's accuracy there. $A_I$ takes no forward pass: it is computed at the cost $c$
-per input. Outside the region the model is run. Over the whole data set the estimate
-$\mu A_I + (1 - \mu) A_{\text{out}}$ is off by at most $\mu (1 - q)$.
-
-Against sampling at the same compute this cuts both ways:
-
-- With a budget of $n$ forward passes, sampling has a standard error of about
-  $\sqrt{A (1 - A) / n}$ and no bias. The interpretation scores $n / c$ inputs for the same
-  compute, so its standard error is lower by $\sqrt{c}$, but it carries the bias $\mu (1 - q)$,
-  which no further compute removes.
-- So it wins while the sampling error at that budget is above $\mu (1 - q)$, and sampling wins
-  beyond that. A fidelity of 1 is the only case in which it wins at every budget.
-- The fidelity $q$ is itself measured by running the network on a sample. The estimate above is
-  therefore not free of samples, which is what ARC asks for: a claim would need its fidelity
-  argued from the weights, which is the step from a measured claim to a proof.
-
-In short, a claim with high fidelity and low cost is a cheap, slightly biased stand-in for the
-network, from which its accuracy and any other statistic of its outputs can be estimated. It is
-not yet a mechanistic estimate in ARC's sense, because the size of its error is known only by
-measuring.
 
 ## Reward function
 
