@@ -34,8 +34,6 @@ by three metrics:
 The verifier measures all three on inputs it draws from $D$, or on all of them when they are few.
 Nothing is proved: a claim is checked by measuring it.
 
-### Relationship to compact proofs
-
 ### Relationship to ARC's approach and to accuracy
 
 ARC has set itself the goal to deductively estimate properties of networks instead of merely
@@ -64,6 +62,8 @@ q = \mathbb{E}_x \big[ \mathbf{1}\{I(x) = M(x)\} \mid x \in S \big].
 
 We can of course calculate our interpretation's accuracy $A_I$. As interpretation and model differ
 on at most $1 - q$ of the inputs of the region, we have there: $|A - A_I| \le 1 - q$.
+
+### Relationship to compact proofs
 
 ## Reward function
 
