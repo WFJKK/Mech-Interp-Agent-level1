@@ -31,8 +31,18 @@ by three metrics:
   on $S$, the region test on every input, and whatever it computes once from the weights), per
   input of $S$, in forward passes of $M$. The network itself has $c = 1$.
 
-The verifier measures all three on inputs it draws from $D$, or on all of them when they are few.
-Nothing is proved: a claim is checked by measuring it.
+Given the data distribution $D$, the verifier draws $n$ samples $x_1, \dots, x_n$ at random. It then
+runs the region test on each of them and compares the interpretation with the network on those in
+$S$. With $n_S$ the number of samples in $S$, and $n_{\text{agree}}$ the number of those on which $I$
+gives the network's output, it estimates coverage and fidelity by
+
+```math
+\hat\mu = \frac{n_S}{n}, \qquad \hat q = \frac{n_{\text{agree}}}{n_S}
+```
+
+and measures the cost $c$ by counting, on the samples, the operations listed above. When the data
+set is a finite list of at most 200,000 inputs, each equally likely, the verifier instead goes
+through every input, and coverage and fidelity are exact rather than estimated.
 
 ### Relationship to ARC's approach and to accuracy
 
