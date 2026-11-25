@@ -65,6 +65,14 @@ on at most $1 - q$ of the inputs of the region, we have there: $|A - A_I| \le 1 
 
 ### Relationship to compact proofs
 
+Let us compare what we are doing here to the idea of compact proofs, for which we have designed an
+automated pipeline in [Compact-Proof-Agent-wip](https://github.com/WFJKK/Compact-Proof-Agent-wip).
+A compact proof proves a lower bound $b$ on the model's accuracy, ideally for less than brute-force
+cost. It is hence judged by its length (or cost, i.e. the compute to check the proof) and by its
+tightness (how close $b$ is to the true accuracy). There is one axis less, as a compact proof is not
+a measurement but a mathematical fact, such that fidelity is 1 and coverage becomes part of the
+tightness of the bound.
+
 ## Reward function
 
 ### What we use
