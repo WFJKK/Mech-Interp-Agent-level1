@@ -4,14 +4,13 @@
 
 In this repo we consider an automated, agentic hill-climbing approach to mechanistic understanding.
 This is a setup in which an agent proposes an interpretation $I$ of a network, a verifier scores
-it, and the agent climbs that score round after round. While this is formalised in the next
-section, we may think of an interpretation as a description of the network that predicts the
-network's outputs more cheaply than running it. This is in line with the bottom-up approach of ARC,
-where explaining a network means estimating its behaviour mechanistically, by reasoning from its
-weights rather than from samples of its outputs, and where such an estimate should compete with
-random sampling ([ARC progress update: Competing with sampling](https://www.lesswrong.com/posts/XdQd9gELHakd5pzJA/arc-progress-update-competing-with-sampling)).
-Hence the interpretation should be more accurate than any method of the same cost that only runs
-the network as a black box, such as running it on a random share of the inputs.
+it, and the agent climbs that score round after round. We may think of an interpretation as a
+description of the network that predicts the network's outputs (with some fidelity) more cheaply
+than running it for some part of the input space. We will formalise this in more detail in the next
+section. Our goal is to estimate the model's behaviour "mechanistically" instead of brute-force
+running the network. Let us be clear that in this repo we are not letting the agent predict the
+model's accuracy but only the model's output. In the next section we show how that can be related
+to accuracy.
 
 ## More formally
 
@@ -20,7 +19,7 @@ $I$ is a program that maps an input $x$ to a predicted output $I(x)$ without run
 written in a small language of priced operations ([`agent_docs/ENTRY.md`](agent_docs/ENTRY.md)), in
 which $M$ itself is written too, so that both are priced by the same list. We may think of an
 interpretation claim as a triple $(I, S, p)$: the interpretation $I$; the region $S$, the inputs it
-is claimed for, given by a test on the input in the same language; and the claimed fidelity $p$.
+is claimed for; and the claimed fidelity $p$.
 In the code the pair $(S, I)$ is called an entry, and $p$ is handed in with it. A claim is judged
 by three metrics:
 
@@ -34,6 +33,10 @@ by three metrics:
 
 The verifier measures all three on inputs it draws from $D$, or on all of them when they are few.
 Nothing is proved: a claim is checked by measuring it.
+
+### Relationship to compact proofs
+
+### Relationship to ARC's approach and to accuracy
 
 ## Reward function
 
