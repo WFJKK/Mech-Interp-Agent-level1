@@ -89,7 +89,9 @@ tightness of the bound.
 
 The idea is now to combine the three metrics of an interpretation into a single scalar reward, one
 that rises with coverage and fidelity and falls with cost; and ideally one that is difficult to
-game. With $\mu$, $c$ and $q$ defined as in the previous sections, we consider:
+game. With $\mu$ and $c$ defined as in the previous sections, and $q$ (which on a sample the reward
+replaces by $q_{\text{low}}$, the lower end of the 95% confidence interval of $\hat q$, so that a
+lucky sample does not pay), we consider:
 
 ```math
 R = \mu \, \big[ (1 - c) - \alpha \, (1 - q) \big]
