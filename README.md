@@ -647,6 +647,70 @@ standard normal, and the reward uses the 95% lower bound of that share.
 | Agent on baseline | first seed | 1 | 100% | 0.504 | 0.494 |
 | Agent on baseline | second seed | 1 | 100% | 0.515 | 0.483 |
 
+##### Evaluation
+
+Agent on trained against agent on baseline: 0.818 against 0.494 on the first seed. In cost, the agent
+on trained needs 0.108 of a forward pass per input (8.4 operations) and the agent on baseline 0.504
+(39 operations), 4.7 times as much. The baseline's entry is exact, while the agent's leaves out 2.7% of
+the inputs and is wrong on 0.4% of the rest, and the agent's still comes out far ahead.
+
+Agent on trained against pure second argmax: 0.818 against 0.744. The agent's entry is the second
+argmax itself, computed with a comparison tree of about 5 operations, on a region that leaves out the
+inputs whose second and third numbers are within 0.05 of each other, $|x_1 - x_2| \le 0.05$ (3
+operations on every input, 2.8% of the inputs). That is where most of the network's departures are:
+there it answers position 0 where the second-largest is at position 1 or 2. Leaving them out costs
+2.8% of coverage and removes most of the 1.5% of wrong answers, each priced at 10 forward passes.
+
+On the second seed the entry scores 0.409, below the baseline's 0.483. Its only number taken from the
+first network is the width of the left-out band, and the band sits where the first network departs:
+the second network departs more often (5.5% of inputs) and mostly elsewhere, so the entry's fidelity
+there is 95.6%.
+
+The agent on baseline found no rule and wrote the network's own calculation, exact for any weights. A
+few sign tests on the inputs pick the input's sector; caps computed from the weights then decide the
+output cheaply on most inputs, and otherwise the entry computes the network restricted to that sector
+and takes the highest of its outputs.
+
+##### Is the network explained?
+
+On the first seed, from $10^8$ drawn inputs:
+
+| Part of the behaviour | Share of inputs | Short description |
+| --- | ---: | --- |
+| Answers the second-largest | 98.46% | yes: "second argmax" |
+| Answers position 0 where the second-largest is at position 1 or 2 | 1.19% | located, not predicted: 91% of it lies where $\lvert x_1 - x_2 \rvert \le 0.05$, which the entry leaves out |
+| Other departures | 0.36% | none |
+
+So we have explained the network up to about 1.5% of inputs. For most of them we know where they are,
+a thin wedge around the plane $x_1 = x_2$, and what the network answers there, but the entry does not
+predict them: it leaves out a band around that plane instead of computing the wedge from the weights.
+
+##### Accuracy bound
+
+The relation from
+[Relationship to ARC's approach and to accuracy](#relationship-to-arcs-approach-and-to-accuracy) holds
+on the entry's region. Here the region is not everything: the entry says nothing about the inputs with
+$|x_1 - x_2| \le 0.05$, so the bound has to count them as wrong:
+
+$$A \ge \mu \, \big( A_I - (1 - q) \big)$$
+
+with $A_I$ the interpretation's accuracy on its region. Both $\mu$ and $A_I$ are known exactly: the
+interpretation is the second argmax itself, so $A_I = 100\%$, and $\mu = 97.18\%$, since $x_1 - x_2$ is
+normal with variance 2.
+
+| Network | $\mu$ | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | Sampling, same compute | $A$ (estimated) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| First seed | 97.18% | 100% | 99.598% | 99.488% | 96.68% | 98.27% | 98.456% |
+| Second seed | 97.18% | 100% | 95.621% | 95.292% | 92.60% | 94.18% | 94.517% |
+
+$A$ is estimated on $10^8$ drawn inputs, to within 0.005%. "Sampling, same compute" is, as in the
+earlier experiments, what the network run on drawn inputs gives for the compute the bound took: about
+18,200 forward passes, almost all of them the network on the 16,384 inputs that measured $q$. Here
+sampling does much better, because the bound counts the 2.8% of inputs the entry leaves out as wrong,
+although the network is right on 61% of them.
+
+##### Further experiments
+
 #### RNN second argmax of 10 numbers
 
 ##### Architecture and training
