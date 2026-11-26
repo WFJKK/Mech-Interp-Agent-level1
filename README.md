@@ -123,33 +123,24 @@ measured parts, so a finished run can be scored again under another reward
 ### Different setups
 
 While the above is our basic setup, we also try some additional modifications to see how far they get
-us. One obvious thing is the increase of $\alpha$, which makes every wrong answer more expensive: a
-claim then only gains if it is right on nearly all of its region, at $\alpha = 360$ on more than 99.7%
-of it even when it costs nothing. One might hope that this pushes the agent beyond a description of
-what the network does most of the time, towards one that also accounts for its rare departures. A
-larger $\alpha$ also needs a larger sample, since an entry right on every input drawn is still charged
-$\alpha (1 - q_{\text{low}})$, about $3.8 \, \alpha / n$; we drew 200 inputs per unit of $\alpha$ (72,000
-at $\alpha = 360$), which keeps that charge at about 0.02.
+us. More specifically, we observe in the experiments that in many cases the agent tries to memorise
+aspects of the model's output instead of aiming for "mechanistic understanding". We are trying
+different methods to disincentivise memorisation:
 
-Another is memorisation. An entry can store numbers it has read off the network, such as a table of
-thresholds or a list of the cases on which the network departs from a rule. Reading from a table costs
-one operation however long the table is, so the cost $c$ cannot tell an entry that computes its answers
-from one that recalls what was observed. Such an entry can fit the network it was made on and do worse
-on another network trained the same way, as the seed check shows. Charging for stored numbers might push
-the agent towards rules it computes from the weights instead. We therefore also tried
+1. **Different $\alpha$**: a larger $\alpha$, from 30 to 445 instead of 10, which makes every wrong
+   answer more expensive.
+2. **Memorisation**: a limit on the numbers an entry may store, 64 instead of 256, so that large tables
+   read off the network no longer fit.
+3. **Different reward function**: a price $\beta$ on every number the entry stores beyond those of the
+   network's own definition, $R = \mu[(1 - c) - \alpha(1 - q)] - \beta N$, with $N$ the number of such
+   numbers and $\beta$ = 0.001, 0.002 or 0.005.
+4. **Multi-agent**: a team instead of a single agent. A lead decides what each researcher works on,
+   mostly one region of the input space each, and builds one complete entry from their checked
+   results, in the hope that the work parallelises. This setup is on the branch
+   [`multi-agent-agnostic`](https://github.com/WFJKK/Mech-Interp-Agent-level1/tree/multi-agent-agnostic).
 
-```math
-R = \mu \, \big[ (1 - c) - \alpha \, (1 - q) \big] - \beta \, N
-```
-
-where $N$ is the number of numbers the entry stores beyond those of the network's own definition and
-$\beta$ the price of one: 0.001, 0.002 and 0.005, at $\alpha = 100$. The network itself still scores 0.
-A last variant limited the stored numbers instead, to 64 per entry rather than 256.
-
-We tried these on the RNNs of Experiment 3: the larger $\alpha$ on the second argmax of 3 numbers and on
-ARC's challenge network, the other two on ARC's challenge network only. The runs were made with the code
-of the branch `multi-agent-agnostic`, where this reward (`r_alpha_numbers`) and the larger samples are
-implemented.
+The first three were tried on the RNNs of Experiment 3, mostly on ARC's challenge network, with the
+code of the same branch.
 
 ### Louis's suggestion
 
