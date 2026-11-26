@@ -1,0 +1,10 @@
+# The pilot on rnn-g (config/pilot/rnn-g.yaml) under a reward that prices stored numbers: everything as in that
+# run, but every number an entry stores beyond the network's own definition costs 0.01 (level1/rewards.py,
+# r_alpha_numbers; level1/lang.py, stored_numbers, for what counts as stored). At alpha 10 a number pays for
+# itself only if it buys at least 0.1% of fidelity. Started afresh, not continued from an earlier run.
+extends: rnn-g.yaml
+run_id: pilot-rnn-g-price-01
+reward:
+  name: r_alpha_numbers
+  alpha: 10
+  price: 0.01
