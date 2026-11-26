@@ -1,0 +1,13 @@
+# The pilot on rnn-b (config/pilot/rnn-b.yaml) under r_budget (level1/rewards.py): an input on which the entry
+# spends more than a quarter of a forward pass, 19.5 of its 78 operations, counts as not predicted, whatever it
+# answers. The budget is wider than on rnn-g (config/pilot/rnn-g-budget.yaml) because a forward pass here is
+# short: a tenth would leave 7 operations, too few for anything beyond the cheapest entries, while a quarter still
+# keeps out an exact re-implementation (the baseline run's entry spends 38 on average, and fits the budget on
+# about one input in ten). Stored numbers cost 0.01 each. Started afresh, not continued from an earlier run.
+extends: rnn-b.yaml
+run_id: pilot-rnn-b-budget-01
+reward:
+  name: r_budget
+  alpha: 10
+  budget: 0.25
+  price: 0.01
