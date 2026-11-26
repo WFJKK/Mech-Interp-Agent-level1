@@ -24,10 +24,13 @@ codex_command: codex                  # backend codex: the Codex CLI
 codex_home: null                      # backend codex: the CLI's home folder (its login); null: the CLI's own
                                       # (~/.codex or CODEX_HOME). A home with an AGENTS.md is refused: name another
 # backend openai_api (level1/backends/openai_api.py). The budget is counted from the tokens the API reports, at
-# the prices here: dollars per million tokens, as OpenAI's pricing page gave them on 25 November 2026. Check
-# them against that page before a run: a wrong price makes the run's count, and so its budget, wrong.
-# cached_input is for input tokens read from the prompt cache; cache_write, where a model has one, for those
-# written to it (billed as input when absent). A request with more input tokens than long_context's
+# the prices here: dollars per million tokens, as OpenAI's pricing page gave them on 25 November 2026 (cache
+# writes: 26 November). Check them against that page before a run: a wrong price makes the run's count, and so
+# its budget, wrong. cached_input is for input tokens read from the prompt cache; cache_write, where a model has
+# one, for those written to it (billed as input when absent): the page's 30-minute write, 1.25 times the input
+# price (a 12-hour write costs twice that, and a run would pay it only by asking for 12-hour retention). The
+# API reports writes as input_tokens_details.cache_write_tokens: the first run through it, on 26 November
+# 2026, wrote 13,532 tokens in a ten-answer round. A request with more input tokens than long_context's
 # above_input_tokens is billed at long_context's prices throughout.
 openai:
   base_url: https://api.openai.com/v1
@@ -36,18 +39,18 @@ openai:
   idle_seconds: 900                   # a response that sends nothing for this long is taken as lost, and asked again
   prices:
     gpt-6.2-astra:
-      {input: 8.00, cached_input: 0.40, output: 40.00,
-       long_context: {above_input_tokens: 272000, input: 16.00, cached_input: 0.80, output: 60.00}}
+      {input: 8.00, cached_input: 0.40, cache_write: 10.00, output: 40.00,
+       long_context: {above_input_tokens: 272000, input: 16.00, cached_input: 0.80, cache_write: 20.00, output: 60.00}}
     gpt-6.2-sol:
-      {input: 2.00, cached_input: 0.10, output: 10.00,
-       long_context: {above_input_tokens: 272000, input: 4.00, cached_input: 0.20, output: 15.00}}
+      {input: 2.00, cached_input: 0.10, cache_write: 2.50, output: 10.00,
+       long_context: {above_input_tokens: 272000, input: 4.00, cached_input: 0.20, cache_write: 5.00, output: 15.00}}
     gpt-6.1-terra:
-      {input: 1.00, cached_input: 0.05, output: 5.00,
-       long_context: {above_input_tokens: 272000, input: 2.00, cached_input: 0.10, output: 7.50}}
+      {input: 1.00, cached_input: 0.05, cache_write: 1.25, output: 5.00,
+       long_context: {above_input_tokens: 272000, input: 2.00, cached_input: 0.10, cache_write: 2.50, output: 7.50}}
     gpt-6-luna:
-      {input: 0.10, cached_input: 0.01, output: 0.50,
-       long_context: {above_input_tokens: 272000, input: 0.20, cached_input: 0.02, output: 0.75}}
-    gpt-5.5:
+      {input: 0.10, cached_input: 0.01, cache_write: 0.125, output: 0.50,
+       long_context: {above_input_tokens: 272000, input: 0.20, cached_input: 0.02, cache_write: 0.25, output: 0.75}}
+    gpt-5.5:                          # the page lists no cache-write price for it
       {input: 5.00, cached_input: 0.50, output: 30.00,
        long_context: {above_input_tokens: 272000, input: 10.00, cached_input: 1.00, output: 45.00}}
 python_executable: null               # the Python that serves the tools; null: the one running the loop

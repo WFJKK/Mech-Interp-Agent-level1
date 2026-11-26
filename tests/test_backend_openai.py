@@ -126,6 +126,19 @@ def test_prices(tmp_path):
     assert price_of({}, p) == 0.0
 
 
+def test_the_config_prices_cache_writes():
+    # OpenAI bills a token written to the prompt cache at 1.25 times the input price (the 30-minute write); the
+    # first run through the API (gpt-6.2-astra at effort low, 26 November 2026) reported writes in every round
+    prices = run_config.read_yaml(run_config.DEFAULTS)["openai"]["prices"]
+    for model in ("gpt-6.2-astra", "gpt-6.2-sol", "gpt-6.1-terra", "gpt-6-luna"):
+        p = prices[model]
+        assert p["cache_write"] == pytest.approx(1.25 * p["input"]), model
+        assert p["long_context"]["cache_write"] == pytest.approx(1.25 * p["long_context"]["input"]), model
+    # that round's usage, as the API reported it: $0.2927, which the count without the write price put at $0.2656
+    assert price_of(usage(84594, 71032, 3218, written=13532), prices["gpt-6.2-astra"]) == pytest.approx(
+        (30 * 8.0 + 71032 * 0.40 + 13532 * 10.0 + 3218 * 40.0) / 1e6)
+
+
 def test_a_session_at_its_spending_cap_keeps_what_it_did(tmp_path):
     cfg, session, where = setup(tmp_path, budget={"run_usd": 0.02, "round_usd": 0.01})
     costly = answer(call("run_python", {"code": "print(1)"}), usage=usage(4000, 0, 400))   # $0.012 at 2 and 10 a million

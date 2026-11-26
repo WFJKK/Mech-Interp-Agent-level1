@@ -53,11 +53,13 @@ What happens (`level1/backends/openai_api.py`):
 submitted, and the rounds end when the run's budget is spent. The difference is who counts. Claude
 Code reports what a session cost. Here the backend counts it, from the tokens every answer reports:
 
-    cost = input x p_in + cached x p_cached + output x p_out
+    cost = input x p_in + cached x p_cached + written x p_write + output x p_out
 
 per million tokens, at `openai.prices.<agent_model>` in `config/defaults.yaml`, with the
-long-context prices for a request over that line. The prices there are OpenAI's pricing page as of
-25 November 2026, for five models. Two consequences:
+long-context prices for a request over that line. Here `written` is what the answer wrote to the
+prompt cache (`input_tokens_details.cache_write_tokens`), at the 30-minute write price, 1.25 times
+the input price for the gpt-6 models. The prices there are OpenAI's pricing page as of 25 November
+2026 (cache writes: 26 November), for five models. Two consequences:
 
 - A model without an entry cannot be run through the API: add its prices first.
 - The count is this pipeline's, not the invoice. After the first run, compare `spend.jsonl` with
