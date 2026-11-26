@@ -717,6 +717,20 @@ although the network is right on 61% of them.
 
 ##### Further experiments
 
+One further run continued the main run with a larger $\alpha$, 445 instead of 10, for two more rounds,
+with the earlier rounds as memory and 89,000 inputs per scoring. Its rewards below are at $\alpha = 10$,
+so that they compare with the main run's; the second network is the seed check's.
+
+| Run | Coverage | Fidelity | Cost | Reward | Second network: fidelity | Second network: reward |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Main run ($\alpha = 10$) | 0.973 | 99.60% | 0.108 | 0.818 | 95.62% | 0.409 |
+| Continued at $\alpha = 445$ | 1 | 100% | 0.184 | 0.816 | 94.16% | 0.217 |
+
+With the larger $\alpha$ the agent predicts the network's departures as well: its entry is right on all
+89,000 inputs. But it does so with 199 numbers read off the first network, and on the second network
+its fidelity falls below the main run's, so the larger $\alpha$ bought memorisation rather than
+mechanism. At $\alpha = 445$ itself it scored 0.797, and -25.9 on the second network.
+
 #### RNN second argmax of 10 numbers
 
 ##### Architecture and training
