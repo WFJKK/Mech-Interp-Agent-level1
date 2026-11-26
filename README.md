@@ -276,6 +276,27 @@ So we have explained the network up to 0.11% of inputs. For those we know where 
 inputs whose top tokens are close together, but we have no explanation for them apart from running the
 network.
 
+##### Accuracy bound
+
+With coverage 1, the relation $|A - A_I| \le 1 - q$ from
+[Relationship to ARC's approach and to accuracy](#relationship-to-arcs-approach-and-to-accuracy) bounds
+the network's accuracy from below:
+
+$$A \ge A_I - (1 - q)$$
+
+The agent's interpretation answers `max(t₁, t₂, t₃, t₄, floor)`, so its accuracy $A_I$ is known exactly:
+it is wrong only when all four tokens are below the floor, on $10^4$ of the $64^4$ inputs on the first
+seed (floor 10) and $11^4$ on the second (floor 11). For $q$ we take $q_{\text{low}}$, the lower end of
+the 95% interval of the fidelity measured on 16,384 inputs, as the reward does.
+
+| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Bound on $A$ | $A$ over all inputs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First seed | 99.940% | 99.872% | 99.804% | 99.745% | 99.830% |
+| Second seed | 99.913% | 99.921% | 99.864% | 99.777% | 99.785% |
+
+With the measured $q$ instead, the second seed would give $A \ge 99.833\%$, above its true accuracy:
+that sample happened to overestimate the fidelity.
+
 #### Attention max of 4 (Experiment still to be performed)
 
 ##### Architecture and training
