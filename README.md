@@ -135,9 +135,7 @@ certain how relevant this is, but one could imagine that it carries more global 
 are leaving out currently. By this I mean that currently the agent tries to get every input of the
 model right, which when summing over all inputs leads to a certain fidelity. However, one could
 imagine that rewarding a high fidelity at low cost could force the agent to work more in terms of the
-input space as a whole: to split it into regions, each with a cheap description and a fidelity it can
-state in advance, and to accept a known share of wrong answers in a region instead of patching the
-description input by input.
+input space as a whole.
 
 ## Agentic setup / Auto-research
 
