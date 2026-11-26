@@ -859,7 +859,7 @@ $\alpha = 360$, then again at $\alpha = 360$ with larger entries allowed (800 no
 from there three runs at $\alpha = 100$, one with at most 64 stored numbers and two with a price on
 each. Rewards below are at $\alpha = 10$, so that they compare; the second network is the seed check's.
 
-| Run | Numbers stored | Coverage | Fidelity | Cost | Reward | Second network: fidelity | Second network: reward |
+| Run | Numbers in constants | Coverage | Fidelity | Cost | Reward | Second network: fidelity | Second network: reward |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
 | Main run ($\alpha = 10$) | 241 | 1 | 99.52% | 0.134 | 0.806 | 98.86% | 0.724 |
 | $\alpha = 360$ | 238 | 1 | 99.994% | 0.300 | 0.699 | 99.75% | 0.642 |
@@ -875,11 +875,13 @@ With a larger $\alpha$ the agent runs the network's own calculation on more inpu
 99.99%, at about twice the cost, so at $\alpha = 10$ these entries score lower. Since that calculation
 is exact for any weights, more of it carries over: on the second network their fidelity stays near
 99.7%, against 98.86% for the main run. Unlike on the 3-number network, the larger $\alpha$ here did not
-lower the fidelity on the second network; it raised it. Limiting or pricing stored numbers cut them
-from 241 to 64, 33 and 0 at about the same fidelity and cost. At the highest price the entry stores no
-numbers at all and derives what it needs from the weights, and it keeps the most on the second network:
-fidelity 99.86%, and at its own $\alpha = 100$ a reward of 0.556 there, against 0.37 and 0.34 for the
-runs with the limit and with the price 0.001.
+lower the fidelity on the second network; it raised it. Limiting or pricing stored numbers cut the
+numbers in constants from 241 to 64, 33 and 0 at about the same fidelity and cost. Not all of them went,
+though: the priced entries made further numbers from the input by arithmetic, which the count of the time
+missed, 342 at the price 0.001 and a dozen thresholds at 0.005. At the highest price the entry also
+derives its main table from the weights instead of fitting it, and it keeps the most on the second
+network: fidelity 99.86%, and at its own $\alpha = 100$ a reward of 0.556 there, against 0.37 and 0.34
+for the runs with the limit and with the price 0.001.
 
 ## More implementation details
 
