@@ -685,6 +685,12 @@ So we have explained the network up to about 1.5% of inputs. For most of them we
 a thin wedge around the plane $x_1 = x_2$, and what the network answers there, but the entry does not
 predict them: it leaves out a band around that plane instead of computing the wedge from the weights.
 
+The 98.46% is about the network: the second argmax describes it there. The agent's entry uses that
+rule only on its region. Of all inputs, it gets 96.75% right and 0.43% wrong, and says nothing about the
+2.82% in the band. The network is right on 61% of the band (1.71% of all inputs), which makes up the
+difference to 98.46%; the entry still leaves the band out, because the other 39% of it (1.11% of all
+inputs) are the network's main departures.
+
 ##### Accuracy bound
 
 The relation from
