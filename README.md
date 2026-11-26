@@ -135,8 +135,8 @@ different methods to disincentivise memorisation:
    network's own definition, $R = \mu[(1 - c) - \alpha(1 - q)] - \beta N$, with $N$ the number of such
    numbers and $\beta$ = 0.001, 0.002 or 0.005.
 4. **Multi-agent**: a team instead of a single agent. A lead decides what each researcher works on,
-   mostly one region of the input space each, and builds one complete entry from their checked
-   results, in the hope that the work parallelises. This setup is on the branch
+   and builds one complete entry from their checked results, in the hope that the work parallelises.
+   This setup is on the branch
    [`multi-agent-agnostic`](https://github.com/WFJKK/Mech-Interp-Agent-level1/tree/multi-agent-agnostic).
 
 The first three were tried on the RNNs of Experiment 3, mostly on ARC's challenge network, with the
@@ -322,13 +322,19 @@ it is wrong only when all four tokens are below the floor, on $10^4$ of the $64^
 seed (floor 10) and $11^4$ on the second (floor 11). For $q$ we take $q_{\text{low}}$, the lower end of
 the 95% interval of the fidelity measured on 16,384 inputs, as the reward does.
 
-| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | $A$ over all inputs |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| First seed | 99.940% | 99.872% | 99.804% | 99.745% | 99.830% |
-| Second seed | 99.913% | 99.921% | 99.864% | 99.777% | 99.785% |
+| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | Sampling, same compute | $A$ over all inputs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| First seed | 99.940% | 99.872% | 99.804% | 99.745% | 99.762% | 99.830% |
+| Second seed | 99.913% | 99.921% | 99.864% | 99.777% | 99.705% | 99.785% |
 
 With the measured $q$ instead, the second seed would give $A \ge 99.833\%$, above its true accuracy:
 that sample happened to overestimate the fidelity.
+
+"Sampling, same compute" is what plain sampling gives for the compute the bound took: the network run
+on as many drawn inputs, and the lower end of the 95% interval of the share it gets right. The bound
+took 16,489 forward passes: the network on the 16,384 inputs that measured $q$, and the entry on them.
+Here the two are about equal, since the bound needs the network on those inputs anyway and the
+uncertainty of $q$ is about as large as that of $A$.
 
 #### Attention max of 4 (Experiment still to be performed)
 
@@ -506,16 +512,21 @@ of 1 to 3 tokens, and on 4 tokens from its rule `max(m, floor)`. Inputs of 5 to 
 to go through, so there $A_I$ and $A$ are estimated on 200,000 inputs per number of tokens, which
 leaves $A_I$, and the bound with it, uncertain by about 0.02% (95%).
 
-| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | $A$ (estimated) |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| First seed | 94.54% | 99.915% | 99.857% | 94.40% | 94.47% |
-| Second seed | 95.47% | 98.920% | 98.750% | 94.22% | 94.51% |
+| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | Sampling, same compute | $A$ (estimated) |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| First seed | 94.54% | 99.915% | 99.857% | 94.40% | 94.34% | 94.47% |
+| Second seed | 95.47% | 98.920% | 98.750% | 94.22% | 94.37% | 94.51% |
 
 By number of tokens, from 1 to 8, the network's accuracy is 81.3%, 97.3%, 99.6%, 99.83%, 99.0%, 96.6%,
 93.2% and 89.1% on the first seed, and 79.7%, 96.7%, 99.4%, 99.78%, 99.0%, 97.0%, 94.0% and 90.5% on
 the second. On the first seed the entry follows the network closely, and $A_I$ is within 0.07% of
 $A$. On the second, its lists, read off the first network, miss more of the network's departures and
 give the largest token there instead, so $A_I$ is a point above $A$ and the bound is looser.
+
+"Sampling, same compute" is, as in Experiment 1, what the network run on drawn inputs gives for the
+compute the bound took: about 117,000 forward passes, most of them for running the entry on the inputs
+that gave $A_I$. The bound does a little better than sampling on the first seed and worse on the
+second, where the entry departs more from the network.
 
 #### Attention max of 4
 
@@ -572,14 +583,20 @@ it on every input of 1 to 3 tokens; on 4 tokens it answers the network's own ans
 alone, from a table of 64 answers, and $A_I$ there follows from that table. Its measured fidelity was
 100% on both networks, which gives $q_{\text{low}} = 99.977\%$.
 
-| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | $A$ over all inputs |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| First seed | 76.519% | 100% | 99.977% | 76.496% | 76.519% |
-| Second seed | 91.386% | 100% | 99.977% | 91.362% | 91.385% |
+| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | Sampling, same compute | $A$ over all inputs |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| First seed | 76.519% | 100% | 99.977% | 76.496% | 75.947% | 76.519% |
+| Second seed | 91.386% | 100% | 99.977% | 91.362% | 90.968% | 91.385% |
 
 The accuracy is low because of the inputs the networks were not trained on. By number of tokens it is
 90.6%, 98.7%, 16.7% and 99.992% on the first seed, and 93.8%, 73.6%, 98.2% and 99.996% on the second.
 The entry reproduces these departures, so its own accuracy is almost exactly the network's.
+
+"Sampling, same compute" is, as in Experiment 1, what the network run on drawn inputs gives for the
+compute the bound took: about 21,000 forward passes on the first seed and 18,000 on the second, 16,384
+of them for measuring $q$ and the rest for running the entry on every input of 1 to 3 tokens. Here the
+bound is much tighter. The network is often wrong, so sampling's interval is wide (±0.57% and ±0.41%),
+while the entry agrees with the network so closely that the bound loses only 0.023%.
 
 ### Experiment 3: AlgZoo
 
