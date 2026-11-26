@@ -88,12 +88,60 @@ def r_alpha_numbers(parts: dict, alpha: float = 10.0, price: float = 0.002, lowe
     return {**out, "reward": out["reward"] - float(price) * extra, "numbers": extra}
 
 
-REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed, "r_alpha_numbers": r_alpha_numbers}
-NEEDS_NUMBERS = {"r_alpha_numbers"}  # rewards for which the verifier counts an entry's stored numbers into the parts
+def wilson_lower(k: int, n: int, z: float = 1.96) -> float:
+    """The lower end of the Wilson interval for k successes in n draws, as lang.wilson_lower (this file stands
+    alone in the sandbox)."""
+    if n == 0:
+        return 0.0
+    p = k / n
+    centre = p + z * z / (2 * n)
+    spread = z * (p * (1 - p) / n + z * z / (4 * n * n)) ** 0.5
+    return max(0.0, (centre - spread) / (1 + z * z / n))
+
+
+def within_budget(parts: dict, budget: float) -> int:
+    """How many inputs of the region the entry answered as the network does while spending at most budget of a
+    forward pass on each (its region test and its prediction; the build is spread over all inputs, in the cost)."""
+    limit = float(budget) * float(parts["model_ops"])
+    return sum(int(agreed) for ops, _n, agreed in parts["input_ops"] if ops <= limit)
+
+
+def r_budget(parts: dict, alpha: float = 10.0, budget: float = 0.1, price: float = 0.01, lower_bound: bool = True, **_) -> dict:
+    """[saved + alpha * predicted - price * numbers] / (1 + alpha), where predicted is the share of the data set
+    on which the entry gives the network's answer with at most budget of a forward pass spent on that input.
+
+    An input on which the entry spends more than the budget counts as not predicted, whatever it answered: running
+    the network there, or work close to it, earns nothing for that input. What scores is then what the entry
+    predicts without running the network. The network itself spends a whole forward pass on every input and
+    saves nothing, so it scores 0; an entry that predicts every input at no cost scores 1. Every number stored
+    beyond those of the network's own definition is charged price, in forward passes, as in r_alpha_numbers.
+    On a sample the share predicted is taken at its lower confidence bound unless lower_bound is false."""
+    if parts.get("input_ops") is None:
+        raise ValueError("r_budget needs what single inputs cost in the parts (input_ops)")
+    if parts.get("numbers") is None or parts.get("numbers_network") is None:
+        raise ValueError("r_budget needs the entry's stored numbers in the parts (numbers, numbers_network)")
+    mu, m = parts["coverage"], int(parts["n_in_region"])
+    k = within_budget(parts, budget)
+    q = (wilson_lower(k, m) if lower_bound and parts.get("sampled") else k / m) if m else 0.0
+    r = parts["r"] if parts["r"] is not None else 0.0
+    saved = mu * (1.0 - r) - parts["r_rule"] - parts["b"]
+    extra = max(0, int(parts["numbers"]) - int(parts["numbers_network"]))
+    reward = (saved + float(alpha) * mu * q - float(price) * extra) / (1.0 + float(alpha))
+    return {"reward": reward, "saved": saved, "predicted": mu * q, "fidelity_used": q, "numbers": extra,
+            "budget_ops": float(budget) * float(parts["model_ops"])}
+
+
+REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed, "r_alpha_numbers": r_alpha_numbers, "r_budget": r_budget}
+NEEDS_NUMBERS = {"r_alpha_numbers", "r_budget"}  # rewards for which the verifier counts an entry's stored numbers into the parts
+NEEDS_INPUT_OPS = {"r_budget"}  # rewards that read what single inputs cost (input_ops), which the agent's measure() then keeps
 
 
 def needs_numbers(cfg: dict | None) -> bool:
     return (cfg or {}).get("name", "r_alpha") in NEEDS_NUMBERS
+
+
+def needs_input_ops(cfg: dict | None) -> bool:
+    return (cfg or {}).get("name", "r_alpha") in NEEDS_INPUT_OPS
 
 
 # The reward as the agent's prompt states it, and one or two sentences on how to read it. Parameters in
@@ -106,6 +154,8 @@ FORMULAS = {
         "               otherwise measured - {penalty:g} * (claimed - measured)"),
     "r_alpha_numbers": ("reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ] - price * numbers,"
                         "   alpha = {alpha:g}, price = {price:g}"),
+    "r_budget": ("reward = [ coverage * ( (1 - cost) + alpha * within ) - price * numbers ] / (1 + alpha),\n"
+                 "    alpha = {alpha:g}, budget = {budget:g} of a forward pass per input, price = {price:g}"),
 }
 EXPLANATIONS = {
     "r_alpha": (
@@ -131,6 +181,22 @@ EXPLANATIONS = {
         "Each counts once per {digits} significant digits it is written with (0.25 once, 0.123456 twice)\n"
         "and is charged {price:g}, so a number is worth storing only if it earns more than that. What the\n"
         "entry computes from the weights is not counted here; it is charged as computation, in the cost."),
+    "r_budget": (
+        "Read it for one input of the region: using the entry there in place of the network saves\n"
+        "(1 - cost) of a forward pass, and the entry earns {alpha:g} more when it gives the network's answer\n"
+        "while spending at most {budget:g} of a forward pass on that input (its region test and its\n"
+        "interpretation; the build is done once and paid in the cost). within is the share of the region's\n"
+        "inputs where both hold: an input on which the entry spends more than the budget counts as not\n"
+        "predicted, whatever it answers. Coverage turns that into a share of the data set; the inputs outside\n"
+        "the region earn nothing. Dividing by (1 + alpha) puts the reward between 0, for the network itself,\n"
+        "and 1, for an entry that predicts every input at no cost.\n"
+        "numbers is what the entry stores beyond the network's own definition: every number that is the\n"
+        "same on every input and for every weight, however it is written. That is every number in its\n"
+        "constants, the length of every arange, every place a slice reads out of a list made of those, and\n"
+        "every value it makes from its input or the weights that comes out the same whatever they are.\n"
+        "Each counts once per {digits} significant digits it is written with (0.25 once, 0.123456 twice)\n"
+        "and is charged {price:g}, in forward passes like the cost. What the entry computes from the weights\n"
+        "is not counted here; it is charged as computation, in the cost."),
 }
 
 
@@ -170,6 +236,11 @@ def warnings(cfg: dict) -> list:
         out.append("lower_bound is off: on a sampled data set, a lucky sample pays, and more submissions mean more luck")
     if name == "r_alpha_claimed" and float(params.get("penalty", 0)) <= 0:
         out.append("penalty is 0 or less: a claim above the measured fidelity costs nothing")
+    if name == "r_budget" and float(params.get("budget", 0)) >= 1:
+        out.append(f"budget = {float(params['budget']):g}: a whole forward pass fits in it, so running the network on an input "
+                   "earns as much as predicting it")
+    if name == "r_budget" and params.get("lower_bound") is False:
+        out.append("lower_bound is off: on a sampled data set, a lucky sample pays, and more submissions mean more luck")
     return out
 
 

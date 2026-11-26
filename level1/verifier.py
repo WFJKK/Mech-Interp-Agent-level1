@@ -105,6 +105,7 @@ class Verifier:
             receipt["verifier_error"] = f"{type(exc).__name__}: {str(exc)[:500]}"
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
+        parts["sampled"] = how["mode"] == "sample"  # so that a reward can bound what it reads off a sample
         if how["mode"] == "sample" and parts["n_in_region"]:
             parts["fidelity_low"] = lang.wilson_lower(parts["n_agree"], parts["n_in_region"])
         else:
@@ -132,7 +133,11 @@ def describe(receipt: dict) -> str:
     fid = "none" if p["fidelity"] is None else f"{p['fidelity']:.5f}"
     cost = rewards.cost_of(p)
     cost = "none" if cost is None else f"{cost:.4f}"
-    return f"reward {receipt['reward']:.4f}  coverage {p['coverage']:.4f}  fidelity {fid}  cost {cost}"
+    line = f"reward {receipt['reward']:.4f}  coverage {p['coverage']:.4f}  fidelity {fid}  cost {cost}"
+    detail = receipt.get("reward_detail") or {}
+    if "budget_ops" in detail:  # a reward with a budget per input: the share predicted within it
+        line += f"  within budget {detail['fidelity_used']:.5f}"
+    return line
 
 
 def main(argv=None) -> int:

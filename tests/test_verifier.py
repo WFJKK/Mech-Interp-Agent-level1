@@ -214,5 +214,31 @@ def test_reward_functions():
     for name in rewards.REWARDS:  # every reward has its two texts for the prompt, and gives the network itself 0
         assert rewards.formula({"name": name}) and rewards.explanation({"name": name})
         itself = {"coverage": 1.0, "fidelity": 1.0, "fidelity_low": 1.0, "r": 1.0, "r_rule": 0.0, "b": 0.0,
-                  "numbers": 3, "numbers_network": 3}  # the network stores what its own definition stores
+                  "numbers": 3, "numbers_network": 3,  # the network stores what its own definition stores
+                  "n_in_region": 100, "model_ops": 600, "input_ops": [[600, 100, 100]], "sampled": True}
         assert rewards.compute(itself, {"name": name}, claimed=1.0)["reward"] == 0.0
+
+
+def test_the_budget_reward():
+    """r_budget counts an input as predicted only when the entry gives the network's answer there within the
+    budget, takes that share at its lower bound on a sample, charges stored numbers like r_alpha_numbers, and
+    divides by 1 + alpha, so that predicting every input at no cost scores 1."""
+    cfg = {"name": "r_budget", "alpha": 10, "budget": 0.1, "price": 0.01}
+    parts = {"coverage": 0.8, "fidelity": 0.95, "fidelity_low": 0.95, "r": 0.25, "r_rule": 0.01, "b": 0.02,
+             "n_in_region": 100, "model_ops": 600, "input_ops": [[40, 70, 69], [60, 10, 9], [500, 20, 20]],
+             "numbers": 5, "numbers_network": 1, "sampled": False}
+    out = rewards.compute(parts, cfg)
+    assert out["budget_ops"] == pytest.approx(60) and out["fidelity_used"] == pytest.approx(0.78)  # 69 + 9 within 60 operations
+    assert out["saved"] == pytest.approx(0.57) and out["numbers"] == 4
+    assert out["reward"] == pytest.approx((0.57 + 10 * 0.8 * 0.78 - 0.04) / 11)
+    assert rewards.compute({**parts, "sampled": True}, cfg)["fidelity_used"] == pytest.approx(rewards.wilson_lower(78, 100))
+    wider = rewards.compute(parts, {**cfg, "budget": 1.0})                        # the third row fits too
+    assert wider["fidelity_used"] == pytest.approx(0.98) and rewards.warnings({**cfg, "budget": 1.0}) and not rewards.warnings(cfg)
+    free = {**parts, "coverage": 1.0, "r": 0.0, "r_rule": 0.0, "b": 0.0, "input_ops": [[0, 100, 100]], "numbers": 1}
+    assert rewards.compute(free, cfg)["reward"] == pytest.approx(1.0)
+    assert rewards.parameters("r_budget") == {"alpha": 10.0, "budget": 0.1, "price": 0.01, "lower_bound": True}
+    assert "budget = 0.1 of a forward pass per input" in rewards.formula(cfg) and "counts as not" in rewards.explanation(cfg)
+    assert rewards.wilson_lower(78, 100) == pytest.approx(wilson_lower(78, 100))
+    with pytest.raises(ValueError, match="needs what single inputs cost"):
+        rewards.compute({k: v for k, v in parts.items() if k != "input_ops"}, cfg)
+    assert rewards.needs_numbers(cfg) and rewards.needs_input_ops(cfg) and not rewards.needs_input_ops({"name": "r_alpha"})

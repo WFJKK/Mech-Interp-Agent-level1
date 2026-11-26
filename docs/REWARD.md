@@ -27,6 +27,11 @@ The cost is one number. A receipt also keeps its three parts:
 
 An empty region has no fidelity, no r and no cost.
 
+A receipt also says what single inputs cost: `input_ops` has a row for each number of operations an
+input of the region took (its region test and its interpretation, the build aside), with how many
+inputs took it and on how many of those the entry gave the network's output. `sampled` says whether
+the inputs were a sample. A reward can then ask what was predicted within a budget per input.
+
 **The build is spread over the inputs scored.** Until 11 November 2026 it was divided by the size
 of the data set. When every input is checked the two are the same, so no receipt on the pilot on
 pairs changes. They differ on a sample: with 17 million possible inputs anything computed once
@@ -109,7 +114,8 @@ every stored number has to earn its price. A stored number is one that is the sa
 and for every weight, however it is written (`lang.stored_numbers`): the numbers in constants, the
 length of every arange, the places a slice reads out of a list made of those, and every value the
 entry makes from its input or the weights that comes out the same on all the inputs tried, under the
-network's weights and under three other sets of weights of the same shapes. Each counts once per four significant digits.
+network's weights and under 32 other sets of weights of the same shapes, each tried on 16 inputs of
+its own and on the extremes of the inputs. Each counts once per four significant digits.
 What the entry computes from the weights is not counted, since it changes with them; it is charged
 as computation, in the cost. The verifier counts the network's own definition the same way, so the
 network itself still scores 0, and the agent's `measure` in the sandbox counts as the verifier does.
@@ -118,9 +124,47 @@ The price is set against alpha: a number pays for itself if it buys more than pr
 fidelity. The runs on ARC's challenge network on the branch `multi-agent-agnostic` used 0.001,
 0.002 and 0.005 at alpha 100, before the two last rows of the table in section 5 were closed.
 
-A value that only rarely changes can pass for one that never does: the count tries the extremes of
-the inputs drawn and 16 of them, so a test that is true on all but a few inputs may be charged as a
-stored truth value, one number.
+A value that only rarely changes can pass for one that never does. Until 26 November 2026 the count
+tried 18 inputs under 4 sets of weights, and `pilot-rnn-g-price-01` was charged for a test that holds
+on 3% of inputs, and on the second network for tests that four hidden units are all off, which hold
+only when their input weights share a sign (6 numbers for 2 at its seed check). With
+33 sets on inputs of their own, a test that holds on one input in a hundred is seen to change; one
+that holds on one in a thousand can still be charged as a stored truth value, one number. The other
+way round, a number disguised to change only under unusual weights, say a threshold plus a term that
+is zero for this network's weights and not for most others, is the more likely to go uncounted the
+more sets are tried. No agent has done that so far.
+
+### `r_budget`
+
+An input counts as predicted only if the entry gives the network's output there while spending at
+most `budget` of a forward pass on it, its region test and its interpretation:
+
+    reward = [mu * (1 - c) + alpha * mu * within - price * numbers] / (1 + alpha)
+
+where within is the share of the region's inputs so predicted. Running the network on an input, or
+anything costing about as much, then earns nothing for that input. What scores is what the entry
+predicts without running the network: the share of the data set it explains, with a small weight on
+the work saved. The network itself spends a forward pass on every input and saves nothing, so it
+scores 0; an entry that predicts every input at no cost scores 1. Stored numbers are counted and
+charged as under `r_alpha_numbers`, in forward passes, and divided like the rest.
+
+Under `r_alpha` the cheapest way to fidelity on the inputs where a rule fails is often to run the
+network there: on ARC's challenge network the Claude entries so far did that on about 15% of the
+inputs, and the GPT one did work close to it, two thirds of a forward pass, on about 12%.
+`r_budget` is the reward to use when the question is how much of the network an entry explains.
+
+- The budget has to sit below what an exact re-implementation of the network costs per input, or such
+  an entry fits inside it. On ARC's RNNs the baseline runs' exact entries cost 0.50 of a forward pass
+  on 3 numbers and 0.73 on 10, so 0.1 is safe. On the transformer of `models/att-c` the baseline run's
+  exact entry costs 0.04, so 0.1 would let it in there. The budget is a setting of the run.
+- The build is not part of the budget: it is done once for all inputs and paid in the cost. On a
+  data set of tokens that leaves room for a cached forward pass, the network's outputs on a small set
+  of inputs worked out in the build and looked up at one operation. Real-valued inputs have no such
+  set.
+- An entry may run a cheap approximation of the network inside the budget, a few of its units, say.
+  If that predicts, it says which part of the network carries the output.
+- On a sample, within is taken at its lower confidence bound, as the fidelity is under `r_alpha`.
+- Every receipt keeps `input_ops`, so a run can be scored again under any budget.
 
 ## 4. The pilots' numbers
 
@@ -253,13 +297,14 @@ construction. A hole found later gets its test there first.
 | Send one entry again and again and keep the luckiest scoring | the locked entry is scored once more on a fresh sample, and the report gives that number |
 | Convert for free what takes a computation | casts are charged (`tests/test_lang.py`) |
 | Claim more than is measured | the default reward ignores the claim; `r_alpha_claimed` penalises it |
-| Sit just inside a threshold or a budget | there is none |
+| Sit just inside a threshold or a budget | there is none, but for `r_budget`'s budget per input, where work inside it is what it pays for |
 | Under `r_alpha_numbers`: pack several numbers into the digits of one, or make a number by the length of an arange | a number counts once per four significant digits; an arange's length is counted |
 | Under `r_alpha_numbers`: hold a table as places in one long arange, a slice for each number (found by the agent of `pilot-rnn-g-numbers-002`) | the places a slice reads out of a list made of constants alone are counted |
 | Under `r_alpha_numbers`: make numbers from the input by arithmetic, a token minus itself, e to that, sums of the 1s (found by the agent of `pilot-rnn-g-numbers-005`) | a value that comes out the same on every input tried and under other weights of the same shapes is counted where the entry reads it |
+| Under `r_budget`: run the network, or work close to it, on the inputs where a rule fails | an input that costs more than the budget counts as not predicted, whatever the answer |
 
 The reward functions also say when a setting invites one of these (`rewards.warnings`): alpha at 1
-or less, the lower bound switched off, a penalty of 0.
+or less, the lower bound switched off, a penalty of 0, a budget of a whole forward pass or more.
 
 ## 6. What is known and left open
 

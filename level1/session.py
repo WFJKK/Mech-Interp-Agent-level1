@@ -92,8 +92,11 @@ def make_result(weights, info, extra):
         lv1.check_structure(entry, extra["limits"]["max_nodes"], extra["limits"]["max_const_scalars"])
         x, answers, ops = network_outputs()
         parts = lv1.measure(entry, weights, n_ctx, x, answers, ops)
-        sampled = info["check"] != "all" and parts["n_in_region"]
+        parts["sampled"] = info["check"] != "all"
+        sampled = parts["sampled"] and parts["n_in_region"]
         parts["fidelity_low"] = lv1.wilson_lower(parts["n_agree"], parts["n_in_region"]) if sampled else parts["fidelity"]
+        if not rewards.needs_input_ops(extra["reward"]):  # what single inputs cost, kept only for a reward that reads it
+            parts.pop("input_ops", None)
         if rewards.needs_numbers(extra["reward"]):  # a reward that prices what an entry stores, counted as the verifier does
             parts["numbers"] = lv1.stored_numbers(entry, weights, n_ctx, x)
             parts["numbers_network"] = lv1.stored_numbers(reference_entry(), weights, n_ctx, x)

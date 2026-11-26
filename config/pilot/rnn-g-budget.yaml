@@ -1,0 +1,12 @@
+# The pilot on rnn-g (config/pilot/rnn-g.yaml) under a reward with a budget per input: everything as in that
+# run, but an input on which the entry spends more than a tenth of a forward pass counts as not predicted,
+# whatever it answers (level1/rewards.py, r_budget). Running the network on the inputs where a rule fails then
+# earns nothing there; what scores is what the entry predicts without running it. Stored numbers cost 0.01 each,
+# as in config/pilot/rnn-g-price.yaml. Started afresh, not continued from an earlier run.
+extends: rnn-g.yaml
+run_id: pilot-rnn-g-budget-01
+reward:
+  name: r_budget
+  alpha: 10
+  budget: 0.1
+  price: 0.01

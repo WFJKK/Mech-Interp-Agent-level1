@@ -318,6 +318,26 @@ def test_numbers_computed_from_the_weights_are_not_stored(model, nets):
     assert priced.score(entry)["parts"]["numbers"] == 0
 
 
+BUDGET = {"reward": {"name": "r_budget", "alpha": 10.0, "budget": 0.1, "price": 0.01}}
+
+
+def test_running_the_network_earns_nothing_within_a_budget(model, nets):
+    """Running the network on the inputs where a rule fails raises r_alpha, since a forward pass there costs less
+    than the wrong answers it spares. Under r_budget an input on which the entry spends more than the budget is
+    not predicted, whatever it answers: the network run on some inputs earns nothing there, the rule alone
+    scores higher, and the network itself scores 0."""
+    w = nets["lin-a-s1"][0]
+    plain, budget = Verifier(model, "lin-a-s1", CFG), Verifier(model, "lin-a-s1", BUDGET)
+    refs = model.reference_entries(w)
+    rule, hybrid = refs["target"], refs["target_with_network_in_corner"]
+    assert plain.score(hybrid)["reward"] > plain.score(rule)["reward"]
+    with_network, alone = budget.score(hybrid), budget.score(rule)
+    assert with_network["reward"] < alone["reward"]
+    assert with_network["reward_detail"]["fidelity_used"] < with_network["parts"]["fidelity"]
+    assert alone["reward_detail"]["fidelity_used"] == alone["parts"]["fidelity"]   # a cheap rule loses nothing
+    assert budget.score(budget.reference)["reward"] == 0.0
+
+
 def test_a_check_that_rarely_holds_is_not_a_stored_number(model, nets):
     """A test that holds on few inputs, or only under some weights, changes with them: it is no stored number,
     even when the inputs and weights the count happens to try never make it hold. The count once tried each value
