@@ -752,17 +752,27 @@ def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model
     (all of the data set when every input is checked, the sample when one is drawn).
 
     cost is the entry's whole work per input of its region, over one forward pass: r + (r_rule + b) /
-    coverage. With it, coverage * (1 - cost) is the share of the forward passes the entry saves."""
+    coverage. With it, coverage * (1 - cost) is the share of the forward passes the entry saves.
+
+    input_ops says what single inputs cost: for each number of operations an input of the region took (its rule
+    and its prediction, the build aside), how many inputs took it and on how many of those the entry gave the
+    network's answer, as rows [operations, inputs, agreed]. A reward can then ask what was predicted within any
+    budget per input, without running the entry again."""
     ev = Evaluator(entry, weights, n_ctx, deadline)
     n = len(inputs)
     inside_n = agree = rule_ops = predict_ops = 0
+    by_ops: dict = {}
     for x, truth in zip(inputs, model_answers):
         inside, answer, c_rule, c_pred = ev.run(x)
         rule_ops += c_rule
         if inside:
             inside_n += 1
             predict_ops += c_pred
-            agree += int(answer == int(truth))
+            right = int(answer == int(truth))
+            agree += right
+            row = by_ops.setdefault(int(c_rule + c_pred), [0, 0])
+            row[0] += 1
+            row[1] += right
     f = float(model_ops)
     return {
         "n_inputs": n, "n_in_region": inside_n, "n_agree": agree,
@@ -773,6 +783,7 @@ def measure(entry: dict, weights: dict, n_ctx: int, inputs, model_answers, model
         "r": (predict_ops / (inside_n * f)) if inside_n else None,
         "r_rule": rule_ops / (n * f),
         "b": ev.build_cost / (n * f),
+        "input_ops": [[k, a, b] for k, (a, b) in sorted(by_ops.items())],
     }
 
 

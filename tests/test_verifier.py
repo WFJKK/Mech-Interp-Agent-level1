@@ -140,6 +140,26 @@ def test_one_cost_and_the_reward_written_with_it(model, nets):
     assert empty["cost"] is None and rewards.cost_of(empty) is None
 
 
+def test_what_single_inputs_cost_is_kept(model, nets):
+    """input_ops keeps, for each number of operations an input of the region took (its region test and its
+    prediction), how many inputs took it and on how many of those the entry gave the network's answer. It adds up
+    to the counts beside it, so a reward can ask what was predicted within a budget per input."""
+    w = nets["lin-a-s0"][0]
+    v = Verifier(model, "lin-a-s0", CFG)
+    g = Graph(w, 2)
+    scores = (g.weight("unembed") @ g.weight("hidden") @ g.weight("embed")).T   # one row of scores per token
+    cheap = lang.maximum(g.token(0), g.token(1))
+    dear = (scores[g.token(0)] + scores[g.token(1)]).argmax()
+    entry = g.entry(region=g.token(0) < 60, interpretation=lang.cond(g.token(1) > 31, dear, cheap))
+    p = v.score(entry)["parts"]
+    rows = p["input_ops"]
+    assert len(rows) == 2 and rows[0][0] < rows[1][0] and all(isinstance(x, int) for row in rows for x in row)
+    assert sum(n for _, n, _ in rows) == p["n_in_region"] == 60 * 64 and sum(a for _, _, a in rows) == p["n_agree"]
+    region_test = p["rule_ops"] / p["n_inputs"]                                   # the same on every input
+    assert sum(k * n for k, n, _ in rows) == pytest.approx(p["predict_ops"] + region_test * p["n_in_region"])
+    assert [n for _, n, _ in rows] == [60 * 32, 60 * 32]
+
+
 def test_the_network_on_one_to_four_tokens(model, model4, nets):
     """The same weights with a zero column for an empty slot: 671 operations per forward pass, the same outputs
     as lin-a wherever an input has two tokens, and a data set drawn with every number of tokens equally likely."""
