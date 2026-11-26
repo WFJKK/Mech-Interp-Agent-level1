@@ -396,8 +396,8 @@ def check_structure(entry, max_nodes: int = MAX_NODES, max_const_scalars: int = 
 
 
 NUMBER_DIGITS = 4  # a stored number counts once per this many significant decimal digits it is written with
-MADE_WEIGHT_SETS = 3  # other weights of the same shapes, besides the network's own, to tell numbers made from nothing
-MADE_INPUTS = 16  # inputs each entry is run on to find them
+MADE_WEIGHT_SETS = 32  # other weights of the same shapes, besides the network's own, to tell numbers made from nothing
+MADE_INPUTS = 16  # inputs drawn for each set of weights, the extremes besides: a test that rarely holds is seen to hold
 
 
 def _digits(v, written: bool = True) -> int:
@@ -462,7 +462,9 @@ def stored_numbers(entry: dict, weights: dict | None = None, n_ctx: int | None =
       holds what the same table holds as a constant);
     - with the weights and some inputs given, every value the entry makes from its input or its weights that
       comes out the same on all of them and under other weights of the same shapes (a token minus itself is 0, e to that is 1,
-      and sums and quotients of 1 make any threshold), counted where the rest of the entry reads it.
+      and sums and quotients of 1 make any threshold), counted where the rest of the entry reads it. Each set of
+      weights is tried on inputs of its own, so that a test which holds on few inputs, or only under some weights,
+      is seen to change and is not taken for a stored truth value.
     Each counts once per NUMBER_DIGITS significant decimal digits it is written with, and at least once, so several
     numbers packed into the digits of one count as what they are. What an entry computes from the weights is not
     counted: it changes with the weights, and it is charged as computation, in the cost."""
@@ -487,15 +489,13 @@ def stored_numbers(entry: dict, weights: dict | None = None, n_ctx: int | None =
 def _made_numbers(entry: dict, weights: dict, n_ctx: int, inputs, fixed: list) -> int:
     """The numbers an entry makes from its input or weights that are the same on every input and every weight:
     each node that is not made of constants alone, gives one value on all the inputs tried under the network's
-    weights and under other weights of the same shapes, and is read by a node that does not. A node that fails on an input
-    (a branch not taken there) is judged on the inputs where it runs."""
+    weights and under other weights of the same shapes, and is read by a node that does not. Each set of weights is
+    tried on MADE_INPUTS inputs of its own and on the extremes of the inputs. A node that fails on an input (a
+    branch not taken there) is judged on the inputs where it runs."""
     nodes = entry["nodes"]
     rng = np.random.default_rng(0)
     x = np.asarray(inputs)
     corners = np.stack([x.min(axis=0), x.max(axis=0)])  # the extremes: where a rarely changing value changes
-    if len(x) > MADE_INPUTS:
-        x = x[np.sort(rng.choice(len(x), MADE_INPUTS, replace=False))]
-    x = np.concatenate([corners, x])
     drawn = []
     for _ in range(MADE_WEIGHT_SETS):
         drawn.append({k: (rng.standard_normal(np.shape(v)) * (float(np.std(v)) or 1.0)).astype(np.float64)
@@ -505,11 +505,12 @@ def _made_numbers(entry: dict, weights: dict, n_ctx: int, inputs, fixed: list) -
     runs = [0] * len(nodes)
     tries = 0
     for w in [weights] + drawn:
+        picked = x[np.sort(rng.choice(len(x), MADE_INPUTS, replace=False))] if len(x) > MADE_INPUTS else x
         try:
             ev = Evaluator(entry, w, n_ctx)
         except EntryError:
             continue
-        for xi in x:
+        for xi in np.concatenate([corners, picked]):
             tokens = _as_input(xi).reshape(-1)
             memo: dict = {}
             ev._held[1] = 0

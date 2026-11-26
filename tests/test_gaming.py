@@ -316,3 +316,22 @@ def test_numbers_computed_from_the_weights_are_not_stored(model, nets):
     entry = g.entry(predict=first[g.token(0)])
     assert lang.stored_numbers(entry) == 0
     assert priced.score(entry)["parts"]["numbers"] == 0
+
+
+def test_a_check_that_rarely_holds_is_not_a_stored_number(model, nets):
+    """A test that holds on few inputs, or only under some weights, changes with them: it is no stored number,
+    even when the inputs and weights the count happens to try never make it hold. The count once tried each value
+    on 18 inputs under 4 weight sets, and pilot-rnn-g-price-01 was charged for its test of a near tie (true on 3%
+    of inputs) and, on the second network, for its tests that four hidden units are all off, which hold only when
+    their input weights have one sign."""
+    w = nets["lin-a-s0"][0]
+    priced = Verifier(model, "lin-a-s0", PRICED)
+    g = Graph(w, 2)
+    guess = lang.maximum(g.token(0), g.token(1))
+    rare = g.entry(predict=lang.cond(g.token(0) == 37, g.token(1), guess))        # holds on 1 input in 64
+    assert lang.stored_numbers(rare) == 1 and priced.score(rare)["parts"]["numbers"] == 1
+    g = Graph(w, 2)
+    guess = lang.maximum(g.token(0), g.token(1))
+    signs = (g.weight("embed")[0, 5] > 0.0) & (g.weight("embed")[0, 0] > 0.0)    # false for this network's weights
+    skip = g.entry(predict=lang.cond(signs, guess, guess))                         # a shortcut taken when it holds
+    assert lang.stored_numbers(skip) == 1 and priced.score(skip)["parts"]["numbers"] == 1
