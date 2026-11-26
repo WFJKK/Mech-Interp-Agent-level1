@@ -122,9 +122,22 @@ measured parts, so a finished run can be scored again under another reward
 
 ### Louis's suggestion
 
+Louis's original suggestion was the following scalar "reward":
+
 ```math
 \text{score} = \begin{cases} \mu \, p & \text{if } \hat q \ge p \\ \mu \, \big(\hat q - \lambda \, (p - \hat q)\big) & \text{otherwise} \end{cases}
 ```
+
+Here $\lambda$ is a hyperparameter, the price of claiming more than is measured. I was not quite sure
+how to implement this, as the cost was missing. However, do note that one aspect of the interpretation
+triple appears here that is left out in the current reward, namely the claimed fidelity $p$. I am not
+certain how relevant this is, but one could imagine that it carries more global information that we
+are leaving out currently. By this I mean that currently the agent tries to get every input of the
+model right, which when summing over all inputs leads to a certain fidelity. However, one could
+imagine that rewarding a high fidelity at low cost could force the agent to work more in terms of the
+input space as a whole: to split it into regions, each with a cheap description and a fidelity it can
+state in advance, and to accept a known share of wrong answers in a region instead of patching the
+description input by input.
 
 ## Agentic setup / Auto-research
 
