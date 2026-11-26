@@ -278,8 +278,8 @@ output o is then
 
 and the network answers the o with the highest score.
 
-Pair sums. For every pair of tokens it stores once `P[a,b][o] = M[o,a] + M[o,b]`, sorted from highest
-to lowest, so that
+Pair sums, a cached half of the forward pass. For every pair of tokens it stores once
+`P[a,b][o] = M[o,a] + M[o,b]`, sorted from highest to lowest, so that
 
     s(o) = P[t₁,t₂][o] + P[t₃,t₄][o]
 
@@ -298,8 +298,10 @@ network has learned.
 ##### Is the network explained?
 
 On the first seed, over all 64⁴ inputs. "In the entry?" says whether the agent's entry predicts that
-part of the behaviour; "How" says whether it does so by a rule, by computing it from the weights, or by
-numbers read off this one network (memorised), which do not carry over to another network.
+part of the behaviour; "How" says whether it does so by a rule, by computing it from the weights, by a
+cached forward pass (the network's answers, computed from the weights in advance for the very inputs
+they predict: exact on any network, but not an explanation), or by numbers read off this one network
+(memorised), which do not carry over to another network.
 
 | Part of the behaviour | Share of inputs | In the entry? | How |
 | --- | ---: | --- | --- |
@@ -428,8 +430,9 @@ baseline 0.308, which is 4.2 times as much.
 
 The agent on baseline again found no rule, and its entry is again the network's own calculation, exact
 for any weights. It uses the table `M = U · H · E` and the pair sums `P[a,b][o] = M[o,a] + M[o,b]` of
-Experiment 1. An input of 1 or 2 tokens is answered from a table. For a longer input the entry pairs
-up the tokens, adds the pair sums,
+Experiment 1. An input of 1 or 2 tokens is answered from a table of the network's answers to every such
+input: a cached forward pass. For a longer input the entry pairs up the tokens and adds their pair
+sums, the network's cached scores on each pair alone,
 
     s(o) = P[t₁,t₂][o] + P[t₃,t₄][o] + …
 
@@ -455,8 +458,8 @@ on its path are run and counted. With `M = U · H · E` as before, the score of 
 
 - Counting the tokens: three checks "is this slot empty?", each followed by a branch point. 6
   operations.
-- 1 token: the answer is read from a table of the network's answer to each single token,
-  `T[t] = argmax over o of M[o,t]`, built once. 1 operation.
+- 1 token: a cached forward pass. The answer is read from a table of the network's answer to each
+  single token, `T[t] = argmax over o of M[o,t]`, built once. 1 operation.
 - 4 tokens: `answer = max(m, floor)`, the entry of Experiment 1, read from a table. 3 operations for m
   and 1 for the table.
 - 2 or 3 tokens: the same. For some values of m the entry also holds a second candidate; then it
@@ -470,7 +473,7 @@ On the first seed, with 20,000 inputs per number of tokens:
 
 | Tokens | What the entry does | Operations per input | Fidelity |
 | ---: | --- | ---: | ---: |
-| 1 | reads the network's answer to that single token from a table | 7 | 100% |
+| 1 | a cached forward pass: reads the network's answer to that single token from a table built in advance | 7 | 100% |
 | 2 | the largest token with the floor of Experiment 1; for some values of the largest token it also holds a second candidate, computes the exact score of both and takes the higher | 11 | 100% |
 | 3 | the same | 13 | 100% |
 | 4 | the largest token with the floor, exactly the entry of Experiment 1 | 10 | 99.88% |
@@ -489,7 +492,7 @@ On the first seed:
 | Part of the behaviour | Share of inputs | In the entry? | How |
 | --- | ---: | --- | --- |
 | Answers the largest token, with the floor | 96.4% | yes | a rule; on 5 to 8 tokens the entry reaches these answers through the lists of the fourth row rather than by the rule |
-| Answers to a single token that depart from it | 0.8% | yes | computed from the weights: a table of the network's 64 answers to a single token. Not memorised, but not explained either |
+| Answers to a single token that depart from it | 0.8% | yes | a cached forward pass: the entry runs the network in advance on each of the 64 single-token inputs and looks the answer up. Exact on any network and not memorised, but not explained: nothing says why tokens 0, 8, 10 and 11 depart |
 | Departures on 2 and 3 tokens | 0.06% | mostly: 181 of 199 | memorised: for some values of the largest token, a second possible answer saved as seen on this network; the entry computes the exact score of both and takes the higher |
 | Departures on 5 to 8 tokens that the entry catches | 2.65% | yes | memorised and computed: with many tokens the smaller ones can outvote the largest, and there is no rule for when. From the largest token and the sum of the tokens the entry picks one of 98 lists of outputs seen to win on this network, then computes the network's exact score for each and answers the highest |
 | Not predicted | 0.09% | no | none |
@@ -569,7 +572,7 @@ the same for both networks. Here the agent on trained needs 116 operations per i
 baseline 525, which is 4.5 times as much. For the linear network it was 51 against 217, which is 4.2
 times as much. So the agent gains about as much from the trained network in both cases. The rewards
 differ because a forward pass costs 12,987 operations here and 703 there, and most of the
-transformer's forward pass can be stored in tables for any weights.
+transformer's forward pass can be cached in tables for any weights.
 
 ##### Accuracy bound
 
@@ -581,8 +584,9 @@ $$A \ge A_I - (1 - q)$$
 
 Here $A$ is the accuracy against the largest of the tokens given, on this experiment's data set, where
 each number of tokens is a quarter. The agent's entry has no short rule, so we computed $A_I$ by running
-it on every input of 1 to 3 tokens; on 4 tokens it answers the network's own answer to the largest token
-alone, from a table of 64 answers, and $A_I$ there follows from that table. Its measured fidelity was
+it on every input of 1 to 3 tokens; on 4 tokens it gives the network's answer to the largest token
+alone, read from a cached forward pass (a table of the network's answers to the 64 single tokens), and
+$A_I$ there follows from that table. Its measured fidelity was
 100% on both networks, which gives $q_{\text{low}} = 99.977\%$.
 
 | Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Lower bound on $A$ | Sampling, same compute | $A$ over all inputs |
@@ -834,7 +838,8 @@ calculation is exact there too; what carries over less well is the choice of whe
 with the tables fitted on the first network.
 
 The agent on baseline found no rule and wrote the network's own calculation, exact for any weights and
-cheaper than the network: its first steps are read from a table built from the weights, the rest is the
+cheaper than the network: its first steps are a cached part of the forward pass, worked out from the
+weights in advance for each region of the first two numbers and read from a table; the rest is the
 recurrence itself.
 
 ##### Is the network explained?
@@ -1225,7 +1230,8 @@ Every receipt keeps these counts and parts, so a run can be scored again under a
 without running anything. With the entry the agent also states a claimed fidelity; the receipt
 records it and the overclaim, the claim minus the measured fidelity when positive. An entry may have
 at most 400 nodes and 256 numbers in constants, so a table of the network's outputs cannot be
-written into it; a table computed from the weights in the build is allowed, and paid for there. The
+written into it; a table computed from the weights in the build, such as a cached forward pass, is allowed, and paid for
+there. The
 verifier gives an entry 120 seconds on its inputs.
 
 ### Checking what the agent did
