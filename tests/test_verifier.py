@@ -193,5 +193,6 @@ def test_reward_functions():
     assert "measured - 2 * (claimed - measured)" in rewards.formula({"name": "r_alpha_claimed"})
     for name in rewards.REWARDS:  # every reward has its two texts for the prompt, and gives the network itself 0
         assert rewards.formula({"name": name}) and rewards.explanation({"name": name})
-        itself = {"coverage": 1.0, "fidelity": 1.0, "fidelity_low": 1.0, "r": 1.0, "r_rule": 0.0, "b": 0.0}
+        itself = {"coverage": 1.0, "fidelity": 1.0, "fidelity_low": 1.0, "r": 1.0, "r_rule": 0.0, "b": 0.0,
+                  "numbers": 3, "numbers_network": 3}  # the network stores what its own definition stores
         assert rewards.compute(itself, {"name": name}, claimed=1.0)["reward"] == 0.0

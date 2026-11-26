@@ -94,6 +94,9 @@ def make_result(weights, info, extra):
         parts = lv1.measure(entry, weights, n_ctx, x, answers, ops)
         sampled = info["check"] != "all" and parts["n_in_region"]
         parts["fidelity_low"] = lv1.wilson_lower(parts["n_agree"], parts["n_in_region"]) if sampled else parts["fidelity"]
+        if rewards.needs_numbers(extra["reward"]):  # a reward that prices what an entry stores, counted as the verifier does
+            parts["numbers"] = lv1.stored_numbers(entry, weights, n_ctx, x)
+            parts["numbers_network"] = lv1.stored_numbers(reference_entry(), weights, n_ctx, x)
         parts["reward"] = rewards.compute(parts, extra["reward"])["reward"]
         return parts
 

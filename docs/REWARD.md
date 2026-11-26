@@ -96,6 +96,32 @@ gained. This is the claim-and-penalty form the levels were first described with.
 default because, with the verifier measuring every submission anyway, the claim adds nothing to the
 score that the measurement does not already give. The claims are recorded in every run either way.
 
+### `r_alpha_numbers`
+
+`r_alpha` less a price for every number the entry stores beyond those of the network's own
+definition:
+
+    reward = r_alpha - price * numbers
+
+Reading a number from a table costs one operation however long the table is, so `r_alpha` cannot
+tell an entry that recalls what was seen of the network from one that computes its answers. Here
+every stored number has to earn its price. A stored number is one that is the same on every input
+and for every weight, however it is written (`lang.stored_numbers`): the numbers in constants, the
+length of every arange, the places a slice reads out of a list made of those, and every value the
+entry makes from its input or the weights that comes out the same on all the inputs tried, under the
+network's weights and under three other sets of weights of the same shapes. Each counts once per four significant digits.
+What the entry computes from the weights is not counted, since it changes with them; it is charged
+as computation, in the cost. The verifier counts the network's own definition the same way, so the
+network itself still scores 0, and the agent's `measure` in the sandbox counts as the verifier does.
+
+The price is set against alpha: a number pays for itself if it buys more than price / alpha of
+fidelity. The runs on ARC's challenge network on the branch `multi-agent-agnostic` used 0.001,
+0.002 and 0.005 at alpha 100, before the two last rows of the table in section 5 were closed.
+
+A value that only rarely changes can pass for one that never does: the count tries the extremes of
+the inputs drawn and 16 of them, so a test that is true on all but a few inputs may be charged as a
+stored truth value, one number.
+
 ## 4. The pilots' numbers
 
 ### On pairs (`models/lin-a`, every input checked)
@@ -228,6 +254,9 @@ construction. A hole found later gets its test there first.
 | Convert for free what takes a computation | casts are charged (`tests/test_lang.py`) |
 | Claim more than is measured | the default reward ignores the claim; `r_alpha_claimed` penalises it |
 | Sit just inside a threshold or a budget | there is none |
+| Under `r_alpha_numbers`: pack several numbers into the digits of one, or make a number by the length of an arange | a number counts once per four significant digits; an arange's length is counted |
+| Under `r_alpha_numbers`: hold a table as places in one long arange, a slice for each number (found by the agent of `pilot-rnn-g-numbers-002`) | the places a slice reads out of a list made of constants alone are counted |
+| Under `r_alpha_numbers`: make numbers from the input by arithmetic, a token minus itself, e to that, sums of the 1s (found by the agent of `pilot-rnn-g-numbers-005`) | a value that comes out the same on every input tried and under other weights of the same shapes is counted where the entry reads it |
 
 The reward functions also say when a setting invites one of these (`rewards.warnings`): alpha at 1
 or less, the lower bound switched off, a penalty of 0.

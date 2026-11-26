@@ -109,6 +109,10 @@ class Verifier:
             parts["fidelity_low"] = lang.wilson_lower(parts["n_agree"], parts["n_in_region"])
         else:
             parts["fidelity_low"] = parts["fidelity"]
+        if rewards.needs_numbers(self.reward_cfg):  # a reward that prices what an entry stores
+            n_ctx = self.model.n_ctx
+            parts["numbers"] = lang.stored_numbers(entry, self.weights, n_ctx, x)
+            parts["numbers_network"] = lang.stored_numbers(self.reference, self.weights, n_ctx, x)
         r = rewards.compute(parts, self.reward_cfg, claimed)
         receipt.update(status="scored", parts=parts, reward=r["reward"],
                        reward_detail={k: v for k, v in r.items() if k != "reward"})

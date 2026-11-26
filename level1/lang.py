@@ -395,6 +395,146 @@ def check_structure(entry, max_nodes: int = MAX_NODES, max_const_scalars: int = 
     return {"nodes": len(nodes), "const_scalars": scalars}
 
 
+NUMBER_DIGITS = 4  # a stored number counts once per this many significant decimal digits it is written with
+MADE_WEIGHT_SETS = 3  # other weights of the same shapes, besides the network's own, to tell numbers made from nothing
+MADE_INPUTS = 16  # inputs each entry is run on to find them
+
+
+def _digits(v, written: bool = True) -> int:
+    """The significant decimal digits one number is written with (a truth value has one). A number the entry
+    computed rather than wrote is read at 12 digits, so that 0.1 + 0.2 counts as 0.3."""
+    if isinstance(v, (bool, np.bool_)):
+        return 1
+    if isinstance(v, (int, np.integer)):
+        text = str(abs(int(v)))
+    else:
+        f = abs(float(v))
+        if not math.isfinite(f):
+            return 1
+        text = (repr(f) if written else f"{f:.12g}").split("e")[0].replace(".", "")
+    return max(1, len(text.strip("0")))
+
+
+def _counted(v, written: bool = True) -> int:
+    return -(-_digits(v, written) // NUMBER_DIGITS)
+
+
+def _counted_all(value, written: bool = True) -> int:
+    """Every number of a value, each counted by its digits (repeated numbers counted each time they appear),
+    except that a list filled with one number holds just that number."""
+    a = np.asarray(value)
+    if a.size == 0:
+        return 0
+    flat = a.reshape(-1)
+    if a.size > 1 and bool(np.all(flat == flat[0])):
+        a = flat[:1]
+    if a.dtype == np.bool_:
+        return int(a.size)
+    vals, counts = np.unique(a.reshape(-1), return_counts=True)
+    py = int if np.issubdtype(a.dtype, np.integer) else float
+    return int(sum(_counted(py(v), written) * int(c) for v, c in zip(vals, counts)))
+
+
+def _index_numbers(index) -> list:
+    """The whole numbers a slice's index is written with."""
+    out = []
+    for it in index if isinstance(index, list) else [index]:
+        if isinstance(it, dict):
+            out.extend(v for v in (it.get("start"), it.get("stop"), it.get("step")) if v is not None)
+        elif isinstance(it, int) and not isinstance(it, bool):
+            out.append(it)
+    return out
+
+
+def _same(a, b) -> bool:
+    a, b = np.asarray(a), np.asarray(b)
+    if a.shape != b.shape or a.dtype.kind != b.dtype.kind:
+        return False
+    return bool(np.array_equal(a, b, equal_nan=a.dtype.kind == "f"))
+
+
+def stored_numbers(entry: dict, weights: dict | None = None, n_ctx: int | None = None, inputs=None) -> int:
+    """How many numbers an entry stores, for a reward that prices them (rewards.r_alpha_numbers).
+
+    A stored number is one that is the same on every input and for every weight, however it is written:
+    - every number in its constants and the length of every arange;
+    - every place read by a slice out of a list made of those alone (a table held as places in a long arange
+      holds what the same table holds as a constant);
+    - with the weights and some inputs given, every value the entry makes from its input or its weights that
+      comes out the same on all of them and under other weights of the same shapes (a token minus itself is 0, e to that is 1,
+      and sums and quotients of 1 make any threshold), counted where the rest of the entry reads it.
+    Each counts once per NUMBER_DIGITS significant decimal digits it is written with, and at least once, so several
+    numbers packed into the digits of one count as what they are. What an entry computes from the weights is not
+    counted: it changes with the weights, and it is charged as computation, in the cost."""
+    check_structure(entry)
+    nodes = entry["nodes"]
+    fixed = []  # made of constants and aranges alone
+    total = 0
+    for node in nodes:
+        op, args = node["op"], node.get("args", [])
+        fixed.append(op in ("const", "arange") or (op not in SOURCES and builtins.all(fixed[a] for a in args)))
+        if op == "const":
+            total += _counted_all(_const(node))
+        elif op == "arange":
+            total += _counted(node["n"])
+        elif op == "slice" and fixed[args[0]]:
+            total += sum(_counted(v) for v in _index_numbers(node.get("index")))
+    if weights is not None and inputs is not None and len(inputs):
+        total += _made_numbers(entry, weights, int(n_ctx), inputs, fixed)
+    return total
+
+
+def _made_numbers(entry: dict, weights: dict, n_ctx: int, inputs, fixed: list) -> int:
+    """The numbers an entry makes from its input or weights that are the same on every input and every weight:
+    each node that is not made of constants alone, gives one value on all the inputs tried under the network's
+    weights and under other weights of the same shapes, and is read by a node that does not. A node that fails on an input
+    (a branch not taken there) is judged on the inputs where it runs."""
+    nodes = entry["nodes"]
+    rng = np.random.default_rng(0)
+    x = np.asarray(inputs)
+    corners = np.stack([x.min(axis=0), x.max(axis=0)])  # the extremes: where a rarely changing value changes
+    if len(x) > MADE_INPUTS:
+        x = x[np.sort(rng.choice(len(x), MADE_INPUTS, replace=False))]
+    x = np.concatenate([corners, x])
+    drawn = []
+    for _ in range(MADE_WEIGHT_SETS):
+        drawn.append({k: (rng.standard_normal(np.shape(v)) * (float(np.std(v)) or 1.0)).astype(np.float64)
+                      for k, v in weights.items()})
+    first: dict = {}
+    varies = [bool(f) for f in fixed]  # set for those made of constants alone too: they are counted already
+    runs = [0] * len(nodes)
+    tries = 0
+    for w in [weights] + drawn:
+        try:
+            ev = Evaluator(entry, w, n_ctx)
+        except EntryError:
+            continue
+        for xi in x:
+            tokens = _as_input(xi).reshape(-1)
+            memo: dict = {}
+            ev._held[1] = 0
+            tries += 1
+            for i in range(len(nodes)):
+                if varies[i]:
+                    continue
+                try:
+                    v = ev._eval(i, memo, [0], tokens)
+                except EntryError:
+                    continue
+                runs[i] += 1
+                if i not in first:
+                    first[i] = np.array(v, copy=True)
+                elif not _same(first[i], v):
+                    varies[i] = True
+    made = {i for i in range(len(nodes)) if not fixed[i] and not varies[i] and runs[i] >= max(2, tries // 2)}
+    read_by_others = set()
+    for j, node in enumerate(nodes):
+        if j not in made:
+            read_by_others.update(a for a in node.get("args", []) if a in made)
+    read_by_others.update(r for r in (entry.get("rule"), entry["predict"]) if r in made)
+    return sum(_counted_all(first[i], written=False) for i in read_by_others)
+
+
 def canonical(entry: dict) -> str:
     return json.dumps(entry, sort_keys=True, separators=(",", ":"), allow_nan=False)
 
