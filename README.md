@@ -297,13 +297,15 @@ network has learned.
 
 ##### Is the network explained?
 
-On the first seed, over all 64⁴ inputs:
+On the first seed, over all 64⁴ inputs. "In the entry?" says whether the agent's entry predicts that
+part of the behaviour; "How" says whether it does so by a rule, by computing it from the weights, or by
+numbers read off this one network (memorised), which do not carry over to another network.
 
-| Part of the behaviour | Share of inputs | Short description |
-| --- | ---: | --- |
-| Answers the largest token | 99.83% | yes: "max of 4" |
-| Answers the floor when all tokens are small | 0.06% | yes: one number from the weights |
-| Close-token mistakes | 0.11% | none found; they depend on the exact numbers in M |
+| Part of the behaviour | Share of inputs | In the entry? | How |
+| --- | ---: | --- | --- |
+| Answers the largest token | 99.83% | yes | a rule: "max of 4" |
+| Answers the floor when all tokens are small | 0.06% | yes | a rule with one number, computed from the weights; not memorised |
+| Close-token mistakes | 0.11% | no | none found; they depend on the exact numbers in M |
 
 So we have explained the network up to 0.11% of inputs. For those we know where they are, among the
 inputs whose top tokens are close together, but we have no explanation for them apart from running the
@@ -484,13 +486,13 @@ network.
 
 On the first seed:
 
-| Part of the behaviour | Share of inputs | Short description |
-| --- | ---: | --- |
-| Answers the largest token, with the floor | 96.4% | yes: one rule |
-| Answers to a single token that depart from it | 0.8% | yes: a table of 64 answers, from the weights |
-| Departures on 2 and 3 tokens | 0.06% | not explained, only stored: the entry saves these cases as seen on this network (for some values of the largest token, a second possible answer) and computes the exact score of both. That gets all 18 departures on 2 tokens right, and 163 of the 181 on 3 tokens |
-| Departures on 5 to 8 tokens that the entry catches | 2.65% | none. With many tokens the smaller ones can outvote the largest, and the entry has no rule for when. From the largest token and the sum of the tokens it picks one of 98 lists of outputs that were seen to win in such a case on this network, computes the network's exact score for each output on the list and answers the highest. So it predicts these inputs by redoing part of the network's own calculation |
-| Not predicted | 0.09% | none |
+| Part of the behaviour | Share of inputs | In the entry? | How |
+| --- | ---: | --- | --- |
+| Answers the largest token, with the floor | 96.4% | yes | a rule; on 5 to 8 tokens the entry reaches these answers through the lists of the fourth row rather than by the rule |
+| Answers to a single token that depart from it | 0.8% | yes | computed from the weights: a table of the network's 64 answers to a single token. Not memorised, but not explained either |
+| Departures on 2 and 3 tokens | 0.06% | mostly: 181 of 199 | memorised: for some values of the largest token, a second possible answer saved as seen on this network; the entry computes the exact score of both and takes the higher |
+| Departures on 5 to 8 tokens that the entry catches | 2.65% | yes | memorised and computed: with many tokens the smaller ones can outvote the largest, and there is no rule for when. From the largest token and the sum of the tokens the entry picks one of 98 lists of outputs seen to win on this network, then computes the network's exact score for each and answers the highest |
+| Not predicted | 0.09% | no | none |
 
 So we have explained the network up to about 2.8% of inputs. For 2.7% the entry predicts the network,
 but only from cases it saved or by computing part of it, both read off this one network. For 0.09% we
@@ -675,11 +677,11 @@ and takes the highest of its outputs.
 
 On the first seed, from $10^8$ drawn inputs:
 
-| Part of the behaviour | Share of inputs | Short description |
-| --- | ---: | --- |
-| Answers the second-largest | 98.46% | yes: "second argmax" |
-| Answers position 0 where the second-largest is at position 1 or 2 | 1.19% | located, not predicted: 91% of it lies where $\lvert x_1 - x_2 \rvert \le 0.05$, which the entry leaves out |
-| Other departures | 0.36% | none |
+| Part of the behaviour | Share of inputs | In the entry? | How |
+| --- | ---: | --- | --- |
+| Answers the second-largest | 98.46% | yes | a rule: "second argmax" |
+| Answers position 0 where the second-largest is at position 1 or 2 | 1.19% | no: left out of the region | located, not predicted: 91% of it lies where $\lvert x_1 - x_2 \rvert \le 0.05$, and the width 0.05 is the one number read off this network |
+| Other departures | 0.36% | no | none |
 
 So we have explained the network up to about 1.5% of inputs. For most of them we know where they are,
 a thin wedge around the plane $x_1 = x_2$, and what the network answers there, but the entry does not
@@ -839,12 +841,12 @@ recurrence itself.
 
 On the first network, from 500,000 drawn inputs:
 
-| Part of the behaviour | Share of inputs | Short description |
-| --- | ---: | --- |
-| Answers the second-largest | 95.29% | yes: "second argmax" |
-| Departures where the second-largest is negative or nearly tied with a neighbour | 2.96% | located, not explained: the entry runs the network's own calculation on these inputs (7.5% of all) |
-| Departures that the fitted error model sends to the network | 1.30% | located with two tables fitted on this network, not explained: the entry runs the network there too (another 7.6% of inputs) |
-| Not predicted | 0.46% | none |
+| Part of the behaviour | Share of inputs | In the entry? | How |
+| --- | ---: | --- | --- |
+| Answers the second-largest | 95.29% | yes | a rule: "second argmax" |
+| Departures where the second-largest is negative or nearly tied with a neighbour | 2.96% | yes | computed, not explained: a rule on the gaps sends these inputs (7.5% of all) to the network's own calculation, which the entry runs |
+| Departures that the fitted error model sends to the network | 1.30% | yes | memorised and computed: two tables fitted on this network pick these inputs (another 7.6%), and the entry runs the network on them |
+| Not predicted | 0.46% | no | none |
 
 So we have explained the network up to 4.7% of inputs. For 4.3% we know where they are and predict
 them, but only by running the network's own calculation, on 15% of the inputs, and a third of those
