@@ -212,3 +212,107 @@ def test_an_entry_that_leans_on_small_weights_does_not_become_the_baseline(tmp_p
     assert (f["name"], f["label"], f["established"]) == ("itself", "passes", True) and f["rule"] == baseline.RULE
     assert sorted(f["confirmation"]["twin_networks"]) == twin_ids and sorted(f["confirmation"]["networks"]) == [f"lin-e-s{k}" for k in (2, 3, 4, 5)]
     assert all(baseline.exact(r) for r in {**f["confirmation"]["networks"], **f["confirmation"]["twin_networks"]}.values())
+
+
+# ---------------------------------------------------------------- a reward that prices stored numbers
+
+PRICED = {"reward": {"name": "r_alpha_numbers", "alpha": 10.0, "price": 0.01}}
+
+
+def test_a_stored_number_has_to_earn_its_price(model, nets):
+    """Under r_alpha_numbers a table read at one operation is no longer free: every number stored beyond those of
+    the network's own definition is charged, and the network itself, which stores no more than that, scores as
+    under r_alpha."""
+    w = nets["lin-a-s0"][0]
+    plain, priced = Verifier(model, "lin-a-s0", CFG), Verifier(model, "lin-a-s0", PRICED)
+    g = Graph(w, 2)
+    guess = lang.maximum(g.token(0), g.token(1))
+    table = g.const([float(i) / 8 for i in range(64)])  # 64 stored numbers, read at one operation per input
+    with_table = g.entry(predict=lang.where(table[g.token(0)] < 4.0, guess, guess))
+    a, b = plain.score(with_table), priced.score(with_table)
+    assert lang.stored_numbers(with_table) == 65 and b["parts"]["numbers"] == 65 and "numbers" not in a["parts"]
+    network = b["parts"]["numbers_network"]
+    assert b["reward"] == pytest.approx(a["reward"] - 0.01 * (65 - network)) and b["reward_detail"]["numbers"] == 65 - network
+    g2 = Graph(w, 2)
+    itself = g2.entry(predict=model.module().reference(g2, lang))
+    assert priced.score(itself)["reward"] == pytest.approx(plain.score(itself)["reward"])
+    with pytest.raises(ValueError, match="needs the entry's stored numbers"):  # never scored without the count
+        rewards.compute(a["parts"], PRICED["reward"])
+
+
+def test_numbers_packed_into_the_digits_of_one_are_counted_as_what_they_are(model, nets):
+    """Two thresholds written as one long number and taken apart again by arithmetic store what two numbers store,
+    and are counted so: a number counts once per four significant digits."""
+    w = nets["lin-a-s0"][0]
+    g = Graph(w, 2)
+    two = g.entry(predict=lang.where(g.token(0) > g.const(1234), g.token(0), lang.where(g.token(1) > g.const(5678), g.token(1), g.token(0))))
+    g = Graph(w, 2)
+    packed = g.const(12345678)
+    first, second = packed // g.const(10000), packed % g.const(10000)
+    one = g.entry(predict=lang.where(g.token(0) > first, g.token(0), lang.where(g.token(1) > second, g.token(1), g.token(0))))
+    assert lang.stored_numbers(two) == 2 and lang.stored_numbers(one) == 2 + 1  # the two halves, and the 10000 once
+    g = Graph(w, 2)
+    listed = g.const([0.5, 0.25, 0.123456, 0.1234567890123])[g.token(1) % g.const(4)]  # 1, 1, 2 and 4, and the 4 once
+    assert lang.stored_numbers(g.entry(predict=lang.where(listed < g.const(0.3), g.token(0), g.token(1)))) == 1 + 1 + 2 + 4 + 1 + 1
+
+
+def test_a_number_made_by_the_length_of_an_arange_is_counted(model, nets):
+    """arange(n) holds n without a constant: its length is counted like a stored number, so a number is not had
+    for nothing by measuring a list."""
+    w = nets["lin-a-s0"][0]
+    g = Graph(w, 2)
+    by_list = g.entry(predict=lang.where(g.token(0) > g.arange(1235).max(), g.token(0), g.token(1)))
+    g = Graph(w, 2)
+    by_const = g.entry(predict=lang.where(g.token(0) > g.const(1234), g.token(0), g.token(1)))
+    assert lang.stored_numbers(by_list) == lang.stored_numbers(by_const) == 1
+
+
+def test_numbers_held_as_positions_in_a_counter_are_counted(model, nets):
+    """A table written as places in one long arange, a slice for each number, holds what the same table holds as a
+    constant, and must be counted so. The agent of pilot-rnn-g-numbers-002 (branch multi-agent-agnostic) held
+    about 290 fitted numbers this way and was charged for one."""
+    w = nets["lin-a-s0"][0]
+    priced = Verifier(model, "lin-a-s0", PRICED)
+    values = [16.03, 2.72, 50.0, 33.97, 47.53, 46.85, 54.6, 45.4]
+    g = Graph(w, 2)
+    as_const = g.entry(predict=lang.where(g.const(values)[g.token(0) % g.const(8)] < 40.0, g.token(0), g.token(1)))
+    g = Graph(w, 2)
+    counter = g.arange(100000)
+    held = lang.cast(lang.stack([counter[int(round(v * 1000))] for v in values]), "float") / lang.cast(counter[1000], "float")
+    as_places = g.entry(predict=lang.where(held[g.token(0) % counter[8]] < lang.cast(counter[40], "float"), g.token(0), g.token(1)))
+    assert Graph.load(as_places, w, 2)[0] is not None and Graph.load(as_const, w, 2)[0] is not None
+    assert lang.stored_numbers(as_places) >= lang.stored_numbers(as_const)
+    assert priced.score(as_places)["parts"]["numbers"] >= priced.score(as_const)["parts"]["numbers"]
+
+
+def test_numbers_made_from_the_input_by_arithmetic_are_counted(model, nets):
+    """A token minus itself is 0 on every input, e to that power is 1, and sums and quotients of 1 give any
+    threshold: a number that is the same on every input and for every weight is a stored number, however it is
+    made. The agent of pilot-rnn-g-numbers-005 (branch multi-agent-agnostic) made its thresholds this way and was
+    charged for none."""
+    w = nets["lin-a-s0"][0]
+    priced = Verifier(model, "lin-a-s0", PRICED)
+    g = Graph(w, 2)
+    plain = g.entry(predict=lang.where(lang.cast(g.token(0), "float") > g.const(0.75), g.token(0), g.token(1)))
+    g = Graph(w, 2)
+    one = lang.exp(lang.cast(g.token(0) - g.token(0), "float"))
+    two = one + one
+    made = (two + one) / (two + two)                              # 0.75, with no constant
+    hidden = g.entry(predict=lang.where(lang.cast(g.token(0), "float") > made, g.token(0), g.token(1)))
+    by_weights = g.entry(predict=lang.where(lang.cast(g.token(0), "float") > made + g.weight("embed")[0, 0] * 0.0, g.token(0), g.token(1)))
+    p, h = priced.score(plain)["parts"]["numbers"], priced.score(hidden)["parts"]["numbers"]
+    assert p == 1 and h >= p
+    assert priced.score(by_weights)["parts"]["numbers"] >= p   # a weight times nothing is no way around it
+
+
+def test_numbers_computed_from_the_weights_are_not_stored(model, nets):
+    """What an entry computes from the weights is charged as computation, not as stored numbers, even when it is a
+    table of whole numbers that small changes of the weights would not move: only what is the same for every weight
+    counts."""
+    w = nets["lin-a-s0"][0]
+    priced = Verifier(model, "lin-a-s0", PRICED)
+    g = Graph(w, 2)
+    first = (g.weight("unembed") @ g.weight("hidden") @ g.weight("embed")).argmax(axis=0)   # an answer per token
+    entry = g.entry(predict=first[g.token(0)])
+    assert lang.stored_numbers(entry) == 0
+    assert priced.score(entry)["parts"]["numbers"] == 0
