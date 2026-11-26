@@ -276,7 +276,7 @@ So we have explained the network up to 0.11% of inputs. For those we know where 
 inputs whose top tokens are close together, but we have no explanation for them apart from running the
 network.
 
-#### Attention max of 4
+#### Attention max of 4 (Experiment still to be performed)
 
 ##### Architecture and training
 
