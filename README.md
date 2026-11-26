@@ -470,6 +470,31 @@ have no prediction at all. On the second seed the saved cases and lists catch mu
 departures on 2 and 3 tokens the entry gets 0 of 18 and 24 of 130, and 1.1% of all inputs are not
 predicted.
 
+##### Accuracy bound
+
+As in Experiment 1, the relation from
+[Relationship to ARC's approach and to accuracy](#relationship-to-arcs-approach-and-to-accuracy) gives,
+with coverage 1,
+
+$$A \ge A_I - (1 - q)$$
+
+Here $A$ is the accuracy against the largest of the tokens given, each number of tokens an eighth of
+the data set. On 1 to 4 tokens we computed $A_I$ on every input: by running the entry on every input
+of 1 to 3 tokens, and on 4 tokens from its rule `max(m, floor)`. Inputs of 5 to 8 tokens are too many
+to go through, so there $A_I$ and $A$ are estimated on 200,000 inputs per number of tokens, which
+leaves $A_I$, and the bound with it, uncertain by about 0.02% (95%).
+
+| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Bound on $A$ | $A$ (estimated) |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First seed | 94.54% | 99.915% | 99.857% | 94.40% | 94.47% |
+| Second seed | 95.47% | 98.920% | 98.750% | 94.22% | 94.51% |
+
+By number of tokens, from 1 to 8, the network's accuracy is 81.3%, 97.3%, 99.6%, 99.83%, 99.0%, 96.6%,
+93.2% and 89.1% on the first seed, and 79.7%, 96.7%, 99.4%, 99.78%, 99.0%, 97.0%, 94.0% and 90.5% on
+the second. On the first seed the entry follows the network closely, and $A_I$ is within 0.07% of
+$A$. On the second, its lists, read off the first network, miss more of the network's departures and
+give the largest token there instead, so $A_I$ is a point above $A$ and the bound is looser.
+
 #### Attention max of 4
 
 ##### Architecture and training
