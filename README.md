@@ -721,15 +721,19 @@ One further run continued the main run with a larger $\alpha$, 445 instead of 10
 with the earlier rounds as memory and 89,000 inputs per scoring. Its rewards below are at $\alpha = 10$,
 so that they compare with the main run's; the second network is the seed check's.
 
-| Run | Coverage | Fidelity | Cost | Reward | Second network: fidelity | Second network: reward |
+| Entry | Coverage | Fidelity | Cost | Reward | Second network: fidelity | Second network: reward |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Pure second argmax | 1 | 98.41% | 0.077 | 0.744 | 94.45% | 0.332 |
 | Main run ($\alpha = 10$) | 0.973 | 99.60% | 0.108 | 0.818 | 95.62% | 0.409 |
-| Continued at $\alpha = 445$ | 1 | 100% | 0.184 | 0.816 | 94.16% | 0.217 |
+| Continued at $\alpha = 445$ | 1 | 100% | 0.184 | 0.816 | 94.16% | **0.217** |
+| Agent on baseline | 1 | 100% | 0.504 | 0.494 | 100% | 0.483 |
 
 With the larger $\alpha$ the agent predicts the network's departures as well: its entry is right on all
-89,000 inputs. But it does so with 199 numbers read off the first network, and on the second network
-its fidelity falls below the main run's, so the larger $\alpha$ bought memorisation rather than
-mechanism. At $\alpha = 445$ itself it scored 0.797, and -25.9 on the second network.
+89,000 inputs. But it does so with 199 numbers read off the first network, and the second network
+shows what they are worth. There the entry is the worst of the four, worse even than the plain second
+argmax, which takes nothing from any network: fidelity 94.16% against 94.45%, reward 0.217 against
+0.332. The larger $\alpha$ bought memorisation rather than mechanism. At $\alpha = 445$ itself the entry
+scored 0.797 on the first network and -25.9 on the second.
 
 #### RNN second argmax of 10 numbers
 
