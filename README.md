@@ -500,6 +500,29 @@ times as much. So the agent gains about as much from the trained network in both
 differ because a forward pass costs 12,987 operations here and 703 there, and most of the
 transformer's forward pass can be stored in tables for any weights.
 
+##### Accuracy bound
+
+As for linear max of 4 in Experiment 1, the relation from
+[Relationship to ARC's approach and to accuracy](#relationship-to-arcs-approach-and-to-accuracy) gives,
+with coverage 1,
+
+$$A \ge A_I - (1 - q)$$
+
+Here $A$ is the accuracy against the largest of the tokens given, on this experiment's data set, where
+each number of tokens is a quarter. The agent's entry has no short rule, so we computed $A_I$ by running
+it on every input of 1 to 3 tokens; on 4 tokens it answers the network's own answer to the largest token
+alone, from a table of 64 answers, and $A_I$ there follows from that table. Its measured fidelity was
+100% on both networks, which gives $q_{\text{low}} = 99.977\%$.
+
+| Network | $A_I$ | Measured $q$ | $q_{\text{low}}$ | Bound on $A$ | $A$ over all inputs |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| First seed | 76.519% | 100% | 99.977% | 76.496% | 76.519% |
+| Second seed | 91.386% | 100% | 99.977% | 91.362% | 91.385% |
+
+The accuracy is low because of the inputs the networks were not trained on. By number of tokens it is
+90.6%, 98.7%, 16.7% and 99.992% on the first seed, and 93.8%, 73.6%, 98.2% and 99.996% on the second.
+The entry reproduces these departures, so its own accuracy is almost exactly the network's.
+
 ### Experiment 3: AlgZoo
 
 The inputs of these networks are real numbers, so there are infinitely many of them. Fidelity is then
