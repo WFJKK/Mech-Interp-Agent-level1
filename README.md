@@ -810,6 +810,77 @@ scored 0.797 on the first network and -25.9 on the second.
 | Agent on baseline | first network | 1 | 100% | 0.728 | 0.270 |
 | Agent on baseline | second network | 1 | 100% | 0.743 | 0.255 |
 
+##### Evaluation
+
+Agent on trained against agent on baseline: 0.806 against 0.270 on the first network. In cost, the
+agent on trained needs 0.134 of a forward pass per input (394 operations) and the agent on baseline
+0.728 (2,138 operations), 5.4 times as much. The baseline's entry is exact and the agent's is wrong on
+0.46% of inputs, and the agent's still comes out far ahead.
+
+Agent on trained against pure second argmax: 0.806 against 0.480. The pure second argmax costs 41
+operations but is wrong on 4.7% of inputs, each priced at 10 forward passes. The agent's entry keeps
+the second argmax on 85% of the inputs and runs the network's own calculation, exact for any weights,
+on the other 15%, where the network is likely to depart. These are the inputs whose second-largest
+number is negative or nearly tied with the largest or the third-largest (7.5% of inputs), and those
+that a logistic model of the network's errors picks out (another 7.6%). The model has two tables of 100
+numbers fitted on this network, one for the positions of the largest and second-largest numbers and
+one for the second- and third-largest, because how often the network departs at a near tie depends
+strongly on where the numbers sit. This brings the wrong answers down from 4.7% to 0.46%.
+
+On the second network the entry keeps much of this: fidelity 98.86%, reward 0.724. The network's own
+calculation is exact there too; what carries over less well is the choice of where to run it, made
+with the tables fitted on the first network.
+
+The agent on baseline found no rule and wrote the network's own calculation, exact for any weights and
+cheaper than the network: its first steps are read from a table built from the weights, the rest is the
+recurrence itself.
+
+##### Is the network explained?
+
+On the first network, from 500,000 drawn inputs:
+
+| Part of the behaviour | Share of inputs | Short description |
+| --- | ---: | --- |
+| Answers the second-largest | 95.29% | yes: "second argmax" |
+| Departures where the second-largest is negative or nearly tied with a neighbour | 2.96% | located, not explained: the entry runs the network's own calculation on these inputs (7.5% of all) |
+| Departures that the fitted error model sends to the network | 1.30% | located with two tables fitted on this network, not explained: the entry runs the network there too (another 7.6% of inputs) |
+| Not predicted | 0.46% | none |
+
+So we have explained the network up to 4.7% of inputs. For 4.3% we know where they are and predict
+them, but only by running the network's own calculation, on 15% of the inputs, and a third of those
+departures are located with tables fitted on this network. On the second network those tables catch
+less: 1.00% of inputs instead of 1.30%, and 1.16% are not predicted.
+
+##### Further experiments
+
+On this network we tried the other setups of the reward section. Each run continued from the one
+before it, with its rounds as memory and 72,000 inputs per scoring: the main run was continued at
+$\alpha = 360$, then again at $\alpha = 360$ with larger entries allowed (800 nodes and 512 numbers), and
+from there three runs at $\alpha = 100$, one with at most 64 stored numbers and two with a price on
+each. Rewards below are at $\alpha = 10$, so that they compare; the second network is the seed check's.
+
+| Run | Numbers stored | Coverage | Fidelity | Cost | Reward | Second network: fidelity | Second network: reward |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Main run ($\alpha = 10$) | 241 | 1 | 99.52% | 0.134 | 0.806 | 98.86% | 0.724 |
+| $\alpha = 360$ | 238 | 1 | 99.994% | 0.300 | 0.699 | 99.75% | 0.642 |
+| $\alpha = 360$, larger entries | 338 | 1 | 99.993% | 0.286 | 0.712 | 99.72% | 0.655 |
+| $\alpha = 100$, at most 64 numbers | 64 | 1 | 99.974% | 0.255 | 0.741 | 99.70% | 0.687 |
+| $\alpha = 100$, price 0.001 per number | 33 | 1 | 99.957% | 0.266 | 0.728 | 99.69% | 0.685 |
+| $\alpha = 100$, price 0.005 per number | 0 | 1 | 99.944% | 0.269 | 0.724 | 99.86% | 0.710 |
+
+The run at a price of 0.002 is left out: its entry hid a table from the count of stored numbers, so the
+price did not apply.
+
+With a larger $\alpha$ the agent runs the network's own calculation on more inputs: fidelity rises to
+99.99%, at about twice the cost, so at $\alpha = 10$ these entries score lower. Since that calculation
+is exact for any weights, more of it carries over: on the second network their fidelity stays near
+99.7%, against 98.86% for the main run. Unlike on the 3-number network, the larger $\alpha$ here did not
+lower the fidelity on the second network; it raised it. Limiting or pricing stored numbers cut them
+from 241 to 64, 33 and 0 at about the same fidelity and cost. At the highest price the entry stores no
+numbers at all and derives what it needs from the weights, and it keeps the most on the second network:
+fidelity 99.86%, and at its own $\alpha = 100$ a reward of 0.556 there, against 0.37 and 0.34 for the
+runs with the limit and with the price 0.001.
+
 ## More implementation details
 
 ### The prompt
