@@ -743,76 +743,29 @@ scored 0.797 on the first network and -25.9 on the second.
 
 ##### Further experiments: a budget per input
 
-These runs are on the [`experiments` branch](https://github.com/WFJKK/Mech-Interp-Agent-level1/tree/experiments),
-which has their code and configs and writes the reward up in
-[its README](https://github.com/WFJKK/Mech-Interp-Agent-level1/blob/experiments/README.md) and in
-[`docs/REWARD.md`](https://github.com/WFJKK/Mech-Interp-Agent-level1/blob/experiments/docs/REWARD.md).
-
-Under the reward above, running the network on the inputs near a tie pays: a forward pass there costs
-less than the wrong answers it spares. The reward of these runs gives every input a budget instead. An
-input on which the entry spends more than a quarter of a forward pass (19.5 of its 78 operations) counts
-as not predicted, even when the answer is right, so running the network there earns nothing:
+From the [`experiments` branch](https://github.com/WFJKK/Mech-Interp-Agent-level1/tree/experiments), which
+writes these runs up in full. The reward there gives every input a budget of a quarter of a forward pass:
+an input on which the entry spends more counts as not predicted, so running the network there earns
+nothing. Each node beyond the network's own 20 is charged too:
 
 ```
 reward = ((1 - cost) + 10 · predicted - 0.01 · numbers - 0.0005 · nodes) / 11
 ```
 
-Here predicted is the share of inputs on which the entry gives the network's answer within the budget,
-at its 95% lower bound; numbers are the numbers the entry writes beyond the network's one, and nodes its
-nodes beyond the 20 of the network's own definition. The network itself scores 0 and a perfect entry at
-no cost 1. The first run had no price on nodes. It was added for the second, because a budget per input
-cannot tell an explanation from a long table of the network's answers looked up in a few operations;
-their lengths can.
+What we learned: with the budget, the agent (GPT-6.2 Astra) stopped leaving the band out and predicted it
+from the weights, with no forward pass. Near the tie $x_1 = x_2$ its entry computes the network's own
+linear map there, and its cut points are read off the weights. What is left is mostly where all three
+numbers are close in ratio, and the sliver at $x_0 = x_1$. The table compares the main run's entry with a
+60-node entry of the run with the budget, on $10^6$ drawn inputs.
 
-Both runs: GPT-6.2 Astra (`gpt-6.2-astra`) at effort max through OpenAI's API, 5 rounds, money cap $20 a
-round and $60 a run, started afresh. The first cost $34.66 in 3 h 35 min. The second is still running;
-its figures below are from its first three rounds ($21.44). Every entry is scored on three fresh samples
-of 16,384 inputs, so the first two rows differ slightly from the tables above; the second network is the
-seed check's, on one sample.
-
-| Entry | Nodes | Coverage | Fidelity | Operations per input | Reward above ($\alpha = 10$) | Budget reward | Budget reward with node price | Second network: fidelity |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
-| Pure second argmax | 3 | 1 | 98.53% | 6.0 | 0.757 | 0.978 | 0.978 | 94.7% |
-| Main run ($\alpha = 10$) | 18 | 0.972 | 99.54% | 8.3 | 0.811 | 0.955 | 0.955 | 95.5% |
-| Budget run | 381 | 1 | 99.85% | 8.3 | 0.868 | **0.988** | 0.972 | 89.7% |
-| Node price, best so far | 61 | 1 | 99.34% | 6.5 | 0.836 | 0.985 | **0.983** | 71.4% |
-| Node price, most faithful so far | 210 | 1 | 99.75% | 9.8 | 0.840 | 0.986 | 0.977 | 64.9% |
-
-What each entry predicts, on the first seed, from $10^6$ drawn inputs: the share of each part of the
-network's behaviour on which it gives the network's answer within the budget.
-
-| Part of the behaviour | Share of inputs | Main run | Budget run | Node price, best so far | Node price, most faithful so far |
-| --- | ---: | ---: | ---: | ---: | ---: |
-| Answers the second-largest | 98.46% | 98.3% | 99.99% | 99.99% | 99.93% |
-| Answers position 0 where the second-largest is at position 1 or 2 | 1.19% | 0% | 95.7% | 74.5% | 90.4% |
-| Answers position 2 where the second-largest is at position 0 | 0.21% | 0% | 94% | 0% | 80% |
-| Answers position 1 where the second-largest is at position 0 | 0.12% | 0% | 32% | 17% | 83% |
-| Answers 1 where the second-largest is at 2, or 2 where it is at 1 | 0.03% | 0% | 95% | 14% | 79% |
-| All inputs | 100% | 96.76% | 99.84% | 99.36% | 99.75% |
-
-The main run's column is the entry of the table above: it leaves out the 2.8% of inputs with
-$\lvert x_1 - x_2 \rvert \le 0.05$, which hold 91% of the second row and 1.7% of the first.
-
-With a budget per input the agent no longer leaves the band out: its entries cover every input and
-predict the band from the weights, with no forward pass. The budget run did it with a table, 128 rows of
-cut points on $x_1 / x_2$, one row per bin of $x_0 / x_1$, worked out from the weights in advance: 381
-nodes in all. With the node price the entries are about 60 nodes long. They write the second argmax on
-one ratio of differences, $(x_0 - x_2) / (x_0 - x_1)$ or its inverse, with three cut points read off the
-weights, and near the tie $x_1 = x_2$ they compute the network itself, as the linear map it is there,
-also from the weights.
-
-The node price then favours the cheapest of these. The best entry so far, at 6.5 operations per input,
-predicts three quarters of the band but not the shifted switch at the tie $x_0 = x_2$, which an entry of
-round 2 predicted for two thirds. The most faithful entry so far predicts 99.75% of all inputs, most of
-the sliver at the tie $x_0 = x_1$ included, but with 210 nodes and 9.8 operations it scores lower.
-Measured by the reward above at $\alpha = 10$, all of these entries score above the main run's: 0.836
-to 0.868 against 0.811.
-
-What is left: 0.64% of inputs for the best entry so far (the switch at $x_0 = x_2$, and the part of the
-band where all three numbers are close in ratio), 0.25% for the most faithful. Two caveats. Some cut
-points are numbers from the weights raised to a power chosen to fit (1.5 or 2), which the count of stored
-numbers does not charge. And on the second network these entries agree with the network less often than
-the plain second argmax: 65% to 90%, against 94.7%.
+| Part of the behaviour | Share of inputs | Main run: predicted | With the budget: predicted |
+| --- | ---: | ---: | ---: |
+| Answers the second-largest | 98.46% | 98.3% of it | 99.98% of it |
+| Answers 0 where the second-largest is at 1 or 2 (the band) | 1.19% | 0% | 74.5% |
+| Answers 2 where the second-largest is at 0 (the $x_0 = x_2$ switch) | 0.21% | 0% | 66% |
+| Answers 1 where the second-largest is at 0 (the $x_0 = x_1$ sliver) | 0.12% | 0% | 0% |
+| Answers 1 or 2 swapped | 0.03% | 0% | 14%, by chance |
+| All inputs | | 96.76% | 99.46% |
 
 #### RNN second argmax of 10 numbers
 
