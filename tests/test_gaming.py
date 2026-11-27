@@ -338,6 +338,38 @@ def test_running_the_network_earns_nothing_within_a_budget(model, nets):
     assert budget.score(budget.reference)["reward"] == 0.0
 
 
+NODES = {"reward": {"name": "r_budget_nodes", "alpha": 10.0, "budget": 0.1, "price": 0.01, "node_price": 0.0005}}
+
+
+def test_length_is_paid_for_under_a_price_per_node(model, nets):
+    """A budget per input cannot tell a short entry from a long one that is as cheap on every input: a table or a
+    deep tree of cases looked up in a few operations. Under r_budget the same answers with fifty more nodes score
+    the same; under r_budget_nodes every node beyond the network's own definition is paid for, whether or not it
+    runs, and the network itself still scores 0."""
+    w = nets["lin-a-s1"][0]
+    budget, nodes = Verifier(model, "lin-a-s1", BUDGET), Verifier(model, "lin-a-s1", NODES)
+    short = model.reference_entries(w)["target"]
+    g = Graph(w, 2)
+    pad = g.weight("embed")
+    for _ in range(50):                    # fifty steps that change nothing the entry answers
+        pad = pad + g.weight("embed")
+    long = g.entry(predict=lang.where(pad.sum() > -1e30, short_answer(g), short_answer(g)))
+    s_b, l_b = budget.score(short), budget.score(long)
+    assert l_b["parts"]["fidelity"] == s_b["parts"]["fidelity"]
+    assert abs(l_b["reward"] - s_b["reward"]) < 0.005                       # the budget sees only a little more work
+    s_n, l_n = nodes.score(short), nodes.score(long)
+    longer = l_n["parts"]["nodes"] - l_n["parts"]["nodes_network"]
+    shorter = max(0, s_n["parts"]["nodes"] - s_n["parts"]["nodes_network"])
+    assert longer - shorter >= 50
+    assert l_n["reward"] - s_n["reward"] == pytest.approx(l_b["reward"] - s_b["reward"] - 0.0005 * (longer - shorter) / 11)
+    assert nodes.score(nodes.reference)["reward"] == 0.0
+
+
+def short_answer(g):
+    """The task's one-operation answer on lin-a, written again in a graph of one's own."""
+    return lang.maximum(g.token(0), g.token(1))
+
+
 def test_a_check_that_rarely_holds_is_not_a_stored_number(model, nets):
     """A test that holds on few inputs, or only under some weights, changes with them: it is no stored number,
     even when the inputs and weights the count happens to try never make it hold. The count once tried each value

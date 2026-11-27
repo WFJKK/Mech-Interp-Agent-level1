@@ -215,7 +215,8 @@ def test_reward_functions():
         assert rewards.formula({"name": name}) and rewards.explanation({"name": name})
         itself = {"coverage": 1.0, "fidelity": 1.0, "fidelity_low": 1.0, "r": 1.0, "r_rule": 0.0, "b": 0.0,
                   "numbers": 3, "numbers_network": 3,  # the network stores what its own definition stores
-                  "n_in_region": 100, "model_ops": 600, "input_ops": [[600, 100, 100]], "sampled": True}
+                  "n_in_region": 100, "model_ops": 600, "input_ops": [[600, 100, 100]], "sampled": True,
+                  "nodes": 12, "nodes_network": 12}  # and is as long as its own definition
         assert rewards.compute(itself, {"name": name}, claimed=1.0)["reward"] == 0.0
 
 
@@ -242,3 +243,23 @@ def test_the_budget_reward():
     with pytest.raises(ValueError, match="needs what single inputs cost"):
         rewards.compute({k: v for k, v in parts.items() if k != "input_ops"}, cfg)
     assert rewards.needs_numbers(cfg) and rewards.needs_input_ops(cfg) and not rewards.needs_input_ops({"name": "r_alpha"})
+
+
+def test_the_budget_reward_with_a_price_per_node():
+    """r_budget_nodes is r_budget less node_price for every node beyond the network's own definition, before the
+    division by 1 + alpha; an entry shorter than the network pays nothing for its length."""
+    parts = {"coverage": 0.8, "fidelity": 0.95, "fidelity_low": 0.95, "r": 0.25, "r_rule": 0.01, "b": 0.02,
+             "n_in_region": 100, "model_ops": 600, "input_ops": [[40, 70, 69], [60, 10, 9], [500, 20, 20]],
+             "numbers": 5, "numbers_network": 1, "sampled": False, "nodes": 212, "nodes_network": 12}
+    plain = rewards.compute(parts, {"name": "r_budget", "alpha": 10, "budget": 0.1, "price": 0.01})
+    cfg = {"name": "r_budget_nodes", "alpha": 10, "budget": 0.1, "price": 0.01, "node_price": 0.0005}
+    out = rewards.compute(parts, cfg)
+    assert out["nodes"] == 200 and out["reward"] == pytest.approx(plain["reward"] - 0.0005 * 200 / 11)
+    assert rewards.compute({**parts, "nodes": 5}, cfg)["reward"] == pytest.approx(plain["reward"])
+    assert rewards.parameters("r_budget_nodes") == {"alpha": 10.0, "budget": 0.1, "price": 0.01, "node_price": 0.0005,
+                                                    "lower_bound": True}
+    assert "node_price = 0.0005" in rewards.formula(cfg) and "how long the entry is" in rewards.explanation(cfg)
+    assert rewards.warnings({**cfg, "node_price": 0}) and not rewards.warnings(cfg)
+    assert rewards.needs_numbers(cfg) and rewards.needs_input_ops(cfg)
+    with pytest.raises(ValueError, match="needs the entry's length"):
+        rewards.compute({k: v for k, v in parts.items() if k != "nodes"}, cfg)

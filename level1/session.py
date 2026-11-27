@@ -93,6 +93,8 @@ def make_result(weights, info, extra):
         x, answers, ops = network_outputs()
         parts = lv1.measure(entry, weights, n_ctx, x, answers, ops)
         parts["sampled"] = info["check"] != "all"
+        parts["nodes"] = len(entry["nodes"])  # the entry's length as written, and the network's own definition's
+        parts["nodes_network"] = len(reference_entry()["nodes"])
         sampled = parts["sampled"] and parts["n_in_region"]
         parts["fidelity_low"] = lv1.wilson_lower(parts["n_agree"], parts["n_in_region"]) if sampled else parts["fidelity"]
         if not rewards.needs_input_ops(extra["reward"]):  # what single inputs cost, kept only for a reward that reads it

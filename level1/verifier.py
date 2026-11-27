@@ -106,6 +106,8 @@ class Verifier:
             receipt["seconds"] = round(time.monotonic() - t0, 3)
             return receipt
         parts["sampled"] = how["mode"] == "sample"  # so that a reward can bound what it reads off a sample
+        parts["nodes"] = len(entry["nodes"])  # the entry's length as written, and the network's own definition's
+        parts["nodes_network"] = len(self.reference["nodes"])
         if how["mode"] == "sample" and parts["n_in_region"]:
             parts["fidelity_low"] = lang.wilson_lower(parts["n_agree"], parts["n_in_region"])
         else:

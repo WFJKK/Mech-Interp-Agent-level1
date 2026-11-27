@@ -116,24 +116,48 @@ def r_budget(parts: dict, alpha: float = 10.0, budget: float = 0.1, price: float
     saves nothing, so it scores 0; an entry that predicts every input at no cost scores 1. Every number stored
     beyond those of the network's own definition is charged price, in forward passes, as in r_alpha_numbers.
     On a sample the share predicted is taken at its lower confidence bound unless lower_bound is false."""
+    return _budgeted(parts, alpha, budget, price, 0.0, lower_bound, "r_budget")
+
+
+def r_budget_nodes(parts: dict, alpha: float = 10.0, budget: float = 0.1, price: float = 0.01, node_price: float = 0.0005,
+                   lower_bound: bool = True, **_) -> dict:
+    """r_budget, with the entry's length charged too: node_price for every node beyond those of the network's own
+    definition, in forward passes like the cost, before the division by 1 + alpha.
+
+    A budget per input cannot tell a short explanation from a long map of the network's answers, a table looked
+    up in a few operations: both are cheap on every input. What tells them apart is how long they are to write. A
+    node counts whether or not it runs on a given input, so a long table or a deep tree of cases pays for every
+    step of it, and a step is worth writing only if it earns more than node_price. The network itself is as long
+    as its own definition and still scores 0."""
+    return _budgeted(parts, alpha, budget, price, node_price, lower_bound, "r_budget_nodes")
+
+
+def _budgeted(parts: dict, alpha, budget, price, node_price, lower_bound, name: str) -> dict:
     if parts.get("input_ops") is None:
-        raise ValueError("r_budget needs what single inputs cost in the parts (input_ops)")
+        raise ValueError(f"{name} needs what single inputs cost in the parts (input_ops)")
     if parts.get("numbers") is None or parts.get("numbers_network") is None:
-        raise ValueError("r_budget needs the entry's stored numbers in the parts (numbers, numbers_network)")
+        raise ValueError(f"{name} needs the entry's stored numbers in the parts (numbers, numbers_network)")
+    if node_price and (parts.get("nodes") is None or parts.get("nodes_network") is None):
+        raise ValueError(f"{name} needs the entry's length in the parts (nodes, nodes_network)")
     mu, m = parts["coverage"], int(parts["n_in_region"])
     k = within_budget(parts, budget)
     q = (wilson_lower(k, m) if lower_bound and parts.get("sampled") else k / m) if m else 0.0
     r = parts["r"] if parts["r"] is not None else 0.0
     saved = mu * (1.0 - r) - parts["r_rule"] - parts["b"]
     extra = max(0, int(parts["numbers"]) - int(parts["numbers_network"]))
-    reward = (saved + float(alpha) * mu * q - float(price) * extra) / (1.0 + float(alpha))
-    return {"reward": reward, "saved": saved, "predicted": mu * q, "fidelity_used": q, "numbers": extra,
-            "budget_ops": float(budget) * float(parts["model_ops"])}
+    longer = max(0, int(parts["nodes"]) - int(parts["nodes_network"])) if node_price else 0
+    reward = (saved + float(alpha) * mu * q - float(price) * extra - float(node_price) * longer) / (1.0 + float(alpha))
+    out = {"reward": reward, "saved": saved, "predicted": mu * q, "fidelity_used": q, "numbers": extra,
+           "budget_ops": float(budget) * float(parts["model_ops"])}
+    if node_price:
+        out["nodes"] = longer
+    return out
 
 
-REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed, "r_alpha_numbers": r_alpha_numbers, "r_budget": r_budget}
-NEEDS_NUMBERS = {"r_alpha_numbers", "r_budget"}  # rewards for which the verifier counts an entry's stored numbers into the parts
-NEEDS_INPUT_OPS = {"r_budget"}  # rewards that read what single inputs cost (input_ops), which the agent's measure() then keeps
+REWARDS = {"r_alpha": r_alpha, "r_alpha_claimed": r_alpha_claimed, "r_alpha_numbers": r_alpha_numbers, "r_budget": r_budget,
+           "r_budget_nodes": r_budget_nodes}
+NEEDS_NUMBERS = {"r_alpha_numbers", "r_budget", "r_budget_nodes"}  # rewards for which the verifier counts an entry's stored numbers
+NEEDS_INPUT_OPS = {"r_budget", "r_budget_nodes"}  # rewards that read what single inputs cost (input_ops), which measure() then keeps
 
 
 def needs_numbers(cfg: dict | None) -> bool:
@@ -154,6 +178,9 @@ FORMULAS = {
         "               otherwise measured - {penalty:g} * (claimed - measured)"),
     "r_alpha_numbers": ("reward = coverage * [ (1 - cost) - alpha * (1 - fidelity) ] - price * numbers,"
                         "   alpha = {alpha:g}, price = {price:g}"),
+    "r_budget_nodes": ("reward = [ coverage * ( (1 - cost) + alpha * within ) - price * numbers - node_price * nodes ]\n"
+                       "    / (1 + alpha),   alpha = {alpha:g}, budget = {budget:g} of a forward pass per input,\n"
+                       "    price = {price:g}, node_price = {node_price:g}"),
     "r_budget": ("reward = [ coverage * ( (1 - cost) + alpha * within ) - price * numbers ] / (1 + alpha),\n"
                  "    alpha = {alpha:g}, budget = {budget:g} of a forward pass per input, price = {price:g}"),
 }
@@ -198,6 +225,10 @@ EXPLANATIONS = {
         "and is charged {price:g}, in forward passes like the cost. What the entry computes from the weights\n"
         "is not counted here; it is charged as computation, in the cost."),
 }
+EXPLANATIONS["r_budget_nodes"] = EXPLANATIONS["r_budget"] + (
+    "\nnodes is how long the entry is beyond the network's own definition: its number of nodes, each\n"
+    "counted whether or not it runs on a given input, less the network's. Each is charged {node_price:g}, in\n"
+    "forward passes like the cost, so a step is worth writing only if it earns more than that.")
 
 
 def parameters(name: str) -> dict:
@@ -236,11 +267,13 @@ def warnings(cfg: dict) -> list:
         out.append("lower_bound is off: on a sampled data set, a lucky sample pays, and more submissions mean more luck")
     if name == "r_alpha_claimed" and float(params.get("penalty", 0)) <= 0:
         out.append("penalty is 0 or less: a claim above the measured fidelity costs nothing")
-    if name == "r_budget" and float(params.get("budget", 0)) >= 1:
+    if name in ("r_budget", "r_budget_nodes") and float(params.get("budget", 0)) >= 1:
         out.append(f"budget = {float(params['budget']):g}: a whole forward pass fits in it, so running the network on an input "
                    "earns as much as predicting it")
-    if name == "r_budget" and params.get("lower_bound") is False:
+    if name in ("r_budget", "r_budget_nodes") and params.get("lower_bound") is False:
         out.append("lower_bound is off: on a sampled data set, a lucky sample pays, and more submissions mean more luck")
+    if name == "r_budget_nodes" and float(params.get("node_price", 0)) <= 0:
+        out.append("node_price is 0 or less: a long map of the network's answers costs no more than a short explanation")
     return out
 
 

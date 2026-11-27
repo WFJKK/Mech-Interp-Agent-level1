@@ -1,0 +1,14 @@
+# The pilot on rnn-b under r_budget_nodes (level1/rewards.py): config/pilot/rnn-b-budget.yaml, the same budget
+# of a quarter of a forward pass per input, and each node beyond the 20 of the network's own definition charged
+# 0.0005 of a forward pass. A budget per input cannot tell a short explanation from a long map of the network's
+# answers looked up in a few operations; their length can. At this price the 381-node map of
+# pilot-rnn-b-budget-gpt-max scores 0.972 on rnn-b-s0, below the plain rule's 0.978, and an entry as faithful
+# as that map beats the rule only when it is shorter than about 250 nodes. Started afresh.
+extends: rnn-b.yaml
+run_id: pilot-rnn-b-nodes-01
+reward:
+  name: r_budget_nodes
+  alpha: 10
+  budget: 0.25
+  price: 0.01
+  node_price: 0.0005

@@ -166,6 +166,26 @@ inputs, and the GPT one did work close to it, two thirds of a forward pass, on a
 - On a sample, within is taken at its lower confidence bound, as the fidelity is under `r_alpha`.
 - Every receipt keeps `input_ops`, so a run can be scored again under any budget.
 
+### `r_budget_nodes`
+
+`r_budget` with the entry's length charged too: `node_price` for every node beyond those of the
+network's own definition, in forward passes, before the division by 1 + alpha:
+
+    reward = [mu * (1 - c) + alpha * mu * within - price * numbers - node_price * nodes] / (1 + alpha)
+
+A budget per input cannot tell a short explanation from a long map of the network's outputs: a table
+or a deep tree of cases is looked up in a few operations, so both are cheap on every input. Their
+length tells them apart. On the 3-number network `pilot-rnn-b-budget-gpt-max` locked such a map, 381
+nodes that predict 99.85% of the first seed: under `r_budget` it scores 0.988 against the plain rule's
+0.978, and at `node_price` 0.0005 it scores 0.972, below the rule. An entry that faithful beats the rule
+there only when it is shorter than about 250 nodes; the network's own definition has 20.
+
+- A node counts whether or not it runs on a given input: the length is of the entry as written.
+- A node can do much or little, one comparison or a product of two matrices, so the count of nodes is
+  a proxy for length, not a measure of it. Large constant tables are priced already, as stored numbers.
+- An entry shorter than the network's own definition pays nothing for its length.
+- Every receipt keeps `nodes` and `nodes_network`, so a run can be scored again under any node price.
+
 ## 4. The pilots' numbers
 
 ### On pairs (`models/lin-a`, every input checked)
@@ -302,9 +322,11 @@ construction. A hole found later gets its test there first.
 | Under `r_alpha_numbers`: hold a table as places in one long arange, a slice for each number (found by the agent of `pilot-rnn-g-numbers-002`) | the places a slice reads out of a list made of constants alone are counted |
 | Under `r_alpha_numbers`: make numbers from the input by arithmetic, a token minus itself, e to that, sums of the 1s (found by the agent of `pilot-rnn-g-numbers-005`) | a value that comes out the same on every input tried and under other weights of the same shapes is counted where the entry reads it |
 | Under `r_budget`: run the network, or work close to it, on the inputs where a rule fails | an input that costs more than the budget counts as not predicted, whatever the answer |
+| Under `r_budget`: a long map of the network's outputs, cheap on every input, in place of a short description (found by the agent of `pilot-rnn-b-budget-gpt-max`) | under `r_budget_nodes` every node beyond the network's own definition is charged |
 
 The reward functions also say when a setting invites one of these (`rewards.warnings`): alpha at 1
-or less, the lower bound switched off, a penalty of 0, a budget of a whole forward pass or more.
+or less, the lower bound switched off, a penalty of 0, a budget of a whole forward pass or more, a
+node price of 0.
 
 ## 6. What is known and left open
 
